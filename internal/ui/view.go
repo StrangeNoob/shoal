@@ -125,7 +125,6 @@ func (m Model) renderHome(w, h int) string {
 
 	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString(renderLogoCompact(w) + "\n\n")
 	b.WriteString(st.Meta.Render("A calm BitTorrent client for your terminal. Search the Internet") + "\n")
 	b.WriteString(st.Meta.Render("Archive and download freely-shared films, music, books and") + "\n")
 	b.WriteString(st.Meta.Render("software — with live progress and seeding.") + "\n\n")

@@ -166,12 +166,16 @@ func TestWindowSizeMakesReady(t *testing.T) {
 
 func TestHomeShownBeforeFirstSearch(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
-	v := m.View()
-	if !strings.Contains(v, "s  h  o  a  l") {
-		t.Error("first-run home screen should show the compact shoal logo")
+	home := m.renderHome(80, 40)
+	for _, want := range []string{"A calm BitTorrent client", "HOW IT WORKS", "START HERE"} {
+		if !strings.Contains(home, want) {
+			t.Errorf("first-run home screen should show %q", want)
+		}
 	}
-	if !strings.Contains(v, "HOW IT WORKS") {
-		t.Error("first-run home screen should still show the how-it-works guide")
+	// Branding lives in the banner header now; the home body no longer repeats
+	// the compact logo (it was floating centered across the pane).
+	if strings.Contains(home, "s  h  o  a  l") {
+		t.Error("home body should not render the compact logo")
 	}
 }
 
