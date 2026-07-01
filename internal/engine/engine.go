@@ -8,7 +8,7 @@ import "time"
 // Status is a point-in-time snapshot of one torrent, shaped for display.
 type Status struct {
 	Name           string
-	InfoHash       string // lowercase hex infohash; "" only while metadata is still fetching
+	InfoHash       string // lowercase hex infohash; known immediately (from the .torrent/magnet)
 	TotalBytes     int64
 	CompletedBytes int64
 	// Uploaded is total bytes shared with peers; used by the Seeding pane to

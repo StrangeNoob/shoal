@@ -200,3 +200,41 @@ func TestAnacrolixRemoveDropsTorrent(t *testing.T) {
 		t.Fatalf("Remove(unknown) = %v, want nil", err)
 	}
 }
+
+func TestRemoveUnderDirContainment(t *testing.T) {
+	base := t.TempDir()
+
+	// a sibling dir OUTSIDE base that a traversal name resolves to — must survive
+	outside := filepath.Join(filepath.Dir(base), "victim-"+filepath.Base(base))
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(outside) })
+	escaping, _ := filepath.Rel(base, outside) // e.g. "../victim-xxxx"
+	if err := removeUnderDir(base, escaping); err == nil {
+		t.Fatalf("removeUnderDir must refuse escaping name %q", escaping)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("escaping delete removed an outside dir: %v", err)
+	}
+
+	// refuse the data-dir root and empty name
+	if err := removeUnderDir(base, "."); err == nil {
+		t.Fatal("removeUnderDir must refuse deleting the data dir root")
+	}
+	if err := removeUnderDir(base, ""); err == nil {
+		t.Fatal("removeUnderDir must refuse an empty name")
+	}
+
+	// a normal name within base is deleted
+	inside := filepath.Join(base, "movie")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeUnderDir(base, "movie"); err != nil {
+		t.Fatalf("removeUnderDir(normal) = %v", err)
+	}
+	if _, err := os.Stat(inside); !os.IsNotExist(err) {
+		t.Fatalf("normal delete did not remove %q", inside)
+	}
+}

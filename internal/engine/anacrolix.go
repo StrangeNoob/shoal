@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -208,15 +209,10 @@ func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
 	var (
 		found *torrent.Torrent
 		hash  metainfo.Hash
-		name  string
 	)
 	for _, t := range a.client.Torrents() {
-		if t.InfoHash().HexString() == infoHash {
-			found = t
-			hash = t.InfoHash()
-			if name = a.names[hash]; name == "" {
-				name = t.Name()
-			}
+		if h := t.InfoHash(); h.HexString() == infoHash {
+			found, hash = t, h
 			break
 		}
 	}
@@ -224,15 +220,29 @@ func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
 		a.mu.Unlock()
 		return nil // already gone
 	}
+	diskName := found.Name() // the info name anacrolix wrote files under (attacker-influenced)
 	found.Drop()
 	delete(a.names, hash)
 	delete(a.addedAt, hash)
 	a.mu.Unlock()
 
-	if deleteData && name != "" {
-		return os.RemoveAll(filepath.Join(a.dataDir, name))
+	if deleteData && diskName != "" {
+		return removeUnderDir(a.dataDir, diskName)
 	}
 	return nil
+}
+
+// removeUnderDir deletes name within dir, refusing any path that escapes dir or
+// targets the dir root. Torrent names are attacker-influenced, so a name like
+// "../../x" must never let os.RemoveAll reach outside the download folder.
+func removeUnderDir(dir, name string) error {
+	base := filepath.Clean(dir)
+	target := filepath.Clean(filepath.Join(base, name))
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to delete %q: escapes data dir", name)
+	}
+	return os.RemoveAll(target)
 }
 
 func (a *Anacrolix) Close() error {
