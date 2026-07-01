@@ -90,6 +90,10 @@ type Model struct {
 	lastTick  time.Time        // timestamp of the previous tick, for the rate delta
 	setCursor int              // index into settingItems()
 
+	dlCursor      int // selection in the Downloads pane
+	cancelConfirm bool
+	cancelTarget  engine.Status
+
 	notice      string
 	noticeErr   bool
 	noticeUntil time.Time
@@ -159,6 +163,12 @@ type searchClosedMsg struct{ gen int }
 type addedMsg struct {
 	title string
 	err   error
+}
+
+type removedMsg struct {
+	name    string
+	deleted bool
+	err     error
 }
 
 type tickMsg time.Time
@@ -245,6 +255,13 @@ func addMagnetCmd(eng engine.Engine, magnet string) tea.Cmd {
 	}
 }
 
+func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cmd {
+	return func() tea.Msg {
+		err := eng.Remove(infoHash, deleteData)
+		return removedMsg{name: name, deleted: deleteData, err: err}
+	}
+}
+
 // --- update ----------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -313,6 +330,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setNotice("Added: " + truncate(msg.title, 48))
 			m.section = sectionDownloads
+		}
+		return m, nil
+
+	case removedMsg:
+		switch {
+		case msg.err != nil:
+			m.setError("Couldn't remove: " + msg.err.Error())
+		case msg.deleted:
+			m.setNotice("Deleted: " + truncate(msg.name, 48))
+		default:
+			m.setNotice("Cancelled: " + truncate(msg.name, 48))
+		}
+		if n := len(m.downloading()); m.dlCursor >= n {
+			m.dlCursor = max(0, n-1)
 		}
 		return m, nil
 
@@ -395,6 +426,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSortKey(msg)
 	}
 
+	if m.cancelConfirm {
+		return m.handleCancelKey(msg)
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -430,6 +465,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			fr := m.filteredResults()
 			if len(fr) > 0 && m.cursor < len(fr) {
 				return m, addCmd(m.eng, fr[m.cursor])
+			}
+		}
+		return m, nil
+	case "x":
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				m.cancelConfirm = true
+				m.cancelTarget = ds[m.dlCursor]
 			}
 		}
 		return m, nil
@@ -469,6 +513,24 @@ func (m Model) handleSortKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.sortDesc = true
 		applySort(m.results, m.sortField, m.sortDesc)
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleCancelKey handles input while the cancel-download confirm modal is
+// active: k keeps partial files, d deletes them, esc/n aborts.
+func (m Model) handleCancelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "k":
+		m.cancelConfirm = false
+		return m, removeCmd(m.eng, m.cancelTarget.InfoHash, m.cancelTarget.Name, false)
+	case "d":
+		m.cancelConfirm = false
+		return m, removeCmd(m.eng, m.cancelTarget.InfoHash, m.cancelTarget.Name, true)
+	case "esc", "n":
+		m.cancelConfirm = false
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
@@ -533,6 +595,10 @@ func (m *Model) moveUp() {
 		if m.setCursor > 0 {
 			m.setCursor--
 		}
+	case sectionDownloads:
+		if m.dlCursor > 0 {
+			m.dlCursor--
+		}
 	}
 }
 
@@ -545,6 +611,10 @@ func (m *Model) moveDown() {
 	case sectionSettings:
 		if m.setCursor < len(settingItems())-1 {
 			m.setCursor++
+		}
+	case sectionDownloads:
+		if m.dlCursor < len(m.downloading())-1 {
+			m.dlCursor++
 		}
 	}
 }
