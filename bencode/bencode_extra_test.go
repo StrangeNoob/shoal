@@ -42,11 +42,11 @@ func TestEncodeUnsupportedType(t *testing.T) {
 
 func TestDecodeTopDictErrors(t *testing.T) {
 	cases := map[string]string{
-		"not a dictionary":     "i1e",
-		"unterminated dict":    "d3:cow3:moo",
-		"bad value":            "d3:cowi1",   // value is an unterminated integer
-		"value at end":         "d2:ab",      // key ok, no value
-		"key not a string":     "di1ei2ee",   // key must be a byte string
+		"not a dictionary":  "i1e",
+		"unterminated dict": "d3:cow3:moo",
+		"bad value":         "d3:cowi1", // value is an unterminated integer
+		"value at end":      "d2:ab",    // key ok, no value
+		"key not a string":  "di1ei2ee", // key must be a byte string
 	}
 	for name, in := range cases {
 		if _, _, err := DecodeTopDict([]byte(in)); err == nil {
@@ -57,9 +57,9 @@ func TestDecodeTopDictErrors(t *testing.T) {
 
 func TestDecodeMoreMalformed(t *testing.T) {
 	bad := []string{
-		"i1.5e",  // invalid integer token
-		"iabce",  // invalid integer token
-		"1a:bc",  // invalid string length (non-digit before colon)
+		"i1.5e", // invalid integer token
+		"iabce", // invalid integer token
+		"1a:bc", // invalid string length (non-digit before colon)
 	}
 	for _, in := range bad {
 		if _, err := Decode([]byte(in)); err == nil {

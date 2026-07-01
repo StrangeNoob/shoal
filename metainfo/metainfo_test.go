@@ -5,7 +5,7 @@ import (
 	"crypto/sha1"
 	"testing"
 
-	"shoal/bencode"
+	"github.com/StrangeNoob/shoal/bencode"
 )
 
 // buildTorrent encodes a synthetic single-file .torrent so the tests are fully

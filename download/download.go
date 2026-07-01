@@ -15,9 +15,9 @@ import (
 	"runtime"
 	"time"
 
-	"shoal/metainfo"
-	"shoal/peer"
-	"shoal/tracker"
+	"github.com/StrangeNoob/shoal/metainfo"
+	"github.com/StrangeNoob/shoal/peer"
+	"github.com/StrangeNoob/shoal/tracker"
 )
 
 const (

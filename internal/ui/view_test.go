@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"shoal/internal/engine"
-	"shoal/internal/history"
-	"shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
+	"github.com/StrangeNoob/shoal/internal/source"
 )
 
 func TestInitReturnsCommand(t *testing.T) {

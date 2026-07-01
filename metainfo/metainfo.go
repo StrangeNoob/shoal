@@ -8,7 +8,7 @@ import (
 	"crypto/sha1"
 	"errors"
 
-	"shoal/bencode"
+	"github.com/StrangeNoob/shoal/bencode"
 )
 
 // File is one entry of a multi-file torrent.

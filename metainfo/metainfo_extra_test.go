@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"shoal/bencode"
+	"github.com/StrangeNoob/shoal/bencode"
 )
 
 func TestParseAnnounceListAndPieceHash(t *testing.T) {
@@ -57,7 +57,7 @@ func TestParseErrors(t *testing.T) {
 	valid := string(bytes.Repeat([]byte{0}, 20))
 
 	cases := map[string][]byte{
-		"missing info": enc(map[string]any{"announce": "http://t"}),
+		"missing info":          enc(map[string]any{"announce": "http://t"}),
 		"info not a dictionary": enc(map[string]any{"info": "x"}),
 		"missing piece length": enc(map[string]any{"info": map[string]any{
 			"name": "x", "pieces": valid, "length": int64(1)}}),

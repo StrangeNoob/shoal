@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"shoal/internal/engine"
-	"shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/source"
 )
 
 // computeRates returns per-torrent byte/sec rates keyed by Status.Name, from the

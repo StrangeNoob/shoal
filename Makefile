@@ -29,6 +29,11 @@ deps:
 build:
 	go build -o $(BINARY) $(CMD_TUI)
 
+## install: install the shoal binary into GOBIN (go install ./cmd/shoal)
+.PHONY: install
+install:
+	go install $(CMD_TUI)
+
 ## classic: build the phase-1 hand-written CLI downloader
 .PHONY: classic
 classic:

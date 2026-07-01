@@ -47,7 +47,7 @@ func (a *Archive) Search(ctx context.Context, query string) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "shoal/0.2 (terminal torrent client)")
+	req.Header.Set("User-Agent", "github.com/StrangeNoob/shoal/0.2 (terminal torrent client)")
 
 	resp, err := a.Client.Do(req)
 	if err != nil {

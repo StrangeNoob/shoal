@@ -1,67 +1,80 @@
 # shoal
 
-A terminal BitTorrent client in Go, built in two layers:
+**A calm BitTorrent client for your terminal.** Search torrents, download with live
+progress, seed, and keep a history — in a fullscreen [Bubble Tea](https://github.com/charmbracelet/bubbletea) UI.
 
-- **Phase 1 — the protocol, by hand.** The entire download path (reading a `.torrent`,
-  talking to a tracker, the peer handshake, trading and verifying pieces) is written
-  from scratch using only the Go standard library. This is the part you build to
-  *understand* how torrents actually work. It lives in the repo-root packages and
-  `cmd/shoal-classic`.
-- **Phase 2 — a real, beautiful tool.** A calm, fullscreen terminal UI
-  ([Bubble Tea](https://github.com/charmbracelet/bubbletea)) that searches a
-  torlink-style source set and downloads with a full BitTorrent engine
-  ([anacrolix/torrent](https://github.com/anacrolix/torrent) — DHT, magnets, web
-  seeds, seeding). This is `cmd/shoal` and `internal/`.
+![shoal demo](docs/demo.gif)
 
-Same idea as torlink (the Node client this project learns from): a search layer, an
-engine, and a TUI. Phase 1 is the engine written by hand; Phase 2 swaps in a mature
-engine and adds the search + UI.
+Built in two layers: a BitTorrent protocol implemented **by hand** from the Go standard
+library (to *understand* how torrents work), and a **real, beautiful tool** on top of a
+mature engine ([anacrolix/torrent](https://github.com/anacrolix/torrent) — DHT, magnets,
+web seeds, seeding).
 
-## Quick start
+## Install
 
-> **First time:** the Phase 2 TUI uses a few well-known libraries. Fetch them once:
->
-> ```sh
-> cd shoal
-> make deps          # go get bubbletea/bubbles/lipgloss/anacrolix + go mod tidy
-> ```
->
-> This writes `go.mod` + `go.sum`. Commit both — CI needs them to pass.
+Requires **Go 1.24+**.
+
+**Go install (recommended):**
 
 ```sh
-make run            # build and launch the fullscreen TUI
-# or:
-make build && ./shoal
-
-make test           # run the Phase 1 unit tests (offline, no deps needed)
-make classic        # build the hand-written CLI downloader (./shoal-classic)
+go install github.com/StrangeNoob/shoal/cmd/shoal@latest
 ```
 
-Run `make help` for all targets.
+This drops a `shoal` binary in your `GOBIN` (`~/go/bin` by default — make sure it's on
+your `PATH`). Then just run `shoal`.
+
+**From source:**
+
+```sh
+git clone https://github.com/StrangeNoob/shoal
+cd shoal
+make install          # go install ./cmd/shoal  → $GOBIN/shoal
+# or, to build a local binary without installing:
+make build            # → ./shoal
+go build -o shoal ./cmd/shoal
+```
+
+`go.mod` / `go.sum` are committed, so the build needs no setup step. (`make deps` only
+exists to re-pin dependencies.)
+
+Downloads land in `~/Downloads/shoal` by default — change it in **Settings → Save to**.
 
 ## Using the TUI
 
-It opens fullscreen on the **Search** pane. Keys (also shown in the footer, and `?`
-brings up the full list):
+`shoal` opens fullscreen on the **Search** pane. The footer always shows the keys for
+the current pane, and `?` opens the full list. `tab` cycles the four panes:
+**Search · Downloads · Seeding · Settings**.
+
+**Search**
 
 | Key | Action |
 | --- | --- |
-| `/` | focus the search box and type |
-| `enter` | run the search · or download the selected result |
+| `/` | focus the search box; type a query and press `enter` |
 | `↑ ↓` / `k j` | move the selection |
+| `← →` / `h l` | narrow results by media type (All / Movies / TV / Anime / …) |
+| `enter` | open the selected result's **details** |
 | `d` | download the selected result |
-| `tab` | switch between Search and Downloads |
-| `?` | toggle help |
-| `q` / `ctrl+c` | quit |
+| `S` | sort results (then `← →` pick a column — Size / Seeders / Leechers / Ratio — and `↑ ↓` set direction) |
+| `tab` | next pane · `q` / `ctrl+c` quit |
 
-Search hits stream from the configured sources; pick one and press `d`, and it moves to
-**Downloads** with a live progress bar, byte counts, and peer count. You can also paste
-a magnet link into the search box and press enter to add it directly. Files land in
-`~/Downloads/shoal`.
+Results stream in live from all sources (`searching… N/M sources`) as a sortable table.
+Press `enter` for a **details** screen (size, health, files, hash, magnet) where `d`
+downloads, `y` copies the magnet, and `esc` goes back. You can also paste a magnet link
+into the search box and press `enter` to add it directly.
 
-Default sources are Internet Archive, a small open-media catalogue, and the
-torlink-derived providers: FitGirl, YTS, The Pirate Bay, 1337x, EZTV,
-SolidTorrents, Nyaa, and SubsPlease.
+**Downloads** — live progress bar, transfer size, peers, and **download speed**. Select
+a download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the
+partial files or `d` delete them; `esc` aborts).
+
+**Seeding** — completed torrents you're still sharing (ratio, uploaded, **upload speed**),
+followed by a **History** of everything you've downloaded (persisted across runs).
+
+**Settings** — theme (Twilight / Tide), color mode, save location, seed ratio, max peers,
+listen port. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
+
+Default sources: the Internet Archive, a small open-media catalogue, and the
+torlink-derived providers — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents,
+Nyaa, and SubsPlease.
 
 ## The hand-written core (Phase 1)
 
@@ -80,7 +93,7 @@ BitTorrent has no central server holding the file. Everyone sharing a file forms
 5. **Write to disk** — single file, or a directory tree for multi-file torrents.
    → `cmd/shoal-classic/`.
 
-Try it standalone with `make classic && ./shoal-classic some.torrent .` (HTTP-tracker
+Build it standalone with `make classic && ./shoal-classic some.torrent .` (HTTP-tracker
 torrents only — see [Phase 1 limitations](#phase-1-limitations)).
 
 ## How this maps to torlink
@@ -103,15 +116,36 @@ shoal/
 ├── internal/
 │   ├── source/         # Phase 2: Source interface + default provider set
 │   ├── engine/         # Phase 2: Engine interface + anacrolix backend
+│   ├── history/        # Phase 2: persisted download history
+│   ├── config/         # Phase 2: persisted user settings
 │   └── ui/             # Phase 2: the fullscreen Bubble Tea interface
 └── cmd/
     ├── shoal/          # Phase 2: the TUI (the product)
     └── shoal-classic/  # Phase 1: the hand-written CLI downloader
 ```
 
-The Phase 1 packages have tests that run offline (`make test`). The decoupling is
-deliberate: the UI depends only on the `source.Source` and `engine.Engine`
-interfaces, so the engine can be swapped without touching the UI.
+The UI depends only on the `source.Source` and `engine.Engine` interfaces, so the engine
+can be swapped without touching the UI. The Phase 1 packages have tests that run offline.
+
+## Development
+
+```sh
+make run        # build and launch the TUI
+make test       # run the unit tests (offline)
+make vet        # go vet
+make fmt        # gofmt -w .
+make classic    # build the hand-written CLI downloader (./shoal-classic)
+make help       # all targets
+```
+
+### Regenerating the demo
+
+`docs/demo.gif` is scripted in `demo.tape`. With [vhs](https://github.com/charmbracelet/vhs)
+installed, regenerate it with:
+
+```sh
+vhs demo.tape
+```
 
 ## Phase 1 limitations
 
@@ -121,26 +155,12 @@ completion timeout, and download-only (never seeds). Phase 2 (anacrolix) has non
 these limits — it's there precisely so the real tool is robust while the hand-written
 code stays readable.
 
-## Roadmap
-
-**Phase 1 — protocol by hand.** ✅ bencode, metainfo + infohash, HTTP tracker, peer
-handshake + messages, concurrent verified piece download, CLI.
-
-**Phase 2 — a real tool.** ✅ anacrolix engine, `Source` interface + Internet Archive
-search, fullscreen Bubble Tea TUI with live progress. Next:
-
-- Persist the download queue across runs (mirroring torlink's `queue.ts`).
-- A Seeding pane with pause/resume.
-- More sources behind the same `Source` interface.
-- Ship as a single static binary (the big payoff over torlink — no runtime to install).
-
 ## A note on use
 
 BitTorrent itself is neutral infrastructure — Linux distributions, game patches, and
 large open datasets are all distributed this way. What carries legal risk is the
-*content* and the *indexing sites*, not the protocol. shoal can search general
-torrent indexes by default; use it only for content you have the right to download
-and share.
+*content* and the *indexing sites*, not the protocol. shoal can search general torrent
+indexes by default; use it only for content you have the right to download and share.
 
 ## License
 

@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"shoal/download"
-	"shoal/metainfo"
-	"shoal/tracker"
+	"github.com/StrangeNoob/shoal/download"
+	"github.com/StrangeNoob/shoal/metainfo"
+	"github.com/StrangeNoob/shoal/tracker"
 )
 
 const listenPort = 6881 // advertised to the tracker; we don't actually accept incoming peers yet

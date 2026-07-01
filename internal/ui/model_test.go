@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"shoal/internal/engine"
-	"shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/source"
 )
 
 // --- fakes implementing the two interfaces the UI depends on ---------------

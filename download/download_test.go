@@ -4,7 +4,7 @@ import (
 	"crypto/sha1"
 	"testing"
 
-	"shoal/peer"
+	"github.com/StrangeNoob/shoal/peer"
 )
 
 func TestParsePieceCopiesData(t *testing.T) {
