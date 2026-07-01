@@ -455,3 +455,38 @@ func TestStreamingUpdatesMergeAndCount(t *testing.T) {
 		t.Fatalf("searchClosedMsg should stop searching")
 	}
 }
+
+func TestDetailOpenCopyAndBack(t *testing.T) {
+	orig := copyToClipboard
+	defer func() { copyToClipboard = orig }()
+
+	const magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&dn=Movie"
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false // command mode (ready model starts focused on the search box)
+	m.hasSearched = true
+	m.results = []source.Result{{Title: "Movie", Magnet: magnet}}
+	m.cursor = 0
+
+	// enter opens the detail screen
+	m, _ = update(m, key("enter"))
+	if !m.showDetail || m.detail.Title != "Movie" {
+		t.Fatalf("enter did not open detail: showDetail=%v title=%q", m.showDetail, m.detail.Title)
+	}
+
+	// y copies the magnet via the injected clipboard func
+	var copied string
+	copyToClipboard = func(s string) error { copied = s; return nil }
+	m, _ = update(m, key("y"))
+	if copied != magnet {
+		t.Fatalf("y did not copy magnet, copied=%q", copied)
+	}
+	if m.notice == "" {
+		t.Fatalf("y should set a 'copied' notice")
+	}
+
+	// esc returns to the list
+	m, _ = update(m, key("esc"))
+	if m.showDetail {
+		t.Fatalf("esc did not close detail")
+	}
+}

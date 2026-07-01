@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -21,6 +22,9 @@ import (
 )
 
 const sidebarWidth = 20
+
+// copyToClipboard is a package var so tests can stub the system clipboard.
+var copyToClipboard = clipboard.WriteAll
 
 // filterCat maps a UI filter chip to an Internet Archive mediatype. The empty
 // mediatype ("All") matches everything.
@@ -50,6 +54,8 @@ type Model struct {
 	editing        bool // search box focused?
 	editingSetting bool // a Settings text field focused?
 	showHelp       bool
+	showDetail     bool
+	detail         source.Result
 
 	input    textinput.Model // search box
 	setInput textinput.Model // settings inline editor
@@ -348,6 +354,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSettingEdit(msg)
 	}
 
+	if m.showDetail {
+		switch msg.String() {
+		case "esc":
+			m.showDetail = false
+		case "d":
+			return m, addCmd(m.eng, m.detail)
+		case "y":
+			if err := copyToClipboard(m.detail.Magnet); err != nil {
+				m.setError("Copy failed: " + err.Error())
+			} else {
+				m.setNotice("Magnet copied.")
+			}
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -495,8 +519,10 @@ func (m *Model) activate() tea.Cmd {
 	case sectionSearch:
 		fr := m.filteredResults()
 		if len(fr) > 0 && m.cursor < len(fr) {
-			return addCmd(m.eng, fr[m.cursor])
+			m.showDetail = true
+			m.detail = fr[m.cursor]
 		}
+		return nil
 	case sectionSettings:
 		items := settingItems()
 		if m.setCursor < 0 || m.setCursor >= len(items) {
