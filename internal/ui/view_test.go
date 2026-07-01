@@ -57,6 +57,41 @@ func TestRenderResultsEmptyFilter(t *testing.T) {
 	}
 }
 
+func TestRenderResultsTable(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.hasSearched = true
+	m.results = []source.Result{
+		{Title: "Magic Mike (2012) 1080p", Source: "TPB", SizeBytes: 1_700_000_000, Seeders: 69, Leechers: 12},
+	}
+	m.sourcesDone, m.sourcesTotal, m.searching = 6, 10, true
+	m.sortField = sortSize
+	m.sortDesc = true
+
+	out := m.renderResults(80, 20)
+	for _, want := range []string{"Results (1)", "searching… 6/10 sources", "Seed:Lch", "69:12", "TPB", "Size"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderResults missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "▼") { // active sort arrow (desc)
+		t.Fatalf("renderResults missing sort arrow:\n%s", out)
+	}
+}
+
+func TestRenderResultsSortBarInSortMode(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.hasSearched = true
+	m.results = []source.Result{{Title: "x", Source: "TPB", Seeders: 1}}
+	m.sortMode = true
+	m.sortField = sortSeeders
+	m.sortCol = 1
+
+	out := m.renderResults(80, 20)
+	if !strings.Contains(out, "Sort") || !strings.Contains(out, "Seeders") || !strings.Contains(out, "Leechers") {
+		t.Fatalf("sort bar missing in sort mode:\n%s", out)
+	}
+}
+
 func TestRenderSettingsPane(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionSettings
