@@ -166,8 +166,12 @@ func TestWindowSizeMakesReady(t *testing.T) {
 
 func TestHomeShownBeforeFirstSearch(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
-	if !strings.Contains(m.View(), "Welcome to shoal") {
-		t.Error("first-run Search pane should show the welcome screen")
+	v := m.View()
+	if !strings.Contains(v, "s  h  o  a  l") {
+		t.Error("first-run home screen should show the compact shoal logo")
+	}
+	if !strings.Contains(v, "HOW IT WORKS") {
+		t.Error("first-run home screen should still show the how-it-works guide")
 	}
 }
 
