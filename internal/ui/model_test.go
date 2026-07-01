@@ -562,3 +562,43 @@ func TestStreamingAllErrorsShowsSearchFailed(t *testing.T) {
 		t.Fatalf("partial failure with no results should be a plain 'No results.' notice, got notice=%q err=%v", m2.notice, m2.noticeErr)
 	}
 }
+
+func TestComputeRates(t *testing.T) {
+	completed := func(s engine.Status) int64 { return s.CompletedBytes }
+	uploaded := func(s engine.Status) int64 { return s.Uploaded }
+
+	prev := []engine.Status{{Name: "A", CompletedBytes: 1000, Uploaded: 0}}
+	next := []engine.Status{{Name: "A", CompletedBytes: 1000 + 2*1024*1024, Uploaded: 3 * 1024 * 1024}}
+	if got := computeRates(prev, next, 2*time.Second, completed)["A"]; got != 1024*1024 {
+		t.Fatalf("download rate = %d, want %d (1 MiB/s)", got, 1024*1024)
+	}
+	if got := computeRates(prev, next, 3*time.Second, uploaded)["A"]; got != 1024*1024 {
+		t.Fatalf("upload rate = %d, want %d (1 MiB/s)", got, 1024*1024)
+	}
+	if s := computeRates(nil, next, time.Second, completed); len(s) != 0 {
+		t.Fatalf("no prior sample → no rate, got %v", s)
+	}
+	if s := computeRates(prev, next, 0, completed); s != nil {
+		t.Fatalf("zero dt → nil, got %v", s)
+	}
+	// a shrinking byte count (torrent replaced / rechecked) yields no bogus rate
+	back := []engine.Status{{Name: "A", CompletedBytes: 500}}
+	if s := computeRates(prev, back, time.Second, completed); len(s) != 0 {
+		t.Fatalf("negative delta → no rate, got %v", s)
+	}
+}
+
+func TestTickComputesTransferSpeeds(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "A", TotalBytes: 100_000_000, CompletedBytes: 0, Uploaded: 0}}}
+	m := ready(New(&fakeSource{}, eng))
+	t0 := time.Unix(1_000_000, 0)
+	m, _ = update(m, tickMsg(t0)) // seeds the prev snapshot; no speed yet
+	eng.statuses = []engine.Status{{Name: "A", TotalBytes: 100_000_000, CompletedBytes: 2 * 1024 * 1024, Uploaded: 4 * 1024 * 1024}}
+	m, _ = update(m, tickMsg(t0.Add(2*time.Second))) // +2 MiB down, +4 MiB up over 2s
+	if got := m.dlSpeed["A"]; got != 1024*1024 {
+		t.Fatalf("dlSpeed[A] = %d, want %d (1 MiB/s)", got, 1024*1024)
+	}
+	if got := m.ulSpeed["A"]; got != 2*1024*1024 {
+		t.Fatalf("ulSpeed[A] = %d, want %d (2 MiB/s)", got, 2*1024*1024)
+	}
+}

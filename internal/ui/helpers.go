@@ -9,8 +9,35 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"shoal/internal/engine"
 	"shoal/internal/source"
 )
+
+// computeRates returns per-torrent byte/sec rates keyed by Status.Name, from the
+// deltas of byteOf(status) between the previous and next snapshots over dt.
+// byteOf picks the field to rate — CompletedBytes for download speed, Uploaded
+// for seeding speed. A torrent with no prior sample, a non-positive delta, or
+// dt<=0 gets no entry.
+// ponytail: keyed by Name because Status carries no infohash — two identically
+// named torrents would share a rate; acceptable for a rare case.
+func computeRates(prev, next []engine.Status, dt time.Duration, byteOf func(engine.Status) int64) map[string]int64 {
+	if dt <= 0 {
+		return nil
+	}
+	prevBytes := make(map[string]int64, len(prev))
+	for _, s := range prev {
+		prevBytes[s.Name] = byteOf(s)
+	}
+	out := make(map[string]int64, len(next))
+	for _, s := range next {
+		if pb, ok := prevBytes[s.Name]; ok {
+			if d := byteOf(s) - pb; d > 0 {
+				out[s.Name] = int64(float64(d) / dt.Seconds())
+			}
+		}
+	}
+	return out
+}
 
 // truncate shortens s to at most n runes, adding an ellipsis when it cuts.
 func truncate(s string, n int) string {

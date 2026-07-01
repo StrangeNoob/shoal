@@ -85,7 +85,10 @@ type Model struct {
 	sortDesc  bool
 
 	statuses  []engine.Status
-	setCursor int // index into settingItems()
+	dlSpeed   map[string]int64 // download byte/sec per Status.Name, sampled between ticks
+	ulSpeed   map[string]int64 // upload (seeding) byte/sec per Status.Name
+	lastTick  time.Time        // timestamp of the previous tick, for the rate delta
+	setCursor int              // index into settingItems()
 
 	notice      string
 	noticeErr   bool
@@ -315,7 +318,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		if m.eng != nil {
-			m.statuses = m.eng.Statuses()
+			now := time.Time(msg)
+			next := m.eng.Statuses()
+			dt := now.Sub(m.lastTick)
+			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.CompletedBytes })
+			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
+			m.statuses = next
+			m.lastTick = now
 		}
 		if m.notice != "" && time.Now().After(m.noticeUntil) {
 			m.notice = ""

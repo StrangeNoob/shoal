@@ -216,3 +216,35 @@ func TestRenderDetail(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderDownloadsShowsSpeed(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 2_000_000_000, CompletedBytes: 61_000_000, Peers: 3}}
+	m.dlSpeed = map[string]int64{"Movie": 1024 * 1024} // 1 MiB/s
+	v := m.View()
+	if !strings.Contains(v, "MiB/s") {
+		t.Fatalf("downloads pane should show a per-second speed:\n%s", v)
+	}
+	// with no sampled speed, the line has no "/s" suffix
+	m.dlSpeed = nil
+	if strings.Contains(m.View(), "/s") {
+		t.Fatalf("no sampled speed should render no /s suffix:\n%s", m.View())
+	}
+}
+
+func TestRenderSeedingShowsSpeed(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "Done", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 2000, Peers: 2, Done: true}}
+	m.ulSpeed = map[string]int64{"Done": 512 * 1024} // 512 KiB/s upload
+	v := m.View()
+	if !strings.Contains(v, "/s") {
+		t.Fatalf("seeding pane should show an upload speed:\n%s", v)
+	}
+	// no sampled upload rate → no /s suffix
+	m.ulSpeed = nil
+	if strings.Contains(m.View(), "/s") {
+		t.Fatalf("no sampled upload speed should render no /s suffix:\n%s", m.View())
+	}
+}

@@ -339,6 +339,9 @@ func (m Model) renderDownloads(w, h int) string {
 
 		state := fmt.Sprintf("%5.1f%%", s.Percent()*100)
 		detail := fmt.Sprintf("%s / %s  ·  %d peers", formatBytes(s.CompletedBytes), sizeOrDash(s.TotalBytes), s.Peers)
+		if sp := m.dlSpeed[s.Name]; sp > 0 {
+			detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
+		}
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
 		b.WriteString("  " + st.Meta.Render(detail) + "\n")
@@ -369,6 +372,9 @@ func (m Model) renderSeeding(w, h int) string {
 		detail := fmt.Sprintf("  ·  %d peers", s.Peers)
 		if s.Uploaded > 0 {
 			detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+		}
+		if sp := m.ulSpeed[s.Name]; sp > 0 {
+			detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
 		}
 		b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		if i < shown-1 {
