@@ -1,11 +1,11 @@
-# demo.tape — regenerate docs/demo.gif with:  vhs demo.tape
+# demo.tape — regenerate demo.gif with:  vhs demo.tape
 # Requires vhs (https://github.com/charmbracelet/vhs), which needs ttyd + ffmpeg.
 #
 # Drives the TUI through the splash, a search, the panes, and a live theme
-# toggle, then quits. (The committed docs/demo.gif was produced from this same
-# sequence via an asciinema + agg pipeline where vhs wasn't available.)
+# toggle, then quits. (The committed demo.gif was recorded to demo.cast and
+# rendered with agg — see "Regenerating the demo" in the README.)
 
-Output docs/demo.gif
+Output demo.gif
 
 Set Shell "bash"
 Set FontSize 16

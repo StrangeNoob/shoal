@@ -3,7 +3,7 @@
 **A calm BitTorrent client for your terminal.** Search torrents, download with live
 progress, seed, and keep a history — in a fullscreen [Bubble Tea](https://github.com/charmbracelet/bubbletea) UI.
 
-![shoal demo](docs/demo.gif)
+![shoal demo](demo.gif)
 
 Built in two layers: a BitTorrent protocol implemented **by hand** from the Go standard
 library (to *understand* how torrents work), and a **real, beautiful tool** on top of a
@@ -140,12 +140,15 @@ make help       # all targets
 
 ### Regenerating the demo
 
-`docs/demo.gif` is scripted in `demo.tape`. With [vhs](https://github.com/charmbracelet/vhs)
-installed, regenerate it with:
+`demo.gif` was recorded to `demo.cast` (asciinema) and rendered with
+[agg](https://github.com/asciinema/agg):
 
 ```sh
-vhs demo.tape
+agg demo.cast demo.gif
 ```
+
+`demo.tape` scripts the same walkthrough for [vhs](https://github.com/charmbracelet/vhs)
+as an alternative (`vhs demo.tape` writes `demo.gif`).
 
 ## Phase 1 limitations
 
