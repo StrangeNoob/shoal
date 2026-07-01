@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"shoal/internal/source"
 )
 
@@ -156,4 +158,49 @@ func ratioStr(r source.Result) string {
 		return "∞"
 	}
 	return fmt.Sprintf("%.2f", v)
+}
+
+// padVisual right-pads s with spaces to visible width w (ANSI-aware). If s is
+// already >= w it is returned unchanged.
+// ponytail: callers keep body lines within the inner width; this only pads.
+func padVisual(s string, w int) string {
+	gap := w - lipgloss.Width(s)
+	if gap <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", gap)
+}
+
+// titledBox draws a rounded border of total width `width`, with `title` inset in
+// the top edge and an optional right-aligned `right` label. Body lines are
+// padded to the inner width.
+func titledBox(title, right, body string, width int, focused bool) string {
+	if width < 8 {
+		width = 8
+	}
+	border := st.Faint
+	if focused {
+		border = st.Accent
+	}
+	inner := width - 2
+
+	titleSeg := "─ " + title + " "
+	var rightSeg string
+	if right != "" {
+		rightSeg = " " + right + " ─"
+	}
+	// top = ╭ + titleSeg + fill + rightSeg + ╮ , all == width
+	fill := inner - lipgloss.Width(titleSeg) - lipgloss.Width(rightSeg)
+	if fill < 0 {
+		fill = 0
+	}
+	top := "╭" + titleSeg + strings.Repeat("─", fill) + rightSeg + "╮"
+
+	var b strings.Builder
+	b.WriteString(border.Render(top) + "\n")
+	for _, ln := range strings.Split(body, "\n") {
+		b.WriteString(border.Render("│") + padVisual(ln, inner) + border.Render("│") + "\n")
+	}
+	b.WriteString(border.Render("╰" + strings.Repeat("─", inner) + "╯"))
+	return b.String()
 }

@@ -2,8 +2,11 @@ package ui
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"shoal/internal/source"
 )
@@ -158,5 +161,34 @@ func TestSeedLeechAndRatioStr(t *testing.T) {
 	}
 	if got := ratioStr(source.Result{}); got != "—" {
 		t.Fatalf("ratioStr (no data) = %q, want —", got)
+	}
+}
+
+func TestTitledBoxDimensionsAndTitle(t *testing.T) {
+	body := "hello\nworld"
+	out := titledBox("Results (3)", "TPB", body, 30, true)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 4 { // top border + 2 body + bottom border
+		t.Fatalf("lines = %d, want 4:\n%s", len(lines), out)
+	}
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != 30 {
+			t.Fatalf("line %d width = %d, want 30: %q", i, w, ln)
+		}
+	}
+	if !strings.Contains(lines[0], "Results (3)") {
+		t.Fatalf("top border missing title: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "TPB") {
+		t.Fatalf("top border missing right label: %q", lines[0])
+	}
+}
+
+func TestPadVisual(t *testing.T) {
+	if got := padVisual("hi", 5); lipgloss.Width(got) != 5 {
+		t.Fatalf("padVisual width = %d, want 5", lipgloss.Width(got))
+	}
+	if got := padVisual("toolong", 3); got != "toolong" {
+		t.Fatalf("padVisual over-width should pass through, got %q", got)
 	}
 }
