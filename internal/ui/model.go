@@ -372,6 +372,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.sortMode {
+		return m.handleSortKey(msg)
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -410,6 +414,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "S":
+		if m.section == sectionSearch {
+			m.sortMode = true
+			m.sortField = sortableCols[m.sortCol]
+			applySort(m.results, m.sortField, m.sortDesc)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleSortKey handles input while the sort-mode overlay is active: arrows
+// pick the column (left/right) and direction (up=asc, down=desc); esc/enter/S
+// exit back to normal navigation.
+func (m Model) handleSortKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "S", "esc", "enter":
+		m.sortMode = false
+	case "left", "h":
+		if m.sortCol > 0 {
+			m.sortCol--
+		}
+		m.sortField = sortableCols[m.sortCol]
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "right", "l":
+		if m.sortCol < len(sortableCols)-1 {
+			m.sortCol++
+		}
+		m.sortField = sortableCols[m.sortCol]
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "up", "k":
+		m.sortDesc = false
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "down", "j":
+		m.sortDesc = true
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "q", "ctrl+c":
+		return m, tea.Quit
 	}
 	return m, nil
 }

@@ -490,3 +490,38 @@ func TestDetailOpenCopyAndBack(t *testing.T) {
 		t.Fatalf("esc did not close detail")
 	}
 }
+
+func TestSortModeKeys(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false // command mode
+	m.results = []source.Result{
+		{Title: "a", SizeBytes: 1, Seeders: 1},
+		{Title: "b", SizeBytes: 3, Seeders: 9},
+		{Title: "c", SizeBytes: 2, Seeders: 5},
+	}
+	m.sortDesc = true
+
+	// S enters sort mode and sorts by the first column (Size), desc → b first
+	m, _ = update(m, key("S"))
+	if !m.sortMode || m.sortField != sortSize || m.results[0].Title != "b" {
+		t.Fatalf("S: sortMode=%v field=%v first=%s", m.sortMode, m.sortField, m.results[0].Title)
+	}
+
+	// right moves to Seeders (still desc → a last)
+	m, _ = update(m, key("right"))
+	if m.sortField != sortSeeders || m.results[2].Title != "a" {
+		t.Fatalf("right: field=%v last=%s", m.sortField, m.results[2].Title)
+	}
+
+	// up sets ascending → a first
+	m, _ = update(m, key("up"))
+	if m.sortDesc || m.results[0].Title != "a" {
+		t.Fatalf("up(asc): desc=%v first=%s", m.sortDesc, m.results[0].Title)
+	}
+
+	// esc exits sort mode
+	m, _ = update(m, key("esc"))
+	if m.sortMode {
+		t.Fatalf("esc did not exit sort mode")
+	}
+}
