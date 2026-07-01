@@ -209,6 +209,7 @@ func titledBox(title, right, body string, width int, focused bool) string {
 	var b strings.Builder
 	b.WriteString(border.Render(top) + "\n")
 	for _, ln := range strings.Split(body, "\n") {
+		ln = lipgloss.NewStyle().MaxWidth(inner).Render(ln) // cap overlong lines so the border never bows
 		b.WriteString(border.Render("│") + padVisual(ln, inner) + border.Render("│") + "\n")
 	}
 	b.WriteString(border.Render("╰" + strings.Repeat("─", inner) + "╯"))

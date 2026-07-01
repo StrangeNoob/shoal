@@ -173,21 +173,19 @@ func (m Model) renderResults(w, h int) string {
 	const sizeW, slW, srcW = 8, 9, 5
 	nameW := max(6, inner-(numW+sizeW+slW+srcW+12))
 
-	arrow := func(f sortField) string {
-		if m.sortField != f {
-			return ""
+	arrowFor := func(fields ...sortField) string {
+		for _, f := range fields {
+			if m.sortField == f {
+				if m.sortDesc {
+					return "▼"
+				}
+				return "▲"
+			}
 		}
-		if m.sortDesc {
-			return "▼"
-		}
-		return "▲"
+		return ""
 	}
-	colHead := func(label string, f sortField) string {
-		a := arrow(f)
-		if a != "" {
-			return label + a
-		}
-		return label
+	colHead := func(label string, fields ...sortField) string {
+		return label + arrowFor(fields...)
 	}
 
 	var body strings.Builder
@@ -200,10 +198,10 @@ func (m Model) renderResults(w, h int) string {
 	}
 
 	// Header row (prefix "  " matches the row's marker+space so Name aligns).
-	head := "  " + strings.Repeat(" ", numW) + " " +
+	head := "  " + st.Faint.Render(leftPad("#", numW)) + " " +
 		st.Faint.Render(padRight("Name", nameW)) + " " +
 		st.Faint.Render(leftPad(colHead("Size", sortSize), sizeW)) + "  " +
-		st.Faint.Render(leftPad(colHead("Seed:Lch", sortSeeders), slW)) + "  " +
+		st.Faint.Render(leftPad(colHead("Seed:Lch", sortSeeders, sortLeechers, sortRatio), slW)) + "  " +
 		st.Faint.Render(leftPad("Src", srcW))
 	body.WriteString(head + "\n")
 

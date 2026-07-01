@@ -73,8 +73,23 @@ func TestRenderResultsTable(t *testing.T) {
 			t.Fatalf("renderResults missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "▼") { // active sort arrow (desc)
-		t.Fatalf("renderResults missing sort arrow:\n%s", out)
+	if !strings.Contains(out, "Size▼") {
+		t.Fatalf("sort arrow not attached to Size header:\n%s", out)
+	}
+}
+
+func TestRenderResultsArrowFollowsSortField(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.hasSearched = true
+	m.results = []source.Result{
+		{Title: "Magic Mike (2012) 1080p", Source: "TPB", SizeBytes: 1_700_000_000, Seeders: 69, Leechers: 12},
+	}
+	m.sortField = sortLeechers
+	m.sortDesc = true
+
+	out := m.renderResults(80, 20)
+	if !strings.Contains(out, "Seed:Lch▼") {
+		t.Fatalf("sortLeechers active sort should light the Seed:Lch column:\n%s", out)
 	}
 }
 

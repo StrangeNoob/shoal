@@ -201,6 +201,16 @@ func TestTitledBoxNarrowClampsWidth(t *testing.T) {
 	}
 }
 
+func TestTitledBoxTruncatesOverlongBody(t *testing.T) {
+	body := strings.Repeat("x", 100) // far wider than the inner width
+	out := titledBox("T", "", body, 20, false)
+	for i, ln := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(ln); w != 20 {
+			t.Fatalf("line %d width = %d, want 20: %q", i, w, ln)
+		}
+	}
+}
+
 func TestPadVisual(t *testing.T) {
 	if got := padVisual("hi", 5); lipgloss.Width(got) != 5 {
 		t.Fatalf("padVisual width = %d, want 5", lipgloss.Width(got))
