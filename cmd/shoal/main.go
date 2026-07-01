@@ -9,11 +9,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"shoal/internal/config"
-	"shoal/internal/engine"
-	"shoal/internal/history"
-	"shoal/internal/source"
-	"shoal/internal/ui"
+	"github.com/StrangeNoob/shoal/internal/config"
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
+	"github.com/StrangeNoob/shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/ui"
 )
 
 func main() {

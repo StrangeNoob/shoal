@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"shoal/bencode"
-	"shoal/metainfo"
+	"github.com/StrangeNoob/shoal/bencode"
+	"github.com/StrangeNoob/shoal/metainfo"
 )
 
 func bencodeBody(t *testing.T, v any) []byte {

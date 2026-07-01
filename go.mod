@@ -1,4 +1,4 @@
-module shoal
+module github.com/StrangeNoob/shoal
 
 go 1.24.2
 

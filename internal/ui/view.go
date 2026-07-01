@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"shoal/internal/history"
-	"shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/history"
+	"github.com/StrangeNoob/shoal/internal/source"
 )
 
 func (m Model) View() string {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/source"
 )
 
 func TestTruncate(t *testing.T) {

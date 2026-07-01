@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"time"
 
-	"shoal/bencode"
-	"shoal/metainfo"
+	"github.com/StrangeNoob/shoal/bencode"
+	"github.com/StrangeNoob/shoal/metainfo"
 )
 
 // Peer is a single address returned by the tracker.
