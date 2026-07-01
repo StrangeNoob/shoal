@@ -184,6 +184,23 @@ func TestTitledBoxDimensionsAndTitle(t *testing.T) {
 	}
 }
 
+func TestTitledBoxNarrowClampsWidth(t *testing.T) {
+	// title + right label exceed the inner width — every line must still be exactly `width`
+	out := titledBox("Results (123)", "TPB", "body", 20, true)
+	for i, ln := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(ln); w != 20 {
+			t.Fatalf("narrow line %d width = %d, want 20: %q", i, w, ln)
+		}
+	}
+	// no right label still holds the invariant
+	out = titledBox("Details", "", "x", 24, false)
+	for i, ln := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(ln); w != 24 {
+			t.Fatalf("no-right line %d width = %d, want 24: %q", i, w, ln)
+		}
+	}
+}
+
 func TestPadVisual(t *testing.T) {
 	if got := padVisual("hi", 5); lipgloss.Width(got) != 5 {
 		t.Fatalf("padVisual width = %d, want 5", lipgloss.Width(got))

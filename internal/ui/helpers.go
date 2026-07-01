@@ -184,12 +184,22 @@ func titledBox(title, right, body string, width int, focused bool) string {
 	}
 	inner := width - 2
 
-	titleSeg := "─ " + title + " "
 	var rightSeg string
 	if right != "" {
 		rightSeg = " " + right + " ─"
 	}
-	// top = ╭ + titleSeg + fill + rightSeg + ╮ , all == width
+	// Truncate the title so the top border never exceeds `width`. The 3 accounts
+	// for the "─ " prefix and " " suffix around the title text.
+	titleRoom := inner - lipgloss.Width(rightSeg) - 3
+	if titleRoom < 0 {
+		// No room for the right label alongside the title framing — drop it.
+		rightSeg = ""
+		titleRoom = inner - 3
+	}
+	if titleRoom < 0 {
+		titleRoom = 0
+	}
+	titleSeg := "─ " + truncate(title, titleRoom) + " "
 	fill := inner - lipgloss.Width(titleSeg) - lipgloss.Width(rightSeg)
 	if fill < 0 {
 		fill = 0
