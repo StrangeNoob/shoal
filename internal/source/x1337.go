@@ -91,10 +91,11 @@ func (x *X1337) Search(ctx context.Context, query string) ([]Result, error) {
 			Source:     x.Label,
 			SizeBytes:  row.SizeBytes,
 			Popularity: row.Seeders,
+			Seeders:    row.Seeders,
+			Leechers:   row.Leechers,
 			Category:   x.Category,
 			Magnet:     parsed.Magnet,
 		})
-		_ = row.Leechers
 	}
 	return out, nil
 }

@@ -19,5 +19,5 @@ func (f *FitGirl) setHTTPClient(c *http.Client) { f.Client = c }
 func (f *FitGirl) Name() string                 { return "FitGirl" }
 
 func (f *FitGirl) Search(ctx context.Context, query string) ([]Result, error) {
-	return fetchWordpressRSS(ctx, f.Base, "FitGirl", "games", "fitgirl", query, f.Client)
+	return fetchWordpressRSS(ctx, f.Base, "FitGirl", "games", query, f.Client)
 }

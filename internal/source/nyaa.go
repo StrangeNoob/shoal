@@ -51,11 +51,12 @@ func parseNyaaRSS(xmlText string) []Result {
 			Source:     "Nyaa",
 			SizeBytes:  parseSize(tag(item, "nyaa:size")),
 			Popularity: seeders,
+			Seeders:    seeders,
+			Leechers:   leechers,
+			Added:      parseTimeUnix(tag(item, "pubDate")),
 			Category:   "anime",
 			Magnet:     buildMagnet(infoHash, name),
 		})
-		_ = leechers
-		_ = parseTimeUnix(tag(item, "pubDate"))
 	}
 	return out
 }

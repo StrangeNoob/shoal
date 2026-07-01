@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 )
 
 // MultiSource fans a single query out across several providers concurrently and
@@ -73,4 +74,43 @@ func (m *MultiSource) Search(ctx context.Context, query string) ([]Result, error
 	// source order.
 	sort.SliceStable(merged, func(a, b int) bool { return merged[a].Popularity > merged[b].Popularity })
 	return merged, nil
+}
+
+// SourceUpdate is one source's contribution to a streaming search.
+type SourceUpdate struct {
+	Results []Result
+	Err     error // this source's error, if any (non-fatal)
+	Done    int   // sources finished so far, including this one
+	Total   int   // total sources in the search
+}
+
+// SearchStream fans out like Search but sends each source's result on ch as it
+// arrives (ordered by completion, not source order), then closes ch. A source
+// error travels in SourceUpdate.Err and does not abort the others.
+func (m *MultiSource) SearchStream(ctx context.Context, query string, ch chan<- SourceUpdate) {
+	defer close(ch)
+	total := len(m.sources)
+	if total == 0 {
+		return
+	}
+	var done int64
+	var wg sync.WaitGroup
+	for _, s := range m.sources {
+		wg.Add(1)
+		go func(s Source) {
+			defer wg.Done()
+			res, err := s.Search(ctx, query)
+			up := SourceUpdate{
+				Results: res,
+				Err:     err,
+				Done:    int(atomic.AddInt64(&done, 1)),
+				Total:   total,
+			}
+			select {
+			case ch <- up:
+			case <-ctx.Done(): // reader gave up (search superseded)
+			}
+		}(s)
+	}
+	wg.Wait()
 }

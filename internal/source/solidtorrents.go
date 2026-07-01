@@ -55,11 +55,12 @@ func (s *SolidTorrents) Search(ctx context.Context, query string) ([]Result, err
 			Source:     "Solid",
 			SizeBytes:  item.Size,
 			Popularity: item.Seeders,
+			Seeders:    item.Seeders,
+			Leechers:   item.Leechers,
+			Added:      parseTimeUnix(item.UpdatedAt),
 			Category:   "tv",
 			Magnet:     buildMagnet(infoHash, name),
 		})
-		_ = item.Leechers
-		_ = parseTimeUnix(item.UpdatedAt)
 	}
 	return out, nil
 }

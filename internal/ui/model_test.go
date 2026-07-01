@@ -421,3 +421,144 @@ func TestQuitKeys(t *testing.T) {
 		t.Error("ctrl+c should quit even while editing")
 	}
 }
+
+func TestStreamingUpdatesMergeAndCount(t *testing.T) {
+	m := New(source.NewCurated(), nil)
+	m.searchGen = 1
+	m.searching = true
+	m.searchCh = make(chan source.SourceUpdate, 1)
+
+	// current-generation update: merges, sorts, records counts
+	upd := sourceUpdateMsg{gen: 1, up: source.SourceUpdate{
+		Results: []source.Result{{Title: "x", Popularity: 3}, {Title: "y", Popularity: 8}},
+		Done:    1, Total: 2,
+	}}
+	m2, _ := m.Update(upd)
+	mm := m2.(Model)
+	if len(mm.results) != 2 || mm.sourcesDone != 1 || mm.sourcesTotal != 2 {
+		t.Fatalf("after update: results=%d done=%d total=%d", len(mm.results), mm.sourcesDone, mm.sourcesTotal)
+	}
+	if mm.results[0].Title != "y" { // default sort = Popularity desc
+		t.Fatalf("results not health-sorted: %s first", mm.results[0].Title)
+	}
+
+	// stale-generation update is ignored
+	stale := sourceUpdateMsg{gen: 0, up: source.SourceUpdate{Results: []source.Result{{Title: "z"}}, Done: 9, Total: 9}}
+	m3, _ := mm.Update(stale)
+	if mmm := m3.(Model); len(mmm.results) != 2 || mmm.sourcesDone != 1 {
+		t.Fatalf("stale update should be ignored, got results=%d done=%d", len(mmm.results), mmm.sourcesDone)
+	}
+
+	// close ends the spinner
+	m4, _ := mm.Update(searchClosedMsg{gen: 1})
+	if m4.(Model).searching {
+		t.Fatalf("searchClosedMsg should stop searching")
+	}
+}
+
+func TestDetailOpenCopyAndBack(t *testing.T) {
+	orig := copyToClipboard
+	defer func() { copyToClipboard = orig }()
+
+	const magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&dn=Movie"
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false // command mode (ready model starts focused on the search box)
+	m.hasSearched = true
+	m.results = []source.Result{{Title: "Movie", Magnet: magnet}}
+	m.cursor = 0
+
+	// enter opens the detail screen
+	m, _ = update(m, key("enter"))
+	if !m.showDetail || m.detail.Title != "Movie" {
+		t.Fatalf("enter did not open detail: showDetail=%v title=%q", m.showDetail, m.detail.Title)
+	}
+
+	// y copies the magnet via the injected clipboard func
+	var copied string
+	copyToClipboard = func(s string) error { copied = s; return nil }
+	m, _ = update(m, key("y"))
+	if copied != magnet {
+		t.Fatalf("y did not copy magnet, copied=%q", copied)
+	}
+	if m.notice == "" {
+		t.Fatalf("y should set a 'copied' notice")
+	}
+
+	// esc returns to the list
+	m, _ = update(m, key("esc"))
+	if m.showDetail {
+		t.Fatalf("esc did not close detail")
+	}
+}
+
+func TestSortModeKeys(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false // command mode
+	m.results = []source.Result{
+		{Title: "a", SizeBytes: 1, Seeders: 1},
+		{Title: "b", SizeBytes: 3, Seeders: 9},
+		{Title: "c", SizeBytes: 2, Seeders: 5},
+	}
+	m.sortDesc = true
+
+	// S enters sort mode and sorts by the first column (Size), desc → b first
+	m, _ = update(m, key("S"))
+	if !m.sortMode || m.sortField != sortSize || m.results[0].Title != "b" {
+		t.Fatalf("S: sortMode=%v field=%v first=%s", m.sortMode, m.sortField, m.results[0].Title)
+	}
+
+	// right moves to Seeders (still desc → a last)
+	m, _ = update(m, key("right"))
+	if m.sortField != sortSeeders || m.results[2].Title != "a" {
+		t.Fatalf("right: field=%v last=%s", m.sortField, m.results[2].Title)
+	}
+
+	// up sets ascending → a first
+	m, _ = update(m, key("up"))
+	if m.sortDesc || m.results[0].Title != "a" {
+		t.Fatalf("up(asc): desc=%v first=%s", m.sortDesc, m.results[0].Title)
+	}
+
+	// esc exits sort mode
+	m, _ = update(m, key("esc"))
+	if m.sortMode {
+		t.Fatalf("esc did not exit sort mode")
+	}
+}
+
+func TestDetailDownloadClearsShowDetail(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	m.showDetail = true
+	m.detail = source.Result{Title: "X", TorrentURL: "u1"}
+	m, _ = update(m, key("d"))
+	if m.showDetail {
+		t.Fatalf("d in detail should clear showDetail so it doesn't hijack the next pane")
+	}
+}
+
+func TestStreamingAllErrorsShowsSearchFailed(t *testing.T) {
+	m := New(&fakeSource{}, &fakeEngine{})
+	m.searchGen = 1
+	m.searching = true
+	m.searchCh = make(chan source.SourceUpdate, 1)
+	// two sources, both error, no results
+	m, _ = update(m, sourceUpdateMsg{gen: 1, up: source.SourceUpdate{Err: errors.New("boom"), Done: 1, Total: 2}})
+	m, _ = update(m, sourceUpdateMsg{gen: 1, up: source.SourceUpdate{Err: errors.New("boom"), Done: 2, Total: 2}})
+	m, _ = update(m, searchClosedMsg{gen: 1})
+	if !m.noticeErr || !strings.Contains(m.notice, "Search failed") {
+		t.Fatalf("all-sources-failed should set a 'Search failed' error notice, got notice=%q err=%v", m.notice, m.noticeErr)
+	}
+
+	// mixed: one error, one empty (no error) → NOT a total failure → "No results."
+	m2 := New(&fakeSource{}, &fakeEngine{})
+	m2.searchGen = 1
+	m2.searching = true
+	m2.searchCh = make(chan source.SourceUpdate, 1)
+	m2, _ = update(m2, sourceUpdateMsg{gen: 1, up: source.SourceUpdate{Err: errors.New("boom"), Done: 1, Total: 2}})
+	m2, _ = update(m2, sourceUpdateMsg{gen: 1, up: source.SourceUpdate{Done: 2, Total: 2}}) // empty, no error
+	m2, _ = update(m2, searchClosedMsg{gen: 1})
+	if m2.noticeErr || m2.notice != "No results." {
+		t.Fatalf("partial failure with no results should be a plain 'No results.' notice, got notice=%q err=%v", m2.notice, m2.noticeErr)
+	}
+}

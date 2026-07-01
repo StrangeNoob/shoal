@@ -51,7 +51,7 @@ func TestFetchWordpressRSSMapsMagnetItems(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	got, err := fetchWordpressRSS(context.Background(), srv.URL, "FitGirl", "games", "fitgirl", "bunny", nil)
+	got, err := fetchWordpressRSS(context.Background(), srv.URL, "FitGirl", "games", "bunny", nil)
 	if err != nil {
 		t.Fatalf("fetchWordpressRSS: %v", err)
 	}
@@ -60,6 +60,9 @@ func TestFetchWordpressRSSMapsMagnetItems(t *testing.T) {
 	}
 	if got[0].Title != "FitGirl & Friends" || got[0].Category != "games" || got[0].Source != "FitGirl" {
 		t.Fatalf("result = %+v", got[0])
+	}
+	if got[0].Added == 0 {
+		t.Fatalf("wordpress Added = 0, want the pubDate parsed")
 	}
 }
 
@@ -83,6 +86,9 @@ func TestYTSSearchMapsMovieTorrents(t *testing.T) {
 	if got[0].Title != "Movie 2024 [1080p BluRay]" || got[0].Popularity != 9 || got[0].Category != "movies" {
 		t.Fatalf("result = %+v", got[0])
 	}
+	if got[0].Seeders != 9 || got[0].Leechers != 2 || got[0].Added != 1710000000 {
+		t.Fatalf("yts fields = %+v, want seeders 9 leechers 2 added 1710000000", got[0])
+	}
 }
 
 func TestPirateBaySearchFiltersCategory(t *testing.T) {
@@ -99,8 +105,12 @@ func TestPirateBaySearchFiltersCategory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(got) != 1 || got[0].Title != "Movie" || got[0].Category != "movies" || got[0].Popularity != 10 {
+	g := got[0]
+	if len(got) != 1 || g.Title != "Movie" || g.Category != "movies" || g.Popularity != 10 {
 		t.Fatalf("results = %+v, want only Movie", got)
+	}
+	if g.Seeders != 10 || g.Leechers != 1 || g.Files != 2 || g.Added != 1710000000 {
+		t.Fatalf("piratebay fields = %+v, want seeders 10 leechers 1 files 2 added 1710000000", g)
 	}
 }
 
@@ -127,6 +137,9 @@ func TestEZTVSearchOnlyBrowsesLatest(t *testing.T) {
 	if len(got) != 1 || got[0].Title != "Show S01E01" || got[0].Category != "tv" {
 		t.Fatalf("results = %+v", got)
 	}
+	if got[0].Seeders != 7 || got[0].Leechers != 3 || got[0].Added != 1710000000 {
+		t.Fatalf("eztv fields = %+v, want seeders 7 leechers 3 added 1710000000", got[0])
+	}
 }
 
 func TestSolidTorrentsSearchMapsResults(t *testing.T) {
@@ -142,6 +155,9 @@ func TestSolidTorrentsSearchMapsResults(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Title != "Solid TV" || got[0].Category != "tv" || got[0].Popularity != 5 {
 		t.Fatalf("results = %+v", got)
+	}
+	if got[0].Seeders != 5 || got[0].Leechers != 1 || got[0].Added == 0 {
+		t.Fatalf("solidtorrents fields = %+v, want seeders 5 leechers 1 added>0", got[0])
 	}
 }
 
@@ -166,6 +182,9 @@ func TestNyaaSearchParsesRSS(t *testing.T) {
 	if len(got) != 1 || got[0].Title != "Anime Episode" || got[0].Category != "anime" || got[0].Popularity != 11 {
 		t.Fatalf("results = %+v", got)
 	}
+	if got[0].Seeders != 11 || got[0].Leechers != 4 || got[0].Added == 0 {
+		t.Fatalf("nyaa fields = %+v, want seeders 11 leechers 4 added>0", got[0])
+	}
 }
 
 func TestSubsPleasePicksBestResolution(t *testing.T) {
@@ -185,6 +204,9 @@ func TestSubsPleasePicksBestResolution(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Title != "Show - 03 [1080p]" || got[0].SizeBytes != 999 || got[0].Category != "anime" {
 		t.Fatalf("results = %+v", got)
+	}
+	if got[0].Added == 0 {
+		t.Fatalf("subsplease Added = 0, want the release_date parsed")
 	}
 }
 

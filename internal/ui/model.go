@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -21,6 +22,9 @@ import (
 )
 
 const sidebarWidth = 20
+
+// copyToClipboard is a package var so tests can stub the system clipboard.
+var copyToClipboard = clipboard.WriteAll
 
 // filterCat maps a UI filter chip to an Internet Archive mediatype. The empty
 // mediatype ("All") matches everything.
@@ -50,6 +54,8 @@ type Model struct {
 	editing        bool // search box focused?
 	editingSetting bool // a Settings text field focused?
 	showHelp       bool
+	showDetail     bool
+	detail         source.Result
 
 	input    textinput.Model // search box
 	setInput textinput.Model // settings inline editor
@@ -65,6 +71,18 @@ type Model struct {
 	results     []source.Result
 	cursor      int
 	filter      int // index into filterCats
+
+	searchCh       chan source.SourceUpdate
+	sourcesDone    int
+	sourcesTotal   int
+	searchGen      int
+	searchCancel   context.CancelFunc
+	searchErrCount int
+
+	sortMode  bool
+	sortCol   int
+	sortField sortField
+	sortDesc  bool
 
 	statuses  []engine.Status
 	setCursor int // index into settingItems()
@@ -113,6 +131,7 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 		src:      src,
 		eng:      eng,
 		cfg:      cfg,
+		sortDesc: true,
 	}
 }
 
@@ -126,6 +145,13 @@ type searchDoneMsg struct {
 	results []source.Result
 	err     error
 }
+
+type sourceUpdateMsg struct {
+	gen int
+	up  source.SourceUpdate
+}
+
+type searchClosedMsg struct{ gen int }
 
 type addedMsg struct {
 	title string
@@ -144,6 +170,51 @@ func searchCmd(src source.Source, query string) tea.Cmd {
 		defer cancel()
 		res, err := src.Search(ctx, query)
 		return searchDoneMsg{results: res, err: err}
+	}
+}
+
+// streamSearcher is implemented by sources that can report per-source
+// progress (e.g. source.MultiSource) instead of blocking for the full result.
+type streamSearcher interface {
+	SearchStream(ctx context.Context, query string, ch chan<- source.SourceUpdate)
+}
+
+// startSearch begins a new (generation-tagged) search, streaming per-source
+// updates when the source supports it, else falling back to a blocking search.
+func (m *Model) startSearch(query string) tea.Cmd {
+	if m.searchCancel != nil {
+		m.searchCancel()
+		m.searchCancel = nil
+	}
+	m.searchGen++
+	m.results = nil
+	m.cursor = 0
+	m.sourcesDone = 0
+	m.sourcesTotal = 0
+	m.searchErrCount = 0
+	m.searching = true
+	m.hasSearched = true
+
+	ss, ok := m.src.(streamSearcher)
+	if !ok {
+		return searchCmd(m.src, query)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	m.searchCancel = cancel
+	ch := make(chan source.SourceUpdate)
+	m.searchCh = ch
+	gen := m.searchGen
+	go ss.SearchStream(ctx, query, ch)
+	return waitForUpdate(gen, ch)
+}
+
+func waitForUpdate(gen int, ch chan source.SourceUpdate) tea.Cmd {
+	return func() tea.Msg {
+		up, ok := <-ch
+		if !ok {
+			return searchClosedMsg{gen: gen}
+		}
+		return sourceUpdateMsg{gen: gen, up: up}
 	}
 }
 
@@ -196,6 +267,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			m.err = nil
 			if len(msg.results) == 0 {
+				m.setNotice("No results.")
+			}
+		}
+		return m, nil
+
+	case sourceUpdateMsg:
+		if msg.gen != m.searchGen {
+			return m, nil
+		}
+		if len(msg.up.Results) > 0 {
+			m.results = append(m.results, msg.up.Results...)
+			applySort(m.results, m.sortField, m.sortDesc)
+		}
+		m.sourcesDone = msg.up.Done
+		m.sourcesTotal = msg.up.Total
+		if msg.up.Err != nil {
+			m.searchErrCount++
+		}
+		if n := len(m.filteredResults()); m.cursor >= n {
+			m.cursor = max(0, n-1)
+		}
+		return m, waitForUpdate(msg.gen, m.searchCh)
+
+	case searchClosedMsg:
+		if msg.gen != m.searchGen {
+			return m, nil
+		}
+		m.searching = false
+		if len(m.results) == 0 {
+			if m.sourcesTotal > 0 && m.searchErrCount >= m.sourcesTotal {
+				m.setError("Search failed.")
+			} else {
 				m.setNotice("No results.")
 			}
 		}
@@ -260,6 +363,29 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSettingEdit(msg)
 	}
 
+	if m.showDetail {
+		switch msg.String() {
+		case "esc":
+			m.showDetail = false
+		case "d":
+			m.showDetail = false
+			return m, addCmd(m.eng, m.detail)
+		case "y":
+			if err := copyToClipboard(m.detail.Magnet); err != nil {
+				m.setError("Copy failed: " + err.Error())
+			} else {
+				m.setNotice("Magnet copied.")
+			}
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	if m.sortMode {
+		return m.handleSortKey(msg)
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -298,6 +424,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "S":
+		if m.section == sectionSearch {
+			m.sortMode = true
+			m.sortField = sortableCols[m.sortCol]
+			applySort(m.results, m.sortField, m.sortDesc)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleSortKey handles input while the sort-mode overlay is active: arrows
+// pick the column (left/right) and direction (up=asc, down=desc); esc/enter/S
+// exit back to normal navigation.
+func (m Model) handleSortKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "S", "esc", "enter":
+		m.sortMode = false
+	case "left", "h":
+		if m.sortCol > 0 {
+			m.sortCol--
+		}
+		m.sortField = sortableCols[m.sortCol]
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "right", "l":
+		if m.sortCol < len(sortableCols)-1 {
+			m.sortCol++
+		}
+		m.sortField = sortableCols[m.sortCol]
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "up", "k":
+		m.sortDesc = false
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "down", "j":
+		m.sortDesc = true
+		applySort(m.results, m.sortField, m.sortDesc)
+	case "q", "ctrl+c":
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -314,10 +478,9 @@ func (m Model) handleSearchEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if mag := asMagnet(q); mag != "" {
 			return m, addMagnetCmd(m.eng, mag)
 		}
-		m.searching = true
-		m.hasSearched = true
 		m.section = sectionSearch
-		return m, searchCmd(m.src, q)
+		cmd := m.startSearch(q)
+		return m, cmd
 	case "esc":
 		m.editing = false
 		m.input.Blur()
@@ -408,8 +571,10 @@ func (m *Model) activate() tea.Cmd {
 	case sectionSearch:
 		fr := m.filteredResults()
 		if len(fr) > 0 && m.cursor < len(fr) {
-			return addCmd(m.eng, fr[m.cursor])
+			m.showDetail = true
+			m.detail = fr[m.cursor]
 		}
+		return nil
 	case sectionSettings:
 		items := settingItems()
 		if m.setCursor < 0 || m.setCursor >= len(items) {

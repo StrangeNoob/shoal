@@ -73,17 +73,21 @@ func (p *PirateBay) Search(ctx context.Context, query string) ([]Result, error) 
 		}
 		seeders, _ := strconv.ParseInt(item.Seeders, 10, 64)
 		size, _ := strconv.ParseInt(item.Size, 10, 64)
+		leechers, _ := strconv.ParseInt(item.Leechers, 10, 64)
+		files, _ := strconv.Atoi(item.NumFiles)
+		added, _ := strconv.ParseInt(item.Added, 10, 64)
 		out = append(out, Result{
 			Title:      name,
 			Source:     p.Label,
 			SizeBytes:  size,
 			Popularity: seeders,
+			Seeders:    seeders,
+			Leechers:   leechers,
+			Files:      files,
+			Added:      added,
 			Category:   p.Category,
 			Magnet:     buildMagnet(infoHash, name),
 		})
-		_ = item.Leechers
-		_ = item.NumFiles
-		_ = item.Added
 	}
 	return out, nil
 }

@@ -62,11 +62,12 @@ func (e *EZTV) Search(ctx context.Context, query string) ([]Result, error) {
 			Source:     "EZTV",
 			SizeBytes:  size,
 			Popularity: tor.Seeds,
+			Seeders:    tor.Seeds,
+			Leechers:   tor.Peers,
+			Added:      tor.ReleasedAt,
 			Category:   "tv",
 			Magnet:     magnet,
 		})
-		_ = tor.Peers
-		_ = tor.ReleasedAt
 	}
 	return out, nil
 }

@@ -74,11 +74,12 @@ func (y *YTS) Search(ctx context.Context, query string) ([]Result, error) {
 				Source:     "YTS",
 				SizeBytes:  tor.SizeBytes,
 				Popularity: tor.Seeds,
+				Seeders:    tor.Seeds,
+				Leechers:   tor.Peers,
+				Added:      movie.Uploaded,
 				Category:   "movies",
 				Magnet:     buildMagnet(infoHash, name),
 			})
-			_ = movie.Uploaded
-			_ = tor.Peers
 		}
 	}
 	return out, nil

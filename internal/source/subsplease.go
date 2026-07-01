@@ -68,10 +68,10 @@ func (s *SubsPlease) Search(ctx context.Context, query string) ([]Result, error)
 			Title:     name,
 			Source:    "SubsPlease",
 			SizeBytes: magnetXL(parsed.Magnet),
+			Added:     parseTimeUnix(entry.ReleaseDate),
 			Category:  "anime",
 			Magnet:    parsed.Magnet,
 		})
-		_ = parseTimeUnix(entry.ReleaseDate)
 	}
 	return out, nil
 }
