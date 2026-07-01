@@ -69,3 +69,47 @@ func TestMultiEmpty(t *testing.T) {
 		t.Errorf("empty MultiSource: got %v err %v, want empty/nil", got, err)
 	}
 }
+
+func TestSearchStreamEmitsPerSourceAndCloses(t *testing.T) {
+	ok1 := stubSource{name: "A", results: []Result{{Title: "a1", Popularity: 5}}}
+	ok2 := stubSource{name: "B", results: []Result{{Title: "b1", Popularity: 9}}}
+	bad := stubSource{name: "C", err: errors.New("boom")}
+	m := NewMulti(ok1, ok2, bad)
+
+	ch := make(chan SourceUpdate)
+	go m.SearchStream(context.Background(), "q", ch)
+
+	var updates []SourceUpdate
+	for up := range ch {
+		updates = append(updates, up)
+	}
+	if len(updates) != 3 {
+		t.Fatalf("updates = %d, want 3", len(updates))
+	}
+	titles := map[string]bool{}
+	sawErr := false
+	maxDone := 0
+	for _, up := range updates {
+		if up.Total != 3 {
+			t.Fatalf("Total = %d, want 3", up.Total)
+		}
+		if up.Done > maxDone {
+			maxDone = up.Done
+		}
+		if up.Err != nil {
+			sawErr = true
+		}
+		for _, r := range up.Results {
+			titles[r.Title] = true
+		}
+	}
+	if maxDone != 3 {
+		t.Fatalf("max Done = %d, want 3", maxDone)
+	}
+	if !sawErr {
+		t.Fatalf("expected the failing source to report Err")
+	}
+	if !titles["a1"] || !titles["b1"] {
+		t.Fatalf("merged titles = %v, want a1 and b1", titles)
+	}
+}
