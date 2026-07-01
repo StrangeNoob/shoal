@@ -21,29 +21,11 @@ func (m Model) View() string {
 
 	header := m.renderHeader()
 	rule := st.Rule.Render(strings.Repeat("─", max(1, m.width)))
-	bodyH := max(3, m.height-4)
+	bodyH := max(3, m.height-m.headerHeight()-3) // header (up to 6 rows) + 2 rules + footer
 	body := m.renderBody(bodyH)
 	footer := m.renderFooter()
 
 	return strings.Join([]string{header, rule, body, rule, footer}, "\n")
-}
-
-func (m Model) renderHeader() string {
-	left := st.Logo.Render(glyphMark+" shoal") + "  " + st.Tag.Render("torrents, calmly, from your terminal")
-	right := ""
-	if m.notice != "" {
-		glyph, style := glyphDone, st.Notice
-		if m.noticeErr {
-			glyph, style = glyphErr, st.Bad // errors get a distinct treatment
-		}
-		right = style.Render(glyph + " " + truncate(m.notice, max(10, m.width/2)))
-	}
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
-		left = truncate(glyphMark+" shoal", m.width)
-	}
-	return left + strings.Repeat(" ", gap) + right
 }
 
 func (m Model) renderBody(h int) string {

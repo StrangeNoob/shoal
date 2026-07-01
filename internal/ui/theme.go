@@ -98,7 +98,7 @@ type Styles struct {
 	SectionHead                             lipgloss.Style
 	SetLabel, SetLabelSel, SetVal, SetValOn lipgloss.Style
 	Good, Bad, Notice                       lipgloss.Style
-	Accent, Faint                           lipgloss.Style
+	Accent, Faint, Dim                      lipgloss.Style
 	Footer, Key, KeyDesc, FooterSep         lipgloss.Style
 }
 
@@ -127,6 +127,7 @@ func newStyles(p Palette) Styles {
 		Notice:       s().Foreground(p.Good),
 		Accent:       s().Foreground(p.Accent),
 		Faint:        s().Foreground(p.Faint),
+		Dim:          s().Foreground(p.Dim),
 		Footer:       s().Foreground(p.Dim),
 		Key:          s().Foreground(p.Accent).Bold(true),
 		KeyDesc:      s().Foreground(p.Faint),
