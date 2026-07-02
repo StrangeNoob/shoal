@@ -777,12 +777,17 @@ func TestUpdateNoticeAndAutoUpdateGate(t *testing.T) {
 		t.Fatalf("header should advertise the available update:\n%s", mm.View())
 	}
 
-	// With AutoUpdate on, a newer version returns an auto-update command.
+	// With AutoUpdate on, a newer version returns an auto-update command and
+	// must NOT also show the "run 'shoal update'" indicator (spec §5: the
+	// indicator is only for when auto-update is not already handling it).
 	a := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.2.0")
 	a.cfg.AutoUpdate = true
-	_, cmd = update(a, updateCheckMsg{latest: "0.3.0", newer: true})
+	a2, cmd := update(a, updateCheckMsg{latest: "0.3.0", newer: true})
 	if cmd == nil {
 		t.Fatal("with AutoUpdate on, a newer version should return an update command")
+	}
+	if a2.updateAvail != "" {
+		t.Fatalf("with AutoUpdate on, updateAvail should stay empty, got %q", a2.updateAvail)
 	}
 
 	// Not newer → nothing.
@@ -790,6 +795,26 @@ func TestUpdateNoticeAndAutoUpdateGate(t *testing.T) {
 	n2, cmd := update(n, updateCheckMsg{latest: "0.3.0", newer: false})
 	if n2.updateAvail != "" || cmd != nil {
 		t.Fatal("a not-newer check should do nothing")
+	}
+}
+
+func TestSelfUpdatedMsgOnlyNoticesWhenApplied(t *testing.T) {
+	// upToDate: the auto-update ran but there was nothing to apply — this must
+	// be a no-op, not a false "installed" toast.
+	m := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.2.0")
+	m.updateAvail = "0.3.0"
+	m2, _ := update(m, selfUpdatedMsg{version: "0.3.0", upToDate: true})
+	if m2.notice != "" {
+		t.Fatalf("upToDate selfUpdatedMsg should not set a notice, got %q", m2.notice)
+	}
+
+	// Actually applied: the "installed" notice fires and updateAvail clears.
+	m3, _ := update(m, selfUpdatedMsg{version: "0.3.0", upToDate: false})
+	if m3.notice == "" {
+		t.Fatal("an applied selfUpdatedMsg should set an 'installed' notice")
+	}
+	if m3.updateAvail != "" {
+		t.Fatal("an applied selfUpdatedMsg should clear updateAvail")
 	}
 }
 

@@ -79,6 +79,10 @@ func CheckLatest(ctx context.Context) (Release, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound) &&
+			os.Getenv("GITHUB_TOKEN") == "" && os.Getenv("GH_TOKEN") == "" {
+			return Release{}, fmt.Errorf("github releases API: %s (set GITHUB_TOKEN if the repo is private)", resp.Status)
+		}
 		return Release{}, fmt.Errorf("github releases API: %s", resp.Status)
 	}
 	var p struct {

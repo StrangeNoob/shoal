@@ -36,6 +36,30 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
+func TestCheckLatestPrivateRepoHintsAtToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/StrangeNoob/shoal/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	oldBase := apiBase
+	apiBase = srv.URL
+	t.Cleanup(func() { apiBase = oldBase })
+
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	_, err := CheckLatest(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for a 404 response")
+	}
+	if !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("error = %q, want it to hint at GITHUB_TOKEN", err.Error())
+	}
+}
+
 func TestMatchAsset(t *testing.T) {
 	names := []string{"checksums.txt", "shoal_0.3.0_linux_amd64.tar.gz", "shoal_0.3.0_darwin_arm64.tar.gz", "shoal_0.3.0_windows_amd64.zip"}
 	if got, ok := matchAsset(names, "darwin", "arm64"); !ok || got != "shoal_0.3.0_darwin_arm64.tar.gz" {

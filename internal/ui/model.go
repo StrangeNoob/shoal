@@ -208,12 +208,10 @@ type updateCheckMsg struct {
 }
 
 type selfUpdatedMsg struct {
-	version string
-	err     error
+	version  string
+	upToDate bool
+	err      error
 }
-
-// updateNewer is a file-local alias for update.Newer (brevity in Update()).
-var updateNewer = upd.Newer
 
 func checkUpdateCmd(current string) tea.Cmd {
 	return func() tea.Msg {
@@ -223,7 +221,7 @@ func checkUpdateCmd(current string) tea.Cmd {
 		if err != nil {
 			return updateCheckMsg{} // silent on failure
 		}
-		return updateCheckMsg{latest: rel.Version, newer: updateNewer(current, rel.Version)}
+		return updateCheckMsg{latest: rel.Version, newer: upd.Newer(current, rel.Version)}
 	}
 }
 
@@ -231,8 +229,8 @@ func autoUpdateCmd(current string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		to, _, err := upd.Apply(ctx, current, nil)
-		return selfUpdatedMsg{version: to, err: err}
+		to, up, err := upd.Apply(ctx, current, nil)
+		return selfUpdatedMsg{version: to, upToDate: up, err: err}
 	}
 }
 
@@ -475,15 +473,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateCheckMsg:
 		if msg.newer {
-			m.updateAvail = msg.latest
 			if m.cfg.AutoUpdate {
 				return m, autoUpdateCmd(m.version)
 			}
+			m.updateAvail = msg.latest
 		}
 		return m, nil
 
 	case selfUpdatedMsg:
-		if msg.err == nil && msg.version != "" {
+		if msg.err == nil && !msg.upToDate && msg.version != "" {
 			m.updateAvail = ""
 			m.setNotice("↑ v" + msg.version + " installed — restart shoal")
 		}
