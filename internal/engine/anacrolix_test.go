@@ -342,6 +342,65 @@ func TestRemoveUnderDirContainment(t *testing.T) {
 	}
 }
 
+// A partly-downloaded file must keep its verified pieces across a restart.
+// Regression test for the anacrolix part-file default, which re-derives piece
+// completion from whole-file rename status on every open and wipes per-piece
+// progress for any still-incomplete file.
+func TestPartialProgressSurvivesRestart(t *testing.T) {
+	const pieceLen = 16384
+	dir := t.TempDir()
+	qpath := filepath.Join(dir, "queue.json")
+	content := bytes.Repeat([]byte("shoal"), 8000) // 40000 bytes = 2 whole pieces + a partial
+	data := buildTorrentBytes(t, content)          // single-file torrent named "blob.bin"
+
+	// Simulate a partial download: the first two whole pieces present on disk at
+	// the final path, the rest missing.
+	want := int64(2 * pieceLen)
+	if err := os.WriteFile(filepath.Join(dir, "blob.bin"), content[:want], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer srv.Close()
+
+	completedIs := func(eng *Anacrolix, n int64) bool {
+		s := eng.Statuses()
+		return len(s) == 1 && s[0].CompletedBytes == n
+	}
+	waitCompleted := func(eng *Anacrolix, n int64) bool {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if completedIs(eng, n) {
+				return true
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return false
+	}
+
+	eng1, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	if err := eng1.AddTorrentURL(srv.URL, "blob"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	if !waitCompleted(eng1, want) { // initial piece check verifies the 2 on-disk pieces
+		t.Fatalf("session 1: CompletedBytes = %d, want %d", eng1.Statuses()[0].CompletedBytes, want)
+	}
+	eng1.Close()
+
+	eng2, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	defer eng2.Close()
+	if !waitCompleted(eng2, want) {
+		t.Fatalf("after restart CompletedBytes = %d, want %d — progress reset!", eng2.Statuses()[0].CompletedBytes, want)
+	}
+}
+
 func TestVerifiedBytes(t *testing.T) {
 	cases := []struct {
 		complete        int

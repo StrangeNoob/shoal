@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 
 	"github.com/StrangeNoob/shoal/internal/queue"
 )
@@ -53,6 +55,17 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = c.DataDir
 	cfg.Seed = c.Seed
+
+	// Disable part files. anacrolix's default part-file storage re-derives piece
+	// completion from whether each file is fully renamed to its final name on
+	// every open, which wipes per-piece progress for any still-incomplete file on
+	// restart — a paused, partly-downloaded torrent would resume from 0. With part
+	// files off, the persistent piece-completion DB stays authoritative and
+	// piece-level progress survives a restart.
+	cfg.DefaultStorage = storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir: c.DataDir,
+		UsePartFiles:  g.Some(false),
+	})
 
 	// Verified against anacrolix/torrent v1.61.0: SetListenAddr and
 	// EstablishedConnsPerTorrent both exist on ClientConfig.
