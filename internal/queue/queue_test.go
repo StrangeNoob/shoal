@@ -50,6 +50,19 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestSetName(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa", Name: ""})
+	s.SetName("aaa", "Cool Movie")
+	if got := LoadFrom(s.Path).Entries[0].Name; got != "Cool Movie" {
+		t.Fatalf("SetName not persisted: %q", got)
+	}
+	s.SetName("nope", "x") // unknown hash is a no-op
+	if len(s.Entries) != 1 {
+		t.Fatalf("SetName on unknown hash changed the store: %+v", s.Entries)
+	}
+}
+
 func TestSetPaused(t *testing.T) {
 	s := tmpStore(t)
 	s.Upsert(Entry{InfoHash: "aaa"})

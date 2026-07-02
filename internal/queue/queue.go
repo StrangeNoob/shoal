@@ -91,6 +91,20 @@ func (s *Store) SetPaused(infoHash string, paused bool) {
 	}
 }
 
+// SetName updates the display name for infoHash (if present and changed) and
+// persists — so a restored torrent shows its real name before metadata loads.
+func (s *Store) SetName(infoHash, name string) {
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			if s.Entries[i].Name != name {
+				s.Entries[i].Name = name
+				_ = s.Save()
+			}
+			return
+		}
+	}
+}
+
 // Save writes the store to Path (creating the dir). No-op when Path is empty.
 func (s *Store) Save() error {
 	if s.Path == "" {

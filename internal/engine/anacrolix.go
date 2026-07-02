@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -174,19 +175,31 @@ func (a *Anacrolix) addTorrentURL(url, name string, persist bool) error {
 }
 
 func (a *Anacrolix) AddMagnet(magnet string) error {
-	return a.addMagnet(magnet, true)
+	return a.addMagnet(magnet, "", true)
 }
 
-func (a *Anacrolix) addMagnet(magnet string, persist bool) error {
+func (a *Anacrolix) addMagnet(magnet, name string, persist bool) error {
 	t, err := a.client.AddMagnet(magnet)
 	if err != nil {
 		return err
 	}
-	a.track(t, "")
+	if name == "" {
+		name = magnetDisplayName(magnet) // show the dn until metadata arrives
+	}
+	a.track(t, name)
 	if persist {
 		a.persist(t.InfoHash(), queue.Entry{Magnet: magnet})
 	}
 	return nil
+}
+
+// magnetDisplayName returns a magnet URI's "dn" (display name), or "" if absent.
+func magnetDisplayName(magnet string) string {
+	u, err := url.Parse(magnet)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("dn")
 }
 
 // persist records an added torrent in the queue store (no-op when disabled).
@@ -214,7 +227,7 @@ func (a *Anacrolix) restore() {
 		switch {
 		case e.Magnet != "":
 			// Magnets re-add instantly (no network), so do them synchronously.
-			if err := a.addMagnet(e.Magnet, false); err == nil && e.Paused {
+			if err := a.addMagnet(e.Magnet, e.Name, false); err == nil && e.Paused {
 				_ = a.Pause(e.InfoHash)
 			}
 		case e.TorrentURL != "":
@@ -262,6 +275,11 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 		a.mu.Lock()
 		if a.names[h] == "" {
 			a.names[h] = t.Name()
+		}
+		// Persist the resolved display name so a restored torrent shows it even
+		// while paused with no peers (when metadata can't be re-fetched).
+		if a.store != nil {
+			a.store.SetName(h.HexString(), a.names[h])
 		}
 		a.mu.Unlock()
 		t.DownloadAll()

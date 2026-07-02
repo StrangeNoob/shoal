@@ -401,6 +401,37 @@ func TestPartialProgressSurvivesRestart(t *testing.T) {
 	}
 }
 
+func TestMagnetDisplayName(t *testing.T) {
+	cases := map[string]string{
+		"magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd&dn=Cool.Movie.2024": "Cool.Movie.2024",
+		"magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd&dn=Cool%20Movie":    "Cool Movie",
+		"magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd":                    "", // no dn
+		"not a magnet": "",
+	}
+	for magnet, want := range cases {
+		if got := magnetDisplayName(magnet); got != want {
+			t.Errorf("magnetDisplayName(%q) = %q, want %q", magnet, got, want)
+		}
+	}
+}
+
+// A magnet carries a display name (dn); it must show before metadata is fetched,
+// not the infohash prefix.
+func TestMagnetShowsDisplayName(t *testing.T) {
+	eng := newEngine(t)
+	magnet := "magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd&dn=Cool.Movie.2024.1080p"
+	if err := eng.AddMagnet(magnet); err != nil {
+		t.Fatalf("AddMagnet: %v", err)
+	}
+	ss := eng.Statuses()
+	if len(ss) != 1 {
+		t.Fatalf("want 1 status, got %d", len(ss))
+	}
+	if ss[0].Name != "Cool.Movie.2024.1080p" {
+		t.Errorf("Name = %q, want the magnet's dn (not the infohash prefix)", ss[0].Name)
+	}
+}
+
 func TestVerifiedBytes(t *testing.T) {
 	cases := []struct {
 		complete        int
