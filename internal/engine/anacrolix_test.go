@@ -11,6 +11,8 @@ import (
 
 	atbencode "github.com/anacrolix/torrent/bencode"
 	atmetainfo "github.com/anacrolix/torrent/metainfo"
+
+	"github.com/StrangeNoob/shoal/internal/queue"
 )
 
 // buildTorrentBytes builds a real, self-contained .torrent (no trackers) for a
@@ -198,6 +200,98 @@ func TestAnacrolixRemoveDropsTorrent(t *testing.T) {
 	// removing an unknown hash is a no-op
 	if err := eng.Remove("deadbeef", false); err != nil {
 		t.Fatalf("Remove(unknown) = %v, want nil", err)
+	}
+}
+
+func TestAnacrolixPauseResume(t *testing.T) {
+	eng := newEngine(t)
+	defer eng.Close()
+
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer srv.Close()
+
+	if err := eng.AddTorrentURL(srv.URL, "pause-test"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	ss := eng.Statuses()
+	if len(ss) != 1 {
+		t.Fatalf("want 1 status, got %d", len(ss))
+	}
+	h := ss[0].InfoHash
+	if ss[0].Paused {
+		t.Fatal("a new torrent should not be paused")
+	}
+
+	if err := eng.Pause(h); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if !eng.Statuses()[0].Paused {
+		t.Fatal("Pause did not set Status.Paused")
+	}
+
+	if err := eng.Resume(h); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if eng.Statuses()[0].Paused {
+		t.Fatal("Resume did not clear Status.Paused")
+	}
+
+	if err := eng.Pause("deadbeef00000000000000000000000000000000"); err != nil {
+		t.Fatalf("Pause of unknown hash should be nil, got %v", err)
+	}
+}
+
+func TestAnacrolixPersistsAndRestores(t *testing.T) {
+	dir := t.TempDir()
+	qpath := filepath.Join(dir, "queue.json")
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer srv.Close()
+
+	eng1, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	if err := eng1.AddTorrentURL(srv.URL, "persist-test"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	h := eng1.Statuses()[0].InfoHash
+	if err := eng1.Pause(h); err != nil {
+		t.Fatal(err)
+	}
+	eng1.Close()
+
+	// queue.json now has one paused entry pointing at the URL.
+	st := queue.LoadFrom(qpath)
+	if len(st.Entries) != 1 || !st.Entries[0].Paused || st.Entries[0].TorrentURL != srv.URL {
+		t.Fatalf("queue not persisted: %+v", st.Entries)
+	}
+
+	// A fresh engine on the same QueuePath restores it, still paused.
+	eng2, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	defer eng2.Close()
+	ss := eng2.Statuses()
+	if len(ss) != 1 {
+		t.Fatalf("restore: want 1 torrent, got %d", len(ss))
+	}
+	if !ss[0].Paused {
+		t.Fatal("restored torrent should be paused")
+	}
+
+	// Remove drops it from the store.
+	if err := eng2.Remove(ss[0].InfoHash, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.LoadFrom(qpath).Entries) != 0 {
+		t.Fatalf("Remove did not drop the queue entry: %+v", queue.LoadFrom(qpath).Entries)
 	}
 }
 

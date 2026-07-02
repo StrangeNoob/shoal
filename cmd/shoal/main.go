@@ -15,6 +15,7 @@ import (
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
+	"github.com/StrangeNoob/shoal/internal/queue"
 	"github.com/StrangeNoob/shoal/internal/source"
 	"github.com/StrangeNoob/shoal/internal/ui"
 	"github.com/StrangeNoob/shoal/internal/update"
@@ -86,6 +87,7 @@ func main() {
 		MaxPeers:   cfg.MaxPeers,
 		Seed:       cfg.Seed,
 		SeedRatio:  cfg.SeedRatio,
+		QueuePath:  queue.DefaultPath(),
 	})
 	if err != nil {
 		fatal(fmt.Errorf("starting torrent engine: %w", err))

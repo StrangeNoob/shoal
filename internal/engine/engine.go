@@ -16,6 +16,7 @@ type Status struct {
 	Uploaded int64
 	Peers    int
 	Done     bool
+	Paused   bool
 	AddedAt  time.Time
 }
 
@@ -47,6 +48,7 @@ type Config struct {
 	MaxPeers   int     // max established connections per torrent (0 = default)
 	Seed       bool    // keep seeding finished torrents
 	SeedRatio  float64 // stop seeding a torrent once uploaded/size reaches this (0 = seed forever)
+	QueuePath  string  // where to persist the set of added torrents ("" = disabled)
 }
 
 // Engine adds torrents and reports their live status.
@@ -62,6 +64,11 @@ type Engine interface {
 	// deleteData is true, its downloaded file/dir under the data dir is also
 	// removed. An unknown hash is a no-op (nil error).
 	Remove(infoHash string, deleteData bool) error
+	// Pause halts the torrent with the given hex infohash (stops downloading
+	// and uploading). An unknown hash is a no-op (nil error).
+	Pause(infoHash string) error
+	// Resume restarts a paused torrent. An unknown hash is a no-op (nil error).
+	Resume(infoHash string) error
 	// Close tears the engine down.
 	Close() error
 }

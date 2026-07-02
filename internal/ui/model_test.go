@@ -36,6 +36,8 @@ type fakeEngine struct {
 	removedHash   string
 	removedDelete bool
 	removeErr     error
+
+	paused map[string]bool
 }
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
@@ -51,6 +53,20 @@ func (e *fakeEngine) Remove(infoHash string, deleteData bool) error {
 	e.removedHash = infoHash
 	e.removedDelete = deleteData
 	return e.removeErr
+}
+func (e *fakeEngine) Pause(infoHash string) error {
+	if e.paused == nil {
+		e.paused = map[string]bool{}
+	}
+	e.paused[infoHash] = true
+	return nil
+}
+func (e *fakeEngine) Resume(infoHash string) error {
+	if e.paused == nil {
+		e.paused = map[string]bool{}
+	}
+	e.paused[infoHash] = false
+	return nil
 }
 func (e *fakeEngine) Close() error { return nil }
 
@@ -493,6 +509,55 @@ func TestCancelConfirmClearsWhenTargetCompletes(t *testing.T) {
 	m, _ = update(m, tickMsg(time.Now().Add(time.Second)))
 	if m.cancelConfirm {
 		t.Fatal("cancel confirm should clear once the target is no longer downloading")
+	}
+}
+
+func TestPauseKeyPausesSelectedDownload(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "dl", InfoHash: "aaa", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m, _ = update(m, tickMsg(time.Now())) // load statuses
+	m.editing = false
+	m.section = sectionDownloads
+	m.dlCursor = 0
+
+	m2, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	_ = m2
+	if cmd == nil {
+		t.Fatal("p should return a pause command")
+	}
+	cmd()
+	if !fe.paused["aaa"] {
+		t.Fatal("p should pause the selected download")
+	}
+
+	// A paused status → p resumes.
+	fe.statuses[0].Paused = true
+	m3 := ready(New(&fakeSource{}, fe))
+	m3, _ = update(m3, tickMsg(time.Now())) // load statuses
+	m3.editing = false
+	m3.section = sectionDownloads
+	m3.dlCursor = 0
+	_, cmd = update(m3, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	if cmd == nil {
+		t.Fatal("p should return a resume command")
+	}
+	cmd()
+	if fe.paused["aaa"] {
+		t.Fatal("p on a paused download should resume it")
+	}
+}
+
+func TestPausedDownloadRendersPaused(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "dl", InfoHash: "aaa", TotalBytes: 100, CompletedBytes: 10, Paused: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m, _ = update(m, tickMsg(time.Now())) // load statuses
+	m.section = sectionDownloads
+	if !strings.Contains(m.View(), "paused") {
+		t.Fatalf("a paused download should render 'paused':\n%s", m.View())
 	}
 }
 

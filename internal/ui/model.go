@@ -617,6 +617,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "p":
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				sel := ds[m.dlCursor]
+				if sel.Paused {
+					return m, func() tea.Msg { m.eng.Resume(sel.InfoHash); return nil }
+				}
+				return m, func() tea.Msg { m.eng.Pause(sel.InfoHash); return nil }
+			}
+		}
+		return m, nil
 	case "S":
 		if m.section == sectionSearch {
 			m.sortMode = true

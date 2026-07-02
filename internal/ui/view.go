@@ -337,8 +337,11 @@ func (m Model) renderDownloads(w, h int) string {
 
 		state := fmt.Sprintf("%5.1f%%", s.Percent()*100)
 		detail := fmt.Sprintf("%s / %s  ·  %d peers", formatBytes(s.CompletedBytes), sizeOrDash(s.TotalBytes), s.Peers)
-		if sp := m.dlSpeed[s.Name]; sp > 0 {
-			detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
+		switch {
+		case s.Paused:
+			detail += "  ·  ⏸ paused"
+		case m.dlSpeed[s.Name] > 0:
+			detail += fmt.Sprintf("  ·  %s/s", formatBytes(m.dlSpeed[s.Name]))
 		}
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
@@ -487,7 +490,7 @@ func (m Model) renderFooter() string {
 	case m.cancelConfirm:
 		parts = []string{hint("k", "keep files"), hint("d", "delete files"), hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("p", "pause"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "filter"),
