@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,8 +24,40 @@ import (
 	"github.com/StrangeNoob/shoal/internal/update"
 )
 
-// version is set at build time via -ldflags "-X main.version=...". "dev" locally.
+// version is set at build time via -ldflags "-X main.version=..." (GoReleaser
+// release builds). A plain `go install`/`go build` doesn't set it, so it stays
+// "dev" and resolveVersion falls back to Go's build metadata.
 var version = "dev"
+
+// pseudoVersion matches Go's local-build pseudo-versions
+// (e.g. v0.4.1-0.20260702143006-aa296a01f28f), which embed a 14-digit build
+// timestamp and a 12-char commit hash.
+var pseudoVersion = regexp.MustCompile(`\d{14}-[0-9a-f]{12}`)
+
+// pickVersion resolves the running version. A release build's ldflags value
+// wins; otherwise fall back to the module version Go records for
+// `go install pkg@vX` (a clean tag). Local builds record "(devel)", a
+// pseudo-version, or a "+dirty" marker — those resolve to "dev" so a dev build
+// never self-updates.
+func pickVersion(ldflags, buildInfo string) string {
+	if ldflags != "" && ldflags != "dev" {
+		return ldflags
+	}
+	if buildInfo != "" && buildInfo != "(devel)" &&
+		!strings.Contains(buildInfo, "+") && !pseudoVersion.MatchString(buildInfo) {
+		return buildInfo
+	}
+	return "dev"
+}
+
+// resolveVersion is pickVersion wired to the real build info.
+func resolveVersion() string {
+	var bi string
+	if info, ok := debug.ReadBuildInfo(); ok {
+		bi = info.Main.Version
+	}
+	return pickVersion(version, bi)
+}
 
 const usage = `shoal — a calm BitTorrent client for your terminal
 
@@ -71,7 +106,8 @@ func runUpdate(out io.Writer, version string) int {
 }
 
 func main() {
-	if handled, code := cli(os.Args, version, os.Stdout); handled {
+	v := resolveVersion()
+	if handled, code := cli(os.Args, v, os.Stdout); handled {
 		os.Exit(code)
 	}
 
@@ -97,7 +133,7 @@ func main() {
 	src := source.NewDefault()
 
 	p := tea.NewProgram(
-		ui.NewWithConfig(src, eng, cfg).WithHistory(history.Load()).WithVersion(version),
+		ui.NewWithConfig(src, eng, cfg).WithHistory(history.Load()).WithVersion(v),
 		tea.WithAltScreen(),       // fullscreen
 		tea.WithMouseCellMotion(), // allow scroll wheel
 	)
