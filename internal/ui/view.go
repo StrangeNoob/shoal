@@ -505,7 +505,7 @@ func (m Model) renderFooter() string {
 	case m.cancelConfirm:
 		parts = []string{hint("k", "keep files"), hint("d", "delete files"), hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("p", "pause"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "filter"),
