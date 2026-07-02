@@ -20,6 +20,7 @@ import (
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
+	upd "github.com/StrangeNoob/shoal/internal/update"
 )
 
 const sidebarWidth = 20
@@ -87,12 +88,14 @@ type Model struct {
 	sortField sortField
 	sortDesc  bool
 
-	statuses  []engine.Status
-	dlSpeed   map[string]int64 // download byte/sec per Status.Name, sampled between ticks
-	ulSpeed   map[string]int64 // upload (seeding) byte/sec per Status.Name
-	lastTick  time.Time        // timestamp of the previous tick, for the rate delta
-	history   history.Store    // completed-download record; injected via WithHistory
-	setCursor int              // index into settingItems()
+	statuses    []engine.Status
+	dlSpeed     map[string]int64 // download byte/sec per Status.Name, sampled between ticks
+	ulSpeed     map[string]int64 // upload (seeding) byte/sec per Status.Name
+	lastTick    time.Time        // timestamp of the previous tick, for the rate delta
+	history     history.Store    // completed-download record; injected via WithHistory
+	setCursor   int              // index into settingItems()
+	version     string           // build version (ldflags), "" or "dev" for local builds
+	updateAvail string           // latest version when a newer release is available
 
 	dlCursor      int // selection in the Downloads pane
 	cancelConfirm bool
@@ -154,8 +157,18 @@ func (m Model) WithHistory(h history.Store) Model {
 	return m
 }
 
+// WithVersion attaches the build version (main injects it via ldflags).
+func (m Model) WithVersion(v string) Model {
+	m.version = v
+	return m
+}
+
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.spin.Tick, tickCmd(), frameCmd())
+	cmds := []tea.Cmd{textinput.Blink, m.spin.Tick, tickCmd(), frameCmd()}
+	if m.version != "" && m.version != "dev" {
+		cmds = append(cmds, checkUpdateCmd(m.version))
+	}
+	return tea.Batch(cmds...)
 }
 
 // --- messages & commands ---------------------------------------------------
@@ -187,6 +200,38 @@ type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(700*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+type updateCheckMsg struct {
+	latest string
+	newer  bool
+}
+
+type selfUpdatedMsg struct {
+	version  string
+	upToDate bool
+	err      error
+}
+
+func checkUpdateCmd(current string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		rel, err := upd.CheckLatest(ctx)
+		if err != nil {
+			return updateCheckMsg{} // silent on failure
+		}
+		return updateCheckMsg{latest: rel.Version, newer: upd.Newer(current, rel.Version)}
+	}
+}
+
+func autoUpdateCmd(current string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		to, up, err := upd.Apply(ctx, current, nil)
+		return selfUpdatedMsg{version: to, upToDate: up, err: err}
+	}
 }
 
 const (
@@ -425,6 +470,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.noticeErr = false
 		}
 		return m, tickCmd()
+
+	case updateCheckMsg:
+		if msg.newer {
+			if m.cfg.AutoUpdate {
+				return m, autoUpdateCmd(m.version)
+			}
+			m.updateAvail = msg.latest
+		}
+		return m, nil
+
+	case selfUpdatedMsg:
+		if msg.err == nil && !msg.upToDate && msg.version != "" {
+			m.updateAvail = ""
+			m.setNotice("↑ v" + msg.version + " installed — restart shoal")
+		}
+		return m, nil
 
 	case frameMsg:
 		if !m.booting {
@@ -818,6 +879,14 @@ func settingItems() []setItem {
 					m.cfg.ListenPort = n
 				}
 			}},
+		{group: "UPDATES", label: "Auto-update", kind: kindEnum, options: []string{"off", "on"},
+			get: func(m *Model) string {
+				if m.cfg.AutoUpdate {
+					return "on"
+				}
+				return "off"
+			},
+			set: func(m *Model, v string) { m.cfg.AutoUpdate = v == "on" }},
 	}
 }
 

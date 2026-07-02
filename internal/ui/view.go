@@ -9,6 +9,7 @@ import (
 
 	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
+	upd "github.com/StrangeNoob/shoal/internal/update"
 )
 
 func (m Model) View() string {
@@ -441,7 +442,7 @@ func (m Model) renderSettings(w, h int) string {
 
 	// ABOUT is informational, not navigable.
 	b.WriteString("\n" + st.SectionHead.Render("ABOUT") + "\n")
-	b.WriteString("  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render("v0.2  ·  anacrolix engine"))
+	b.WriteString("  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"))
 	return b.String()
 }
 

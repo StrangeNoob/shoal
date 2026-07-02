@@ -26,6 +26,9 @@ type Config struct {
 	SeedRatio  float64 `json:"seed_ratio"`  // target share ratio (see HANDOFF — not yet enforced)
 	MaxPeers   int     `json:"max_peers"`   // max connections per torrent
 	ListenPort int     `json:"listen_port"` // BitTorrent listen port
+
+	// Updates
+	AutoUpdate bool `json:"auto_update"` // apply the latest release automatically on launch
 }
 
 // Default returns the built-in configuration.

@@ -87,3 +87,18 @@ func TestSaveEmptyPathIsNoOp(t *testing.T) {
 		t.Errorf("Save with empty Path should be a no-op, got %v", err)
 	}
 }
+
+func TestAutoUpdateDefaultsFalseAndRoundTrips(t *testing.T) {
+	isolate(t)
+	if Default().AutoUpdate {
+		t.Fatal("AutoUpdate should default to false (opt-in)")
+	}
+	c := Default()
+	c.AutoUpdate = true
+	if err := c.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !Load().AutoUpdate {
+		t.Fatal("AutoUpdate did not survive save/load")
+	}
+}
