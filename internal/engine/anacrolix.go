@@ -342,8 +342,10 @@ func (a *Anacrolix) Statuses() []Status {
 			Downloaded: stats.BytesReadUsefulData.Int64(),
 			Uploaded:   stats.BytesWrittenData.Int64(),
 			Peers:      stats.ActivePeers,
+			TotalPeers: stats.TotalPeers,
 			Done:       total > 0 && verified >= total,
 			Paused:     a.paused[h],
+			Seeding:    !a.paused[h] && t.Seeding(),
 			Path:       diskPath,
 			AddedAt:    a.addedAt[h],
 		})

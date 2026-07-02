@@ -494,14 +494,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
 			for _, s := range newlyCompleted(m.statuses, next) {
-				m.history.Append(history.Entry{InfoHash: s.InfoHash, Name: s.Name, Size: s.TotalBytes, CompletedAt: now})
+				m.history.Append(history.Entry{InfoHash: s.InfoHash, Name: s.Name, Size: s.TotalBytes, CompletedAt: now, Path: s.Path})
 			}
 			m.statuses = next
 			m.lastTick = now
 			if n := len(m.downloading()); m.dlCursor >= n {
 				m.dlCursor = max(0, n-1)
 			}
-			if n := len(m.seeding()); m.seedCursor >= n {
+			if n := len(m.seeding()) + len(m.seedHistory()); m.seedCursor >= n {
 				m.seedCursor = max(0, n-1)
 			}
 			// If the torrent we're asking to cancel finished (or vanished) while the
@@ -722,8 +722,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case sectionSeeding:
 			ss := m.seeding()
-			if len(ss) > 0 && m.seedCursor < len(ss) {
+			if m.seedCursor < len(ss) {
 				cmd := m.openSelected(ss[m.seedCursor])
+				return m, cmd
+			}
+			hist := m.seedHistory()
+			if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
+				cmd := m.openHistory(hist[hi])
 				return m, cmd
 			}
 		}
@@ -887,7 +892,7 @@ func (m *Model) moveDown() {
 			m.dlCursor++
 		}
 	case sectionSeeding:
-		if m.seedCursor < len(m.seeding())-1 {
+		if m.seedCursor < len(m.seeding())+len(m.seedHistory())-1 {
 			m.seedCursor++
 		}
 	}
@@ -1093,6 +1098,35 @@ func (m Model) seeding() []engine.Status {
 		}
 	}
 	return out
+}
+
+// seedHistory returns finished torrents from history that aren't currently
+// active seeders — the Seeding pane's HISTORY section, selectable for opening.
+func (m Model) seedHistory() []history.Entry {
+	active := make(map[string]bool, len(m.statuses))
+	for _, s := range m.seeding() {
+		active[s.InfoHash] = true
+	}
+	var hist []history.Entry
+	for _, e := range m.history.Entries {
+		if !active[e.InfoHash] {
+			hist = append(hist, e)
+		}
+	}
+	return hist
+}
+
+// openHistory opens a finished download's folder, preferring the live torrent's
+// path (still loaded) over the path stored in history.
+func (m *Model) openHistory(e history.Entry) tea.Cmd {
+	path := e.Path
+	for _, s := range m.statuses {
+		if s.InfoHash == e.InfoHash && s.Path != "" {
+			path = s.Path
+			break
+		}
+	}
+	return m.openSelected(engine.Status{Path: path})
 }
 
 // mainWidth is the width of the content pane (everything right of the sidebar).

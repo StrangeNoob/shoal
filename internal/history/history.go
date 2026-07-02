@@ -15,6 +15,9 @@ type Entry struct {
 	Name        string    `json:"name"`
 	Size        int64     `json:"size"`
 	CompletedAt time.Time `json:"completed_at"`
+	// Path is the on-disk top-level location, captured at completion so the
+	// Seeding pane can open a finished download's folder later.
+	Path string `json:"path,omitempty"`
 }
 
 // Store is the persisted history. Path is where it loads/saves; an empty Path

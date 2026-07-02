@@ -22,8 +22,15 @@ type Status struct {
 	// show an upload total and a ratio. Zero when unknown.
 	Uploaded int64
 	Peers    int
-	Done     bool
-	Paused   bool
+	// TotalPeers is all peers discovered via announce (trackers/DHT), including
+	// those not currently connected — nonzero proves announce is working even
+	// when Peers (active downloaders) is 0.
+	TotalPeers int
+	Done       bool
+	Paused     bool
+	// Seeding reports whether the client is actively seeding this torrent
+	// (Seed enabled, upload allowed, not paused) — independent of peer count.
+	Seeding bool
 	// Path is the torrent's top-level on-disk location (<data dir>/<name>), or
 	// "" before metadata is known. Used by the UI to open the download folder.
 	Path    string

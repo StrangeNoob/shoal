@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
@@ -1033,5 +1034,68 @@ func TestOpenFolderNotices(t *testing.T) {
 	_, cmd := update(m, key("o"))
 	if cmd == nil {
 		t.Error("o on an existing folder should return an open command")
+	}
+}
+
+func TestTickRecordsHistoryPath(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 0, Path: "/save/Movie"}}}
+	m := ready(New(&fakeSource{}, eng))
+	t0 := time.Unix(1_000_000, 0)
+	m, _ = update(m, tickMsg(t0))
+	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true, Path: "/save/Movie"}}
+	m, _ = update(m, tickMsg(t0.Add(time.Second)))
+	if len(m.history.Entries) != 1 || m.history.Entries[0].Path != "/save/Movie" {
+		t.Fatalf("history entry should record the on-disk Path, got %+v", m.history.Entries)
+	}
+}
+
+func TestOpenHistoryFolder(t *testing.T) {
+	dir := t.TempDir() // exists → openable
+	fe := &fakeEngine{statuses: []engine.Status{}}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionSeeding
+
+	// One finished item in history with a stored Path; no active seeders, so the
+	// cursor (0) selects the history row.
+	m.history.Entries = []history.Entry{{InfoHash: "h1", Name: "Old Movie", Path: dir}}
+	_, cmd := update(m, key("o"))
+	if cmd == nil {
+		t.Fatal("o on a history entry with a valid Path should open its folder")
+	}
+
+	// A history item whose folder is gone → 'deleted' notice.
+	m.history.Entries = []history.Entry{{InfoHash: "h2", Name: "Gone", Path: filepath.Join(dir, "missing")}}
+	m2, _ := update(m, key("o"))
+	if !strings.Contains(m2.notice, "deleted") {
+		t.Errorf("o on a missing history path should notice 'deleted', got %q", m2.notice)
+	}
+
+	// A still-loaded torrent's live Path wins over the stored one.
+	fe.statuses = []engine.Status{{InfoHash: "h3", Name: "Loaded", Path: dir, Done: false}}
+	m.statuses = fe.statuses
+	m.history.Entries = []history.Entry{{InfoHash: "h3", Name: "Loaded", Path: "/stale/gone"}}
+	_, cmd = update(m, key("o"))
+	if cmd == nil {
+		t.Fatal("o should resolve a loaded torrent's live Path and open it")
+	}
+}
+
+func TestSeedCursorSpansHistory(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "Seeder", InfoHash: "s1", TotalBytes: 100, CompletedBytes: 100, Done: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.history.Entries = []history.Entry{{InfoHash: "h1", Name: "Old"}}
+	m.section = sectionSeeding
+	// 1 active seeder + 1 history = 2 selectable; down should reach index 1
+	m, _ = update(m, key("down"))
+	if m.seedCursor != 1 {
+		t.Fatalf("seedCursor should span history (want 1), got %d", m.seedCursor)
+	}
+	// can't go past the last selectable item
+	m, _ = update(m, key("down"))
+	if m.seedCursor != 1 {
+		t.Fatalf("seedCursor should clamp at the last item, got %d", m.seedCursor)
 	}
 }
