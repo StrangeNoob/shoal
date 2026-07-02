@@ -132,14 +132,38 @@ func TestNewModelDefaults(t *testing.T) {
 	if m.section != sectionSearch {
 		t.Error("default section is not Search")
 	}
-	if !m.editing {
-		t.Error("model should start in editing mode")
+	if m.editing {
+		t.Error("model should start navigable (not editing) so keys move between panes instead of typing into search")
 	}
 	if m.cfg.Theme != "Twilight" {
 		t.Errorf("default theme = %q, want Twilight", m.cfg.Theme)
 	}
 	if !strings.Contains(m.View(), "starting shoal") {
 		t.Errorf("pre-ready View = %q, want starting message", m.View())
+	}
+}
+
+// The home screen must be usable immediately: keys navigate between panes, the
+// footer shows the full option set, and search is opt-in via "/". Regression
+// test for the "trapped in the search box on launch" bug.
+func TestFreshHomeScreenIsNavigable(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	if m.editing {
+		t.Fatal("fresh model must not be in editing mode (keys have to navigate, not type)")
+	}
+	// tab moves to Downloads without first touching search
+	m2, _ := update(m, key("tab"))
+	if m2.section != sectionDownloads {
+		t.Errorf("tab from home should switch to Downloads, got section %v", m2.section)
+	}
+	// the footer advertises navigation, not just enter/esc
+	if !strings.Contains(m.View(), "panes") {
+		t.Errorf("home footer should show all options incl. 'tab panes':\n%s", m.View())
+	}
+	// "/" focuses the search box on demand
+	m3, _ := update(m, key("/"))
+	if !m3.editing {
+		t.Error(`"/" should enter search-editing mode`)
 	}
 }
 
@@ -198,6 +222,7 @@ func TestHomeShownBeforeFirstSearch(t *testing.T) {
 func TestSearchFlowPopulatesResults(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "A"}, {Title: "B"}}}
 	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/")) // focus the search box (opt-in)
 	m.input.SetValue("linux")
 
 	m, cmd := update(m, key("enter"))
@@ -227,6 +252,7 @@ func TestSearchFlowPopulatesResults(t *testing.T) {
 
 func TestSearchErrorSetsNotice(t *testing.T) {
 	m := ready(New(&fakeSource{err: errors.New("boom")}, &fakeEngine{}))
+	m, _ = update(m, key("/"))
 	m.input.SetValue("q")
 	m, cmd := update(m, key("enter"))
 	m, _ = update(m, cmd())
@@ -243,6 +269,7 @@ func TestSearchErrorSetsNotice(t *testing.T) {
 
 func TestSearchEmptyResultsNotice(t *testing.T) {
 	m := ready(New(&fakeSource{results: nil}, &fakeEngine{}))
+	m, _ = update(m, key("/"))
 	m.input.SetValue("q")
 	m, cmd := update(m, key("enter"))
 	m, _ = update(m, cmd())
@@ -257,6 +284,7 @@ func TestSearchEmptyResultsNotice(t *testing.T) {
 func TestMagnetEnterAddsDirectly(t *testing.T) {
 	eng := &fakeEngine{}
 	m := ready(New(&fakeSource{}, eng))
+	m, _ = update(m, key("/"))
 	const magnet = "magnet:?xt=urn:btih:deadbeef"
 	m.input.SetValue(magnet)
 
@@ -284,6 +312,7 @@ func TestNavigationAndDownloadSelection(t *testing.T) {
 		{Title: "B", TorrentURL: "u2"},
 	}}
 	m := ready(New(src, eng))
+	m, _ = update(m, key("/"))
 	m.input.SetValue("q")
 	m, cmd := update(m, key("enter"))
 	m, _ = update(m, cmd()) // populate results, leaves editing mode
@@ -313,6 +342,7 @@ func TestFilterNarrowsResults(t *testing.T) {
 		{Title: "A Song", Category: "audio"},
 	}}
 	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
 	m.input.SetValue("q")
 	m, cmd := update(m, key("enter"))
 	m, _ = update(m, cmd())

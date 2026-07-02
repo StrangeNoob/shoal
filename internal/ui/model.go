@@ -122,7 +122,8 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	ti.Placeholder = "Search the Internet Archive…"
 	ti.Prompt = ""
 	ti.CharLimit = 120
-	ti.Focus()
+	// Not focused on launch: the home screen must be navigable (tab/arrows/q
+	// work immediately); "/" focuses the search box when the user wants it.
 
 	si := textinput.New()
 	si.Prompt = ""
@@ -137,7 +138,7 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 
 	return Model{
 		section:  sectionSearch,
-		editing:  true,
+		editing:  false,
 		input:    ti,
 		setInput: si,
 		spin:     sp,
