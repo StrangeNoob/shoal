@@ -761,3 +761,57 @@ func TestTickComputesTransferSpeeds(t *testing.T) {
 		t.Fatalf("ulSpeed[A] = %d, want %d (2 MiB/s)", got, 2*1024*1024)
 	}
 }
+
+func TestUpdateNoticeAndAutoUpdateGate(t *testing.T) {
+	// A newer version sets the header notice.
+	m := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.2.0")
+	m2, cmd := update(m, updateCheckMsg{latest: "0.3.0", newer: true})
+	mm := m2
+	if mm.updateAvail != "0.3.0" {
+		t.Fatalf("updateAvail = %q, want 0.3.0", mm.updateAvail)
+	}
+	if cmd != nil { // auto-update off by default → no follow-up command
+		t.Fatal("with AutoUpdate off, updateCheckMsg should not trigger an update command")
+	}
+	if !strings.Contains(mm.View(), "0.3.0") {
+		t.Fatalf("header should advertise the available update:\n%s", mm.View())
+	}
+
+	// With AutoUpdate on, a newer version returns an auto-update command.
+	a := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.2.0")
+	a.cfg.AutoUpdate = true
+	_, cmd = update(a, updateCheckMsg{latest: "0.3.0", newer: true})
+	if cmd == nil {
+		t.Fatal("with AutoUpdate on, a newer version should return an update command")
+	}
+
+	// Not newer → nothing.
+	n := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.3.0")
+	n2, cmd := update(n, updateCheckMsg{latest: "0.3.0", newer: false})
+	if n2.updateAvail != "" || cmd != nil {
+		t.Fatal("a not-newer check should do nothing")
+	}
+}
+
+func TestAutoUpdateSettingTogglesConfig(t *testing.T) {
+	var found *setItem
+	for i := range settingItems() {
+		if settingItems()[i].label == "Auto-update" {
+			it := settingItems()[i]
+			found = &it
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("Settings should include an 'Auto-update' item")
+	}
+	m := New(&fakeSource{}, &fakeEngine{})
+	found.set(&m, "on")
+	if !m.cfg.AutoUpdate {
+		t.Fatal("setting Auto-update to 'on' should enable cfg.AutoUpdate")
+	}
+	found.set(&m, "off")
+	if m.cfg.AutoUpdate {
+		t.Fatal("setting Auto-update to 'off' should disable cfg.AutoUpdate")
+	}
+}

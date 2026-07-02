@@ -195,8 +195,11 @@ func (m Model) renderHeader() string {
 		}
 		lines = append(lines, row)
 	}
-	lines = append(lines, strings.Repeat(" ", 2+headerIconWidth+4)+
-		st.Tag.Render("torrents, calmly, from your terminal"))
+	tagline := st.Tag.Render("torrents, calmly, from your terminal")
+	if m.updateAvail != "" {
+		tagline += "   " + st.Faint.Render("· ↑ v"+m.updateAvail+" available, run 'shoal update'")
+	}
+	lines = append(lines, strings.Repeat(" ", 2+headerIconWidth+4)+tagline)
 	return strings.Join(lines, "\n")
 }
 
