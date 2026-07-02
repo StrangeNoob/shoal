@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	g "github.com/anacrolix/generics"
+	alog "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -57,6 +59,13 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	cfg.DataDir = c.DataDir
 	cfg.Seed = c.Seed
 
+	// anacrolix logs to stderr by default, which scribbles over the fullscreen
+	// TUI (Bubble Tea owns the alternate screen). Silence every log sink: the
+	// analog client logger, the client's slog logger, and the file-storage logger.
+	discard := slog.New(slog.DiscardHandler)
+	cfg.Logger = alog.NewLogger().WithFilterLevel(alog.Disabled)
+	cfg.Slogger = discard
+
 	// Disable part files. anacrolix's default part-file storage re-derives piece
 	// completion from whether each file is fully renamed to its final name on
 	// every open, which wipes per-piece progress for any still-incomplete file on
@@ -66,6 +75,7 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	cfg.DefaultStorage = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: c.DataDir,
 		UsePartFiles:  g.Some(false),
+		Logger:        discard,
 	})
 
 	// Verified against anacrolix/torrent v1.61.0: SetListenAddr and
