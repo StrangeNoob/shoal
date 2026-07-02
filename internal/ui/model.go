@@ -98,6 +98,7 @@ type Model struct {
 	updateAvail string           // latest version when a newer release is available
 
 	dlCursor      int // selection in the Downloads pane
+	seedCursor    int // selection in the Seeding pane
 	cancelConfirm bool
 	cancelTarget  engine.Status
 
@@ -326,6 +327,18 @@ func addMagnetCmd(eng engine.Engine, magnet string) tea.Cmd {
 	}
 }
 
+// pauseToggleCmd pauses a running torrent or resumes a paused one.
+func pauseToggleCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+	return func() tea.Msg {
+		if s.Paused {
+			eng.Resume(s.InfoHash)
+		} else {
+			eng.Pause(s.InfoHash)
+		}
+		return nil
+	}
+}
+
 func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cmd {
 	return func() tea.Msg {
 		err := eng.Remove(infoHash, deleteData)
@@ -450,6 +463,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastTick = now
 			if n := len(m.downloading()); m.dlCursor >= n {
 				m.dlCursor = max(0, n-1)
+			}
+			if n := len(m.seeding()); m.seedCursor >= n {
+				m.seedCursor = max(0, n-1)
 			}
 			// If the torrent we're asking to cancel finished (or vanished) while the
 			// confirm prompt was open, drop the prompt — it only applies to in-progress downloads.
@@ -619,14 +635,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "p":
-		if m.section == sectionDownloads {
+		switch m.section {
+		case sectionDownloads:
 			ds := m.downloading()
 			if len(ds) > 0 && m.dlCursor < len(ds) {
-				sel := ds[m.dlCursor]
-				if sel.Paused {
-					return m, func() tea.Msg { m.eng.Resume(sel.InfoHash); return nil }
-				}
-				return m, func() tea.Msg { m.eng.Pause(sel.InfoHash); return nil }
+				return m, pauseToggleCmd(m.eng, ds[m.dlCursor])
+			}
+		case sectionSeeding:
+			ss := m.seeding()
+			if len(ss) > 0 && m.seedCursor < len(ss) {
+				return m, pauseToggleCmd(m.eng, ss[m.seedCursor])
 			}
 		}
 		return m, nil
@@ -752,6 +770,10 @@ func (m *Model) moveUp() {
 		if m.dlCursor > 0 {
 			m.dlCursor--
 		}
+	case sectionSeeding:
+		if m.seedCursor > 0 {
+			m.seedCursor--
+		}
 	}
 }
 
@@ -768,6 +790,10 @@ func (m *Model) moveDown() {
 	case sectionDownloads:
 		if m.dlCursor < len(m.downloading())-1 {
 			m.dlCursor++
+		}
+	case sectionSeeding:
+		if m.seedCursor < len(m.seeding())-1 {
+			m.seedCursor++
 		}
 	}
 }

@@ -936,3 +936,36 @@ func TestAutoUpdateSettingTogglesConfig(t *testing.T) {
 		t.Fatal("setting Auto-update to 'off' should disable cfg.AutoUpdate")
 	}
 }
+
+func TestSeedingPauseAndCursor(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "A", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true},
+		{Name: "B", InfoHash: "b", TotalBytes: 100, CompletedBytes: 100, Done: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionSeeding
+
+	// down moves the seed cursor
+	m, _ = update(m, key("down"))
+	if m.seedCursor != 1 {
+		t.Fatalf("seedCursor after down = %d, want 1", m.seedCursor)
+	}
+	// p pauses the selected seeder (B)
+	_, cmd := update(m, key("p"))
+	if cmd == nil {
+		t.Fatal("p should return a pause command")
+	}
+	cmd()
+	if !fe.paused["b"] {
+		t.Fatal("p should pause the selected seeding torrent")
+	}
+	// p again on a paused seeder resumes it
+	fe.statuses[1].Paused = true
+	m.seedCursor = 1
+	_, cmd = update(m, key("p"))
+	cmd()
+	if fe.paused["b"] {
+		t.Fatal("p on a paused seeder should resume it")
+	}
+}

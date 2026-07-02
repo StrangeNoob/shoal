@@ -327,3 +327,19 @@ func TestRenderSeedingShowsSpeed(t *testing.T) {
 		t.Fatalf("no sampled upload speed should render no /s suffix:\n%s", m.View())
 	}
 }
+
+func TestSeedingRendersPausedAndFooter(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "Paused Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Paused: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionSeeding
+	v := m.View()
+	if !strings.Contains(v, "paused") {
+		t.Errorf("a paused seeder should render 'paused':\n%s", v)
+	}
+	if !strings.Contains(v, "pause/resume") {
+		t.Errorf("Seeding footer should show 'pause/resume':\n%s", v)
+	}
+}

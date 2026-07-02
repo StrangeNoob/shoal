@@ -394,16 +394,24 @@ func (m Model) renderSeeding(w, h int) string {
 	shown := min(len(ss), visible)
 	for i := 0; i < shown; i++ {
 		s := ss[i]
-		b.WriteString(st.Good.Render(glyphSeed+" ") + st.Row.Render(truncate(s.Name, max(4, w-4))) + "\n")
+		head, nameStyle := st.Good.Render(glyphSeed+" "), st.Row
+		if i == m.seedCursor {
+			head, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
+		}
+		b.WriteString(head + nameStyle.Render(truncate(s.Name, max(4, w-4))) + "\n")
 
-		detail := fmt.Sprintf("  ·  %d peers", s.Peers)
-		if s.Uploaded > 0 {
-			detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+		if s.Paused {
+			b.WriteString("  " + st.Meta.Render("⏸ paused (not sharing)") + "\n")
+		} else {
+			detail := fmt.Sprintf("  ·  %d peers", s.Peers)
+			if s.Uploaded > 0 {
+				detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+			}
+			if sp := m.ulSpeed[s.Name]; sp > 0 {
+				detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
+			}
+			b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		}
-		if sp := m.ulSpeed[s.Name]; sp > 0 {
-			detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
-		}
-		b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		if i < shown-1 {
 			b.WriteString("\n")
 		}
@@ -517,6 +525,8 @@ func (m Model) renderFooter() string {
 			hint("↑↓", "move"), hint("←→", "change"), hint("enter", "edit"),
 			hint("tab", "panes"), hint("?", "help"), hint("q", "quit"),
 		}
+	case m.section == sectionSeeding:
+		parts = []string{hint("↑↓", "move"), hint("p", "pause/resume"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	default:
 		parts = []string{hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	}
