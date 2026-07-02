@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1097,5 +1098,45 @@ func TestSeedCursorSpansHistory(t *testing.T) {
 	m, _ = update(m, key("down"))
 	if m.seedCursor != 1 {
 		t.Fatalf("seedCursor should clamp at the last item, got %d", m.seedCursor)
+	}
+}
+
+func TestOpenHistoryFallsBackToDownloadDir(t *testing.T) {
+	dir := t.TempDir()
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.cfg.DataDir = dir
+	m.section = sectionSeeding
+
+	// Legacy entry: no stored Path, torrent not loaded, name matches no folder →
+	// fall back to opening the downloads folder (not the misleading 'isn't ready').
+	m.history.Entries = []history.Entry{{InfoHash: "old", Name: "Nonexistent Movie"}}
+	m2, cmd := update(m, key("o"))
+	if cmd == nil {
+		t.Fatal("o on a legacy history item should open the downloads folder as a fallback")
+	}
+	if strings.Contains(m2.notice, "isn't ready") {
+		t.Errorf("must not show the 'isn't ready yet' message for a finished item, got %q", m2.notice)
+	}
+	if !strings.Contains(m2.notice, "downloads folder") {
+		t.Errorf("should note the downloads-folder fallback, got %q", m2.notice)
+	}
+}
+
+func TestOpenHistoryGuessesFolderByName(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "Match Movie [1080p]"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.cfg.DataDir = dir
+	m.section = sectionSeeding
+	// legacy entry whose Name matches an on-disk folder → opens it, no fallback notice
+	m.history.Entries = []history.Entry{{InfoHash: "x", Name: "Match Movie [1080p]"}}
+	m2, cmd := update(m, key("o"))
+	if cmd == nil {
+		t.Fatal("o should open the matching on-disk folder")
+	}
+	if strings.Contains(m2.notice, "downloads folder") {
+		t.Errorf("an exact folder match should not trigger the downloads-folder fallback, got %q", m2.notice)
 	}
 }

@@ -1119,14 +1119,33 @@ func (m Model) seedHistory() []history.Entry {
 // openHistory opens a finished download's folder, preferring the live torrent's
 // path (still loaded) over the path stored in history.
 func (m *Model) openHistory(e history.Entry) tea.Cmd {
-	path := e.Path
+	// 1. Still-loaded torrent → its exact on-disk path.
 	for _, s := range m.statuses {
 		if s.InfoHash == e.InfoHash && s.Path != "" {
-			path = s.Path
-			break
+			return m.openSelected(s)
 		}
 	}
-	return m.openSelected(engine.Status{Path: path})
+	// 2. Path saved at completion (v0.4.9+).
+	if e.Path != "" {
+		return m.openSelected(engine.Status{Path: e.Path})
+	}
+	// 3. Legacy entry (completed before paths were recorded): best-effort the
+	//    item's folder under the download dir, else open the download dir itself
+	//    so `o` always lands somewhere useful — never the misleading "not ready".
+	if m.cfg.DataDir != "" {
+		if guess := filepath.Join(m.cfg.DataDir, e.Name); pathExists(guess) {
+			return m.openSelected(engine.Status{Path: guess})
+		}
+		m.setNotice("opened downloads folder — exact location wasn't recorded for this older download")
+		return openFolderCmd(m.cfg.DataDir)
+	}
+	m.setError("couldn't locate this download's folder")
+	return nil
+}
+
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // mainWidth is the width of the content pane (everything right of the sidebar).
