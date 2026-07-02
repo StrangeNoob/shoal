@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -141,3 +142,42 @@ func TestApply(t *testing.T) {
 
 // goosArch mirrors the runtime target so the fake asset name matches matchAsset.
 func goosArch() string { return runtimeGOOS + "_" + runtimeGOARCH }
+
+func TestApplyChecksumMismatch(t *testing.T) {
+	bin := []byte("NEW-SHOAL-BINARY")
+	archive := tarGz(t, "shoal", bin)
+	assetName := "shoal_0.3.0_" + goosArch() + ".tar.gz"
+
+	mux := http.NewServeMux()
+	var base string
+	mux.HandleFunc("/repos/StrangeNoob/shoal/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"tag_name":"v0.3.0","assets":[
+			{"name":%q,"browser_download_url":%q},
+			{"name":"checksums.txt","browser_download_url":%q}]}`,
+			assetName, base+"/dl/"+assetName, base+"/dl/checksums.txt")
+	})
+	mux.HandleFunc("/dl/"+assetName, func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+	mux.HandleFunc("/dl/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
+		// Deliberately wrong checksum (sha256 of the empty string) so it never matches the archive.
+		fmt.Fprintf(w, "%s  %s\n", strings.Repeat("0", 64), assetName)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	base = srv.URL
+
+	oldBase := apiBase
+	apiBase = srv.URL
+	t.Cleanup(func() { apiBase = oldBase })
+
+	var applyCalled bool
+	_, _, err := Apply(context.Background(), "0.2.0", func(io.Reader) error {
+		applyCalled = true
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected checksum mismatch error, got nil")
+	}
+	if applyCalled {
+		t.Fatal("applyFn must not be called on checksum mismatch")
+	}
+}
