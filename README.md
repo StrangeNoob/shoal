@@ -108,18 +108,6 @@ make classic    # build the CLI downloader (./shoal-classic)
 make help       # all targets
 ```
 
-### Regenerating the demo
-
-`demo.gif` was recorded to `demo.cast` (asciinema) and rendered with
-[agg](https://github.com/asciinema/agg):
-
-```sh
-agg demo.cast demo.gif
-```
-
-`demo.tape` scripts the same walkthrough for [vhs](https://github.com/charmbracelet/vhs)
-as an alternative (`vhs demo.tape` writes `demo.gif`).
-
 ## A note on use
 
 BitTorrent itself is neutral infrastructure — Linux distributions, game patches, and
