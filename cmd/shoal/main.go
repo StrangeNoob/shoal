@@ -92,14 +92,20 @@ func runUpdate(out io.Writer, version string) int {
 	fmt.Fprintln(out, "Checking for updates…")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	to, upToDate, err := update.Apply(ctx, version, nil)
+	rel, err := update.CheckLatest(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "shoal: update failed:", err)
 		return 1
 	}
-	if upToDate {
-		fmt.Fprintf(out, "Already on the latest version (%s).\n", update.DisplayVersion(to))
+	if !update.Newer(version, rel.Version) {
+		fmt.Fprintf(out, "Already on the latest version (%s).\n", update.DisplayVersion(rel.Version))
 		return 0
+	}
+	fmt.Fprintf(out, "Updating %s → %s…\n", update.DisplayVersion(version), update.DisplayVersion(rel.Version))
+	to, _, err := update.Apply(ctx, version, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shoal: update failed:", err)
+		return 1
 	}
 	fmt.Fprintf(out, "Updated to %s — restart shoal to use it.\n", update.DisplayVersion(to))
 	return 0
