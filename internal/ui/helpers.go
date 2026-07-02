@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"math"
+	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +14,25 @@ import (
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
+
+// openCommand returns the OS file-manager command + args to open path.
+func openCommand(goos, path string) (name string, args []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{path}
+	case "windows":
+		return "explorer", []string{path}
+	default:
+		return "xdg-open", []string{path}
+	}
+}
+
+// openInFileManager opens path in the OS file manager, detached so a slow or
+// failed file manager never blocks the caller.
+func openInFileManager(path string) error {
+	name, args := openCommand(runtime.GOOS, path)
+	return exec.Command(name, args...).Start()
+}
 
 // computeRates returns per-torrent byte/sec rates keyed by Status.Name, from the
 // deltas of byteOf(status) between the previous and next snapshots over dt.

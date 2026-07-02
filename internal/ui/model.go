@@ -6,6 +6,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -98,8 +100,11 @@ type Model struct {
 	updateAvail string           // latest version when a newer release is available
 
 	dlCursor      int // selection in the Downloads pane
+	seedCursor    int // selection in the Seeding pane
 	cancelConfirm bool
 	cancelTarget  engine.Status
+	stopConfirm   bool          // Seeding pane: confirm "stop seeding"
+	stopTarget    engine.Status // the torrent being stopped
 
 	notice      string
 	noticeErr   bool
@@ -326,6 +331,45 @@ func addMagnetCmd(eng engine.Engine, magnet string) tea.Cmd {
 	}
 }
 
+type folderOpenedMsg struct{ err error }
+
+// openFolderCmd opens dir in the OS file manager, off the UI goroutine.
+func openFolderCmd(dir string) tea.Cmd {
+	return func() tea.Msg { return folderOpenedMsg{err: openInFileManager(dir)} }
+}
+
+// openSelected opens the selected torrent's folder, or sets a notice when it
+// isn't ready or is missing. dir is Path if it's a directory, else its parent
+// (single-file torrents live directly in the save dir).
+func (m *Model) openSelected(s engine.Status) tea.Cmd {
+	if s.Path == "" {
+		m.setNotice("download folder isn't ready yet")
+		return nil
+	}
+	fi, err := os.Stat(s.Path)
+	if err != nil {
+		m.setError("folder not found — it may have been deleted")
+		return nil
+	}
+	dir := s.Path
+	if !fi.IsDir() {
+		dir = filepath.Dir(s.Path)
+	}
+	return openFolderCmd(dir)
+}
+
+// pauseToggleCmd pauses a running torrent or resumes a paused one.
+func pauseToggleCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+	return func() tea.Msg {
+		if s.Paused {
+			eng.Resume(s.InfoHash)
+		} else {
+			eng.Pause(s.InfoHash)
+		}
+		return nil
+	}
+}
+
 func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cmd {
 	return func() tea.Msg {
 		err := eng.Remove(infoHash, deleteData)
@@ -436,6 +480,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case folderOpenedMsg:
+		if msg.err != nil {
+			m.setError("couldn't open the folder")
+		}
+		return m, nil
+
 	case tickMsg:
 		if m.eng != nil {
 			now := time.Time(msg)
@@ -451,6 +501,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if n := len(m.downloading()); m.dlCursor >= n {
 				m.dlCursor = max(0, n-1)
 			}
+			if n := len(m.seeding()); m.seedCursor >= n {
+				m.seedCursor = max(0, n-1)
+			}
 			// If the torrent we're asking to cancel finished (or vanished) while the
 			// confirm prompt was open, drop the prompt — it only applies to in-progress downloads.
 			if m.cancelConfirm {
@@ -463,6 +516,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if !stillDownloading {
 					m.cancelConfirm = false
+				}
+			}
+			// Likewise, if the torrent we're asking to stop is no longer seeding,
+			// drop the stop prompt.
+			if m.stopConfirm {
+				stillSeeding := false
+				for _, s := range m.seeding() {
+					if s.InfoHash == m.stopTarget.InfoHash {
+						stillSeeding = true
+						break
+					}
+				}
+				if !stillSeeding {
+					m.stopConfirm = false
 				}
 			}
 		}
@@ -571,6 +638,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCancelKey(msg)
 	}
 
+	if m.stopConfirm {
+		return m.handleStopKey(msg)
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -610,23 +681,50 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "x":
-		if m.section == sectionDownloads {
+		switch m.section {
+		case sectionDownloads:
 			ds := m.downloading()
 			if len(ds) > 0 && m.dlCursor < len(ds) {
 				m.cancelConfirm = true
 				m.cancelTarget = ds[m.dlCursor]
 			}
+		case sectionSeeding:
+			ss := m.seeding()
+			if len(ss) > 0 && m.seedCursor < len(ss) {
+				m.stopConfirm = true
+				m.stopTarget = ss[m.seedCursor]
+			}
 		}
 		return m, nil
 	case "p":
-		if m.section == sectionDownloads {
+		switch m.section {
+		case sectionDownloads:
 			ds := m.downloading()
 			if len(ds) > 0 && m.dlCursor < len(ds) {
-				sel := ds[m.dlCursor]
-				if sel.Paused {
-					return m, func() tea.Msg { m.eng.Resume(sel.InfoHash); return nil }
-				}
-				return m, func() tea.Msg { m.eng.Pause(sel.InfoHash); return nil }
+				return m, pauseToggleCmd(m.eng, ds[m.dlCursor])
+			}
+		case sectionSeeding:
+			ss := m.seeding()
+			if len(ss) > 0 && m.seedCursor < len(ss) {
+				return m, pauseToggleCmd(m.eng, ss[m.seedCursor])
+			}
+		}
+		return m, nil
+	case "o":
+		// Assign the command first: openSelected has a pointer receiver and sets
+		// the notice on m, so it must run before `return m` copies m.
+		switch m.section {
+		case sectionDownloads:
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				cmd := m.openSelected(ds[m.dlCursor])
+				return m, cmd
+			}
+		case sectionSeeding:
+			ss := m.seeding()
+			if len(ss) > 0 && m.seedCursor < len(ss) {
+				cmd := m.openSelected(ss[m.seedCursor])
+				return m, cmd
 			}
 		}
 		return m, nil
@@ -674,6 +772,21 @@ func (m Model) handleSortKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleCancelKey handles input while the cancel-download confirm modal is
 // active: k keeps partial files, d deletes them, esc/n aborts.
+// handleStopKey handles the Seeding "stop seeding" confirm. Files are always
+// kept — this just stops sharing and forgets the torrent.
+func (m Model) handleStopKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "y":
+		m.stopConfirm = false
+		return m, removeCmd(m.eng, m.stopTarget.InfoHash, m.stopTarget.Name, false)
+	case "esc", "n":
+		m.stopConfirm = false
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m Model) handleCancelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "k":
@@ -752,6 +865,10 @@ func (m *Model) moveUp() {
 		if m.dlCursor > 0 {
 			m.dlCursor--
 		}
+	case sectionSeeding:
+		if m.seedCursor > 0 {
+			m.seedCursor--
+		}
 	}
 }
 
@@ -768,6 +885,10 @@ func (m *Model) moveDown() {
 	case sectionDownloads:
 		if m.dlCursor < len(m.downloading())-1 {
 			m.dlCursor++
+		}
+	case sectionSeeding:
+		if m.seedCursor < len(m.seeding())-1 {
+			m.seedCursor++
 		}
 	}
 }

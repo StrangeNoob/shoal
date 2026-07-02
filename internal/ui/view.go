@@ -391,19 +391,33 @@ func (m Model) renderSeeding(w, h int) string {
 	visible := max(1, h/perItem)
 
 	var b strings.Builder
+	if m.stopConfirm {
+		b.WriteString("  " + st.Bad.Render("Stop seeding ") +
+			st.Row.Render("\""+truncate(m.stopTarget.Name, max(8, w-32))+"\"") + st.Meta.Render("?   ") +
+			st.Key.Render("enter") + st.Meta.Render(" stop (keep files)   ·   ") +
+			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+	}
 	shown := min(len(ss), visible)
 	for i := 0; i < shown; i++ {
 		s := ss[i]
-		b.WriteString(st.Good.Render(glyphSeed+" ") + st.Row.Render(truncate(s.Name, max(4, w-4))) + "\n")
+		head, nameStyle := st.Good.Render(glyphSeed+" "), st.Row
+		if i == m.seedCursor {
+			head, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
+		}
+		b.WriteString(head + nameStyle.Render(truncate(s.Name, max(4, w-4))) + "\n")
 
-		detail := fmt.Sprintf("  ·  %d peers", s.Peers)
-		if s.Uploaded > 0 {
-			detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+		if s.Paused {
+			b.WriteString("  " + st.Meta.Render("⏸ paused (not sharing)") + "\n")
+		} else {
+			detail := fmt.Sprintf("  ·  %d peers", s.Peers)
+			if s.Uploaded > 0 {
+				detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+			}
+			if sp := m.ulSpeed[s.Name]; sp > 0 {
+				detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
+			}
+			b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		}
-		if sp := m.ulSpeed[s.Name]; sp > 0 {
-			detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
-		}
-		b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		if i < shown-1 {
 			b.WriteString("\n")
 		}
@@ -504,8 +518,10 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("←→", "column"), hint("↑↓", "direction"), hint("esc", "done")}
 	case m.cancelConfirm:
 		parts = []string{hint("k", "keep files"), hint("d", "delete files"), hint("esc", "back")}
+	case m.stopConfirm:
+		parts = []string{hint("enter", "stop"), hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "filter"),
@@ -517,6 +533,8 @@ func (m Model) renderFooter() string {
 			hint("↑↓", "move"), hint("←→", "change"), hint("enter", "edit"),
 			hint("tab", "panes"), hint("?", "help"), hint("q", "quit"),
 		}
+	case m.section == sectionSeeding:
+		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "stop"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	default:
 		parts = []string{hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	}
@@ -531,8 +549,9 @@ func (m Model) helpView() string {
 		{"↑ ↓ / k j", "move the selection"},
 		{"← → / h l", "switch the media filter · change a setting"},
 		{"d", "download the selected result"},
-		{"p", "pause / resume the selected download"},
-		{"x", "cancel the selected download (keep or delete files)"},
+		{"p", "pause / resume the selected download or seed"},
+		{"x", "cancel a download · stop seeding the selected torrent"},
+		{"o", "open the download's folder"},
 		{"S", "sort results (←→ column · ↑↓ direction)"},
 		{"y", "copy magnet (in details)"},
 		{"tab", "cycle Search · Downloads · Seeding · Settings"},

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -934,5 +935,103 @@ func TestAutoUpdateSettingTogglesConfig(t *testing.T) {
 	found.set(&m, "off")
 	if m.cfg.AutoUpdate {
 		t.Fatal("setting Auto-update to 'off' should disable cfg.AutoUpdate")
+	}
+}
+
+func TestSeedingPauseAndCursor(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "A", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true},
+		{Name: "B", InfoHash: "b", TotalBytes: 100, CompletedBytes: 100, Done: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionSeeding
+
+	// down moves the seed cursor
+	m, _ = update(m, key("down"))
+	if m.seedCursor != 1 {
+		t.Fatalf("seedCursor after down = %d, want 1", m.seedCursor)
+	}
+	// p pauses the selected seeder (B)
+	_, cmd := update(m, key("p"))
+	if cmd == nil {
+		t.Fatal("p should return a pause command")
+	}
+	cmd()
+	if !fe.paused["b"] {
+		t.Fatal("p should pause the selected seeding torrent")
+	}
+	// p again on a paused seeder resumes it
+	fe.statuses[1].Paused = true
+	m.seedCursor = 1
+	_, cmd = update(m, key("p"))
+	cmd()
+	if fe.paused["b"] {
+		t.Fatal("p on a paused seeder should resume it")
+	}
+}
+
+func TestSeedingStopFlow(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: "h1", TotalBytes: 100, CompletedBytes: 100, Done: true},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionSeeding
+
+	// x opens the stop confirm
+	m, _ = update(m, key("x"))
+	if !m.stopConfirm || m.stopTarget.InfoHash != "h1" {
+		t.Fatalf("x should open the stop confirm, got confirm=%v target=%q", m.stopConfirm, m.stopTarget.InfoHash)
+	}
+	// enter stops it (removeCmd with deleteData=false)
+	m2, cmd := update(m, key("enter"))
+	if m2.stopConfirm {
+		t.Fatal("enter should close the stop confirm")
+	}
+	if cmd == nil {
+		t.Fatal("enter should return a remove command")
+	}
+	cmd()
+	if fe.removedHash != "h1" || fe.removedDelete {
+		t.Fatalf("stop should Remove(h1, deleteData=false); got hash=%q delete=%v", fe.removedHash, fe.removedDelete)
+	}
+	// esc cancels the confirm without removing
+	fe.removedHash = ""
+	m, _ = update(m, key("x"))
+	m3, _ := update(m, key("esc"))
+	if m3.stopConfirm {
+		t.Fatal("esc should cancel the stop confirm")
+	}
+	if fe.removedHash != "" {
+		t.Fatalf("esc must not Remove, got %q", fe.removedHash)
+	}
+}
+
+func TestOpenFolderNotices(t *testing.T) {
+	// not ready: no on-disk path yet
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "A", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10, Path: ""},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionDownloads
+	m2, _ := update(m, key("o"))
+	if !strings.Contains(m2.notice, "ready") {
+		t.Errorf("o with no path should notice 'not ready', got %q", m2.notice)
+	}
+
+	// deleted: path set but missing
+	fe.statuses[0].Path = filepath.Join(t.TempDir(), "gone")
+	m3, _ := update(m, key("o"))
+	if !strings.Contains(m3.notice, "deleted") || !m3.noticeErr {
+		t.Errorf("o on a missing path should error 'deleted', got %q err=%v", m3.notice, m3.noticeErr)
+	}
+
+	// existing dir → returns a command (folder open)
+	fe.statuses[0].Path = t.TempDir()
+	_, cmd := update(m, key("o"))
+	if cmd == nil {
+		t.Error("o on an existing folder should return an open command")
 	}
 }

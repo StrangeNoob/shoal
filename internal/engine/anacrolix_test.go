@@ -487,3 +487,30 @@ func TestRestoreDoesNotBlockOnSlowURL(t *testing.T) {
 		t.Fatal("NewAnacrolix blocked on a slow .torrent-URL restore; URLs should re-fetch in the background")
 	}
 }
+
+func TestStatusPath(t *testing.T) {
+	eng := newEngine(t)
+	content := bytes.Repeat([]byte("shoal"), 8000)
+	torrent := buildTorrentBytes(t, content) // single-file torrent named "blob.bin"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(torrent)
+	}))
+	t.Cleanup(srv.Close)
+	if err := eng.AddTorrentURL(srv.URL, "blob"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	var st Status
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		all := eng.Statuses()
+		if len(all) == 1 && all[0].TotalBytes > 0 {
+			st = all[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	want := filepath.Join(eng.dataDir, "blob.bin")
+	if st.Path != want {
+		t.Errorf("Status.Path = %q, want %q", st.Path, want)
+	}
+}
