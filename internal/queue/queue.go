@@ -100,6 +100,10 @@ func (s *Store) Save() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// MkdirAll is a no-op (no chmod) when dir already exists, so tighten it
+	// explicitly — keep this even if it looks redundant.
+	// ponytail: Chmod needs dir ownership; on a shared/multi-user or
+	// UID-remapped dir this can fail where a plain write would've succeeded.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
