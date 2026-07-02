@@ -514,3 +514,50 @@ func TestStatusPath(t *testing.T) {
 		t.Errorf("Status.Path = %q, want %q", st.Path, want)
 	}
 }
+
+func TestStatusSeeding(t *testing.T) {
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	// Seed enabled: a loaded torrent reports Seeding.
+	on := newEngine(t) // Config{Seed: true}
+	if err := on.AddTorrentURL(srv.URL, "x"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, on)
+	if s := on.Statuses()[0]; !s.Seeding {
+		t.Error("Seed=true torrent should report Seeding=true")
+	}
+	if s := on.Statuses()[0]; s.TotalPeers != 0 {
+		t.Errorf("no-peer torrent TotalPeers = %d, want 0", s.TotalPeers)
+	}
+
+	// Seed disabled: same torrent does not report Seeding.
+	off, err := NewAnacrolix(Config{DataDir: t.TempDir(), Seed: false})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { off.Close() })
+	if err := off.AddTorrentURL(srv.URL, "x"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, off)
+	if s := off.Statuses()[0]; s.Seeding {
+		t.Error("Seed=false torrent should report Seeding=false")
+	}
+}
+
+func waitMeta(t *testing.T, eng *Anacrolix) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if all := eng.Statuses(); len(all) == 1 && all[0].TotalBytes > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("metadata never resolved")
+}
