@@ -28,9 +28,20 @@ type Anacrolix struct {
 	done      chan struct{}
 	closeOnce sync.Once
 
-	mu      sync.Mutex
-	addedAt map[metainfo.Hash]time.Time
-	names   map[metainfo.Hash]string
+	mu       sync.Mutex
+	addedAt  map[metainfo.Hash]time.Time
+	names    map[metainfo.Hash]string
+	paused   map[metainfo.Hash]bool
+	maxConns int
+}
+
+// maxConnsFor is the per-torrent connection cap to restore on resume: the
+// configured value, or anacrolix's default of 50 when unset.
+func maxConnsFor(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	return 50
 }
 
 // NewAnacrolix starts a torrent client configured from the user's settings.
@@ -60,6 +71,8 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		done:      make(chan struct{}),
 		addedAt:   map[metainfo.Hash]time.Time{},
 		names:     map[metainfo.Hash]string{},
+		paused:    map[metainfo.Hash]bool{},
+		maxConns:  maxConnsFor(c.MaxPeers),
 	}
 	if c.Seed && c.SeedRatio > 0 {
 		go a.seedRatioLoop(10 * time.Second)
@@ -197,6 +210,7 @@ func (a *Anacrolix) Statuses() []Status {
 			Uploaded: stats.BytesWrittenData.Int64(),
 			Peers:    stats.ActivePeers,
 			Done:     total > 0 && completed >= total,
+			Paused:   a.paused[h],
 			AddedAt:  a.addedAt[h],
 		})
 	}
@@ -204,22 +218,24 @@ func (a *Anacrolix) Statuses() []Status {
 	return out
 }
 
-func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
-	a.mu.Lock()
-	var (
-		found *torrent.Torrent
-		hash  metainfo.Hash
-	)
+// torrentByHash returns the tracked torrent for a hex infohash. Caller holds mu.
+func (a *Anacrolix) torrentByHash(hex string) (*torrent.Torrent, metainfo.Hash, bool) {
 	for _, t := range a.client.Torrents() {
-		if h := t.InfoHash(); h.HexString() == infoHash {
-			found, hash = t, h
-			break
+		if h := t.InfoHash(); h.HexString() == hex {
+			return t, h, true
 		}
 	}
-	if found == nil {
+	return nil, metainfo.Hash{}, false
+}
+
+func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
+	a.mu.Lock()
+	found, hash, ok := a.torrentByHash(infoHash)
+	if !ok {
 		a.mu.Unlock()
 		return nil // already gone
 	}
+	delete(a.paused, hash)
 	diskName := found.Name() // the info name anacrolix wrote files under (attacker-influenced)
 	found.Drop()
 	delete(a.names, hash)
@@ -229,6 +245,32 @@ func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
 	if deleteData && diskName != "" {
 		return removeUnderDir(a.dataDir, diskName)
 	}
+	return nil
+}
+
+func (a *Anacrolix) Pause(infoHash string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, h, ok := a.torrentByHash(infoHash)
+	if !ok {
+		return nil
+	}
+	t.DisallowDataDownload()
+	t.SetMaxEstablishedConns(0)
+	a.paused[h] = true
+	return nil
+}
+
+func (a *Anacrolix) Resume(infoHash string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, h, ok := a.torrentByHash(infoHash)
+	if !ok {
+		return nil
+	}
+	t.AllowDataDownload()
+	t.SetMaxEstablishedConns(a.maxConns)
+	a.paused[h] = false
 	return nil
 }
 

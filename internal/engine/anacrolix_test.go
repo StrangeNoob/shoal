@@ -201,6 +201,47 @@ func TestAnacrolixRemoveDropsTorrent(t *testing.T) {
 	}
 }
 
+func TestAnacrolixPauseResume(t *testing.T) {
+	eng := newEngine(t)
+	defer eng.Close()
+
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer srv.Close()
+
+	if err := eng.AddTorrentURL(srv.URL, "pause-test"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	ss := eng.Statuses()
+	if len(ss) != 1 {
+		t.Fatalf("want 1 status, got %d", len(ss))
+	}
+	h := ss[0].InfoHash
+	if ss[0].Paused {
+		t.Fatal("a new torrent should not be paused")
+	}
+
+	if err := eng.Pause(h); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if !eng.Statuses()[0].Paused {
+		t.Fatal("Pause did not set Status.Paused")
+	}
+
+	if err := eng.Resume(h); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if eng.Statuses()[0].Paused {
+		t.Fatal("Resume did not clear Status.Paused")
+	}
+
+	if err := eng.Pause("deadbeef00000000000000000000000000000000"); err != nil {
+		t.Fatalf("Pause of unknown hash should be nil, got %v", err)
+	}
+}
+
 func TestRemoveUnderDirContainment(t *testing.T) {
 	base := t.TempDir()
 

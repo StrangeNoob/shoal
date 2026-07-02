@@ -36,6 +36,8 @@ type fakeEngine struct {
 	removedHash   string
 	removedDelete bool
 	removeErr     error
+
+	paused map[string]bool
 }
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
@@ -51,6 +53,20 @@ func (e *fakeEngine) Remove(infoHash string, deleteData bool) error {
 	e.removedHash = infoHash
 	e.removedDelete = deleteData
 	return e.removeErr
+}
+func (e *fakeEngine) Pause(infoHash string) error {
+	if e.paused == nil {
+		e.paused = map[string]bool{}
+	}
+	e.paused[infoHash] = true
+	return nil
+}
+func (e *fakeEngine) Resume(infoHash string) error {
+	if e.paused == nil {
+		e.paused = map[string]bool{}
+	}
+	e.paused[infoHash] = false
+	return nil
 }
 func (e *fakeEngine) Close() error { return nil }
 

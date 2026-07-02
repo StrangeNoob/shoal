@@ -16,6 +16,7 @@ type Status struct {
 	Uploaded int64
 	Peers    int
 	Done     bool
+	Paused   bool
 	AddedAt  time.Time
 }
 
@@ -62,6 +63,11 @@ type Engine interface {
 	// deleteData is true, its downloaded file/dir under the data dir is also
 	// removed. An unknown hash is a no-op (nil error).
 	Remove(infoHash string, deleteData bool) error
+	// Pause halts the torrent with the given hex infohash (stops downloading
+	// and uploading). An unknown hash is a no-op (nil error).
+	Pause(infoHash string) error
+	// Resume restarts a paused torrent. An unknown hash is a no-op (nil error).
+	Resume(infoHash string) error
 	// Close tears the engine down.
 	Close() error
 }
