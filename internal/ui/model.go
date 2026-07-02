@@ -93,6 +93,7 @@ type Model struct {
 	lastTick  time.Time        // timestamp of the previous tick, for the rate delta
 	history   history.Store    // completed-download record; injected via WithHistory
 	setCursor int              // index into settingItems()
+	version   string           // build version (ldflags), "" or "dev" for local builds
 
 	dlCursor      int // selection in the Downloads pane
 	cancelConfirm bool
@@ -151,6 +152,12 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 // leave it empty so Save is a no-op).
 func (m Model) WithHistory(h history.Store) Model {
 	m.history = h
+	return m
+}
+
+// WithVersion attaches the build version (main injects it via ldflags).
+func (m Model) WithVersion(v string) Model {
+	m.version = v
 	return m
 }
 

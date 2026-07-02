@@ -277,6 +277,20 @@ func TestRenderDownloadsCancelPrompt(t *testing.T) {
 	}
 }
 
+func TestAboutShowsVersion(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{})).WithVersion("0.3.0")
+	m.section = sectionSettings
+	if !strings.Contains(m.View(), "v0.3.0") {
+		t.Fatalf("About should show the build version:\n%s", m.View())
+	}
+	// no version → "dev"
+	d := ready(New(&fakeSource{}, &fakeEngine{}))
+	d.section = sectionSettings
+	if !strings.Contains(d.View(), "dev") {
+		t.Fatalf("About should show 'dev' for an unversioned build:\n%s", d.View())
+	}
+}
+
 func TestRenderSeedingShowsSpeed(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionSeeding

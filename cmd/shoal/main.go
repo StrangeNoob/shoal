@@ -16,6 +16,9 @@ import (
 	"github.com/StrangeNoob/shoal/internal/ui"
 )
 
+// version is set at build time via -ldflags "-X main.version=...". "dev" locally.
+var version = "dev"
+
 func main() {
 	cfg := config.Load()
 
@@ -38,7 +41,7 @@ func main() {
 	src := source.NewDefault()
 
 	p := tea.NewProgram(
-		ui.NewWithConfig(src, eng, cfg).WithHistory(history.Load()),
+		ui.NewWithConfig(src, eng, cfg).WithHistory(history.Load()).WithVersion(version),
 		tea.WithAltScreen(),       // fullscreen
 		tea.WithMouseCellMotion(), // allow scroll wheel
 	)
