@@ -343,3 +343,24 @@ func TestSeedingRendersPausedAndFooter(t *testing.T) {
 		t.Errorf("Seeding footer should show 'pause/resume':\n%s", v)
 	}
 }
+
+func TestSeedingRowShowsSeedingStatus(t *testing.T) {
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "Idle Seeder", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true, Peers: 0, TotalPeers: 3, Uploaded: 0},
+		{Name: "Off Seeder", InfoHash: "b", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: false, Peers: 0, TotalPeers: 0, Uploaded: 0},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.statuses = fe.statuses
+	m.section = sectionSeeding
+	v := m.View()
+	// actively-seeding, no downloaders but peers discovered
+	for _, want := range []string{"seeding", "known", "0 B"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("actively-seeding row should contain %q:\n%s", want, v)
+		}
+	}
+	// Seed disabled → labelled 'complete', not 'seeding'
+	if !strings.Contains(v, "complete") {
+		t.Errorf("a non-seeding complete torrent should show 'complete':\n%s", v)
+	}
+}

@@ -409,14 +409,28 @@ func (m Model) renderSeeding(w, h int) string {
 		if s.Paused {
 			b.WriteString("  " + st.Meta.Render("⏸ paused (not sharing)") + "\n")
 		} else {
-			detail := fmt.Sprintf("  ·  %d peers", s.Peers)
-			if s.Uploaded > 0 {
-				detail = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s  ·  %d peers", s.Ratio(), glyphSeed, formatBytes(s.Uploaded), s.Peers)
+			label := "complete"
+			if s.Seeding {
+				label = "seeding"
 			}
+			// Always show the upload total (↑ 0 B when nothing's been shared yet);
+			// add the ratio once there's been any upload.
+			up := fmt.Sprintf("  ·  %s %s", glyphSeed, formatBytes(s.Uploaded))
+			if s.Uploaded > 0 {
+				up = fmt.Sprintf("  ·  ratio %.2f  ·  %s %s", s.Ratio(), glyphSeed, formatBytes(s.Uploaded))
+			}
+			// Active downloaders; if none are connected but announce found peers,
+			// show how many are known so 'seeding, no demand' reads differently
+			// from 'not announcing'.
+			peers := fmt.Sprintf("  ·  %d peers", s.Peers)
+			if s.Peers == 0 && s.TotalPeers > 0 {
+				peers = fmt.Sprintf("  ·  0 peers (%d known)", s.TotalPeers)
+			}
+			detail := up + peers
 			if sp := m.ulSpeed[s.Name]; sp > 0 {
 				detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
 			}
-			b.WriteString("  " + st.Good.Render(glyphDone+" complete") + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
+			b.WriteString("  " + st.Good.Render(glyphDone+" "+label) + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
 		}
 		if i < shown-1 {
 			b.WriteString("\n")
