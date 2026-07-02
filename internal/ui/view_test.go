@@ -31,6 +31,27 @@ func TestSectionString(t *testing.T) {
 	}
 }
 
+func TestHomeAndHelpListCommands(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{})) // Search pane, no results → home screen
+	home := m.View()
+	for _, want := range []string{"sort", "pause", "cancel", "copy magnet", "cycle", "show all keys"} {
+		if !strings.Contains(home, want) {
+			t.Errorf("home HOW IT WORKS is missing %q:\n%s", want, home)
+		}
+	}
+	m.showHelp = true
+	if help := m.View(); !strings.Contains(help, "pause / resume") {
+		t.Errorf("? help should list pause/resume:\n%s", help)
+	}
+
+	// The Downloads footer hint must say pause/resume (p toggles both), not just pause.
+	d := ready(New(&fakeSource{}, &fakeEngine{}))
+	d.section = sectionDownloads
+	if f := d.View(); !strings.Contains(f, "pause/resume") {
+		t.Errorf("Downloads footer should read 'pause/resume':\n%s", f)
+	}
+}
+
 func TestRenderResultsListWithOverflow(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.hasSearched = true

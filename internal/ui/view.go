@@ -122,7 +122,13 @@ func (m Model) renderFilterRow(w int) string {
 }
 
 func (m Model) renderHome(w, h int) string {
-	key := func(k string) string { return st.Key.Render(k) }
+	cmd := func(k, desc string) string {
+		pad := 9 - lipgloss.Width(k)
+		if pad < 1 {
+			pad = 1
+		}
+		return "  " + st.Key.Render(k) + strings.Repeat(" ", pad) + st.Meta.Render(desc) + "\n"
+	}
 
 	var b strings.Builder
 	b.WriteString("\n")
@@ -131,9 +137,18 @@ func (m Model) renderHome(w, h int) string {
 	b.WriteString(st.Meta.Render("software — with live progress and seeding.") + "\n\n")
 
 	b.WriteString(st.SectionHead.Render("HOW IT WORKS") + "\n")
-	b.WriteString("  " + key("/") + st.Meta.Render("    type a description, then ") + key("enter") + st.Meta.Render(" to search") + "\n")
-	b.WriteString("  " + key("← →") + st.Meta.Render("  narrow results by media type") + "\n")
-	b.WriteString("  " + key("d") + st.Meta.Render("    download a result · ") + key("tab") + st.Meta.Render(" for Downloads") + "\n\n")
+	b.WriteString(cmd("/", "type a query, then enter to search"))
+	b.WriteString(cmd("↑ ↓", "move the selection"))
+	b.WriteString(cmd("← →", "narrow by media type · change a setting"))
+	b.WriteString(cmd("enter", "open a result's details"))
+	b.WriteString(cmd("d", "download the selected result"))
+	b.WriteString(cmd("S", "sort results  (← → column · ↑ ↓ direction)"))
+	b.WriteString(cmd("p", "pause / resume a download"))
+	b.WriteString(cmd("x", "cancel a download  (keep or delete files)"))
+	b.WriteString(cmd("y", "copy magnet  (in a result's details)"))
+	b.WriteString(cmd("tab", "cycle Search · Downloads · Seeding · Settings"))
+	b.WriteString(cmd("esc", "leave search · close details · cancel"))
+	b.WriteString(cmd("? / q", "show all keys · quit") + "\n")
 
 	b.WriteString(st.SectionHead.Render("START HERE") + "\n")
 	b.WriteString(st.SearchLabel.Render("/ ") + m.input.View() + "\n")
@@ -490,7 +505,7 @@ func (m Model) renderFooter() string {
 	case m.cancelConfirm:
 		parts = []string{hint("k", "keep files"), hint("d", "delete files"), hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("p", "pause"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "filter"),
@@ -516,6 +531,7 @@ func (m Model) helpView() string {
 		{"↑ ↓ / k j", "move the selection"},
 		{"← → / h l", "switch the media filter · change a setting"},
 		{"d", "download the selected result"},
+		{"p", "pause / resume the selected download"},
 		{"x", "cancel the selected download (keep or delete files)"},
 		{"S", "sort results (←→ column · ↑↓ direction)"},
 		{"y", "copy magnet (in details)"},
