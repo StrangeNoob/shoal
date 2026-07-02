@@ -77,14 +77,20 @@ func (c Config) Save() error {
 	if c.Path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(c.Path), 0o755); err != nil {
+	dir := filepath.Dir(c.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// Keep the config dir owner-only — it also holds history.json / queue.json.
+	// MkdirAll won't chmod an existing dir, so tighten it explicitly.
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.Path, b, 0o644)
+	return os.WriteFile(c.Path, b, 0o600)
 }
 
 func defaultPath() string {

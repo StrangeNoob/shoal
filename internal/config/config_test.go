@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+// TestSaveTightensToOwnerOnly checks that config.json is written owner-only
+// (0600) and that Save tightens an already-existing, too-permissive config dir
+// to 0700 — it shares that dir with history.json/queue.json.
+func TestSaveTightensToOwnerOnly(t *testing.T) {
+	isolate(t)
+	c := Default()
+	dir := filepath.Dir(c.Path)
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil { // MkdirAll respects umask; force it loose
+		t.Fatal(err)
+	}
+	if err := c.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if fi, _ := os.Stat(c.Path); fi.Mode().Perm() != 0o600 {
+		t.Errorf("config.json perms = %o, want 0600", fi.Mode().Perm())
+	}
+	if di, _ := os.Stat(dir); di.Mode().Perm() != 0o700 {
+		t.Errorf("config dir perms = %o, want 0700 (Save must tighten an existing loose dir)", di.Mode().Perm())
+	}
+}
+
 // isolate points HOME (and so the OS config/data dirs) at a temp directory, so
 // Load/Save/Default never touch the real user config. It also sets
 // XDG_CONFIG_HOME: os.UserConfigDir honors that over HOME on Linux, so a runner

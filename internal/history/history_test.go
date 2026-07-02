@@ -28,7 +28,14 @@ func TestAppendSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "history.json")
+	dir := filepath.Join(t.TempDir(), "sub")
+	if err := os.MkdirAll(dir, 0o777); err != nil { // pre-existing, too-permissive dir
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "history.json")
 	s := LoadFrom(path)
 	s.Append(Entry{InfoHash: "a", Name: "X"}) // Append persists via Save
 	info, err := os.Stat(path)
@@ -37,6 +44,9 @@ func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Fatalf("history.json perms = %o, want 0600 (owner-only; it lists what you downloaded)", perm)
+	}
+	if di, _ := os.Stat(dir); di.Mode().Perm() != 0o700 {
+		t.Errorf("history dir perms = %o, want 0700 (Save must tighten an existing loose dir)", di.Mode().Perm())
 	}
 }
 

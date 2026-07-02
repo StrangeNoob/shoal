@@ -65,7 +65,12 @@ func (s Store) Save() error {
 	if s.Path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+	dir := filepath.Dir(s.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll won't chmod an existing dir; tighten it (shared with config/queue).
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(s, "", "  ")
