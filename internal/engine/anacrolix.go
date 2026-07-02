@@ -307,9 +307,11 @@ func (a *Anacrolix) Statuses() []Status {
 		name := a.names[h]
 
 		var total, pieceLen int64
+		var diskPath string
 		if info := t.Info(); info != nil {
 			total = info.TotalLength()
 			pieceLen = info.PieceLength
+			diskPath = filepath.Join(a.dataDir, t.Name())
 			if name == "" {
 				name = t.Name()
 			}
@@ -342,6 +344,7 @@ func (a *Anacrolix) Statuses() []Status {
 			Peers:      stats.ActivePeers,
 			Done:       total > 0 && verified >= total,
 			Paused:     a.paused[h],
+			Path:       diskPath,
 			AddedAt:    a.addedAt[h],
 		})
 	}

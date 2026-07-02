@@ -24,7 +24,10 @@ type Status struct {
 	Peers    int
 	Done     bool
 	Paused   bool
-	AddedAt  time.Time
+	// Path is the torrent's top-level on-disk location (<data dir>/<name>), or
+	// "" before metadata is known. Used by the UI to open the download folder.
+	Path    string
+	AddedAt time.Time
 }
 
 // Percent is download progress in the range [0, 1].
