@@ -29,6 +29,7 @@ type Anacrolix struct {
 	seedRatio float64
 	done      chan struct{}
 	closeOnce sync.Once
+	wg        sync.WaitGroup // tracks the background URL-restore goroutine
 
 	mu       sync.Mutex
 	addedAt  map[metainfo.Hash]time.Time
@@ -195,20 +196,36 @@ func (a *Anacrolix) persist(h metainfo.Hash, e queue.Entry) {
 // restore re-adds every persisted torrent on startup (best-effort) and applies
 // paused state. A failed .torrent-URL re-fetch is skipped, leaving the entry.
 func (a *Anacrolix) restore() {
+	var urls []queue.Entry
 	for _, e := range a.store.Entries {
-		var err error
 		switch {
 		case e.Magnet != "":
-			err = a.addMagnet(e.Magnet, false)
+			// Magnets re-add instantly (no network), so do them synchronously.
+			if err := a.addMagnet(e.Magnet, false); err == nil && e.Paused {
+				_ = a.Pause(e.InfoHash)
+			}
 		case e.TorrentURL != "":
-			err = a.addTorrentURL(e.TorrentURL, e.Name, false)
+			urls = append(urls, e) // may be slow/dead: fetch off the startup path
+		}
+	}
+	if len(urls) > 0 {
+		a.wg.Add(1)
+		go a.restoreURLs(urls)
+	}
+}
+
+// restoreURLs re-adds .torrent-URL entries in the background so a slow or dead
+// URL never stalls startup. Close waits on a.wg before closing the client, so
+// no add ever races a torn-down client.
+func (a *Anacrolix) restoreURLs(entries []queue.Entry) {
+	defer a.wg.Done()
+	for _, e := range entries {
+		select {
+		case <-a.done:
+			return // shutting down
 		default:
-			continue
 		}
-		if err != nil {
-			continue // dead URL / bad magnet: skip, keep the entry
-		}
-		if e.Paused {
+		if err := a.addTorrentURL(e.TorrentURL, e.Name, false); err == nil && e.Paused {
 			_ = a.Pause(e.InfoHash)
 		}
 	}
@@ -357,7 +374,8 @@ func removeUnderDir(dir, name string) error {
 }
 
 func (a *Anacrolix) Close() error {
-	a.closeOnce.Do(func() { close(a.done) }) // stop the seed-ratio loop; safe if called twice
+	a.closeOnce.Do(func() { close(a.done) }) // stop the seed-ratio loop + signal restore; safe if called twice
+	a.wg.Wait()                              // let the background URL-restore finish before tearing down the client
 	a.client.Close()
 	return nil
 }

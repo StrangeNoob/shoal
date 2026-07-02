@@ -278,7 +278,16 @@ func TestAnacrolixPersistsAndRestores(t *testing.T) {
 		t.Skipf("cannot start torrent client: %v", err)
 	}
 	defer eng2.Close()
-	ss := eng2.Statuses()
+	// URL restore is asynchronous now (so a dead URL can't stall startup), so
+	// poll until the torrent is back and paused.
+	var ss []Status
+	for i := 0; i < 100; i++ {
+		ss = eng2.Statuses()
+		if len(ss) == 1 && ss[0].Paused {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if len(ss) != 1 {
 		t.Fatalf("restore: want 1 torrent, got %d", len(ss))
 	}
@@ -330,5 +339,43 @@ func TestRemoveUnderDirContainment(t *testing.T) {
 	}
 	if _, err := os.Stat(inside); !os.IsNotExist(err) {
 		t.Fatalf("normal delete did not remove %q", inside)
+	}
+}
+
+// A dead/slow .torrent URL in the restore queue must not stall startup: URL
+// re-fetches run in the background, so NewAnacrolix returns promptly.
+func TestRestoreDoesNotBlockOnSlowURL(t *testing.T) {
+	dir := t.TempDir()
+	qpath := filepath.Join(dir, "queue.json")
+
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block // never responds until the test releases it
+	}))
+	defer srv.Close()
+
+	q := queue.LoadFrom(qpath)
+	q.Upsert(queue.Entry{InfoHash: "slow", TorrentURL: srv.URL, Name: "slow"})
+
+	type res struct {
+		eng *Anacrolix
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		eng, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+		done <- res{eng, err}
+	}()
+
+	select {
+	case r := <-done:
+		close(block) // release the server so the background fetch can finish
+		if r.err != nil {
+			t.Skipf("cannot start torrent client: %v", r.err)
+		}
+		r.eng.Close()
+	case <-time.After(5 * time.Second):
+		close(block)
+		t.Fatal("NewAnacrolix blocked on a slow .torrent-URL restore; URLs should re-fetch in the background")
 	}
 }
