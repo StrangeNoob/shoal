@@ -87,10 +87,24 @@ partial files or `d` delete them; `esc` aborts).
 followed by a **History** of everything you've downloaded (persisted across runs).
 
 **Settings** — theme (Twilight / Tide), color mode, save location, seed ratio, max peers,
-listen port. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
+listen port, and auto-update. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
 indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
+
+## Updating
+
+shoal can update itself from GitHub Releases:
+
+```sh
+shoal update     # fetch the latest release, verify its checksum, replace the binary
+shoal version    # print the installed version
+```
+
+`shoal update` downloads the archive for your OS/arch, checks its SHA-256 against the
+release's `checksums.txt`, and swaps the binary in place (restart to use it). On release
+builds, a launch-time check also shows a `↑ vX available` hint in the header. Turn on
+**Settings → Auto-update** to have shoal apply new releases automatically on launch.
 
 ## Project layout
 
@@ -128,19 +142,12 @@ make help       # all targets
 
 ## Roadmap
 
-Planned work — contributions welcome:
+Shipped: CI on every push/PR, tag-triggered GoReleaser releases, and self-update
+(`shoal update` + opt-in Auto-update). Still planned — contributions welcome:
 
-- **CI/CD (GitHub Actions).** Run `go build`, `go vet`, `gofmt`, and the test suite on
-  every push and pull request. The workflow uses `actions/setup-go` with dependency
-  caching, so Go modules are downloaded from the proxy once and cached on the runner and
-  reused across runs (keyed on `go.sum`) instead of being re-fetched every time.
-- **Automated releases.** A tag-triggered workflow (e.g. [GoReleaser](https://goreleaser.com))
-  that cross-compiles static binaries for macOS, Linux, and Windows and publishes them to
-  GitHub Releases — so `go install` isn't the only way in.
-- **Self-update.** A `shoal update` command (and an in-app prompt) that checks GitHub
-  Releases for a newer version and replaces the running binary in place.
 - **Pause / resume downloads** and **persist the active download queue** across restarts.
 - **More sources** behind the existing `source.Source` interface, each toggleable in Settings.
+- **Homebrew tap** as an additional install channel.
 
 ## A note on use
 
