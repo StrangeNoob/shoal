@@ -9,6 +9,9 @@ import (
 )
 
 func TestRunSourcesJSON(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
 	var buf bytes.Buffer
 	if code := runSources([]string{"--json"}, &buf); code != 0 {
 		t.Fatalf("exit = %d", code)
@@ -32,6 +35,9 @@ func TestRunSourcesJSON(t *testing.T) {
 }
 
 func TestRunSourcesPlain(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
 	var buf bytes.Buffer
 	if code := runSources(nil, &buf); code != 0 {
 		t.Fatalf("exit = %d", code)
