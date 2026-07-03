@@ -18,7 +18,7 @@ source fails.
 Integrated sources: Internet Archive, Open Media (curated), YTS, The Pirate Bay
 (Movies + TV), 1337x (Movies + TV), EZTV, SolidTorrents, Nyaa, SubsPlease, FitGirl.
 Get the exact list at runtime with `shoal sources` (or `shoal sources --json` for
-a JSON array of provider names).
+a JSON array of {name, enabled} objects).
 
 Results are sorted best-first (seeders, then popularity), so the top hit can come
 from any provider. To restrict to one, use `--source <name>` (case-insensitive

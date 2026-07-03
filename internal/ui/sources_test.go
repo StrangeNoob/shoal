@@ -60,3 +60,26 @@ func TestStartSearchRebuildsFromConfig(t *testing.T) {
 		m.searchCancel() // clean up the context startSearch created
 	}
 }
+
+func TestSettingsWindow(t *testing.T) {
+	counts := make([]int, 29)
+	for i := range counts {
+		counts[i] = 1
+	}
+	// a cursor near the end must be inside the window, and the window must fit avail
+	start, end := settingsWindow(counts, 25, 15)
+	if !(start <= 25 && 25 < end) {
+		t.Fatalf("cursor 25 not in window [%d,%d)", start, end)
+	}
+	total := 0
+	for i := start; i < end; i++ {
+		total += counts[i]
+	}
+	if total > 15 {
+		t.Fatalf("window is %d lines, exceeds avail 15", total)
+	}
+	// a short list is shown in full
+	if s, e := settingsWindow([]int{1, 1, 1}, 0, 15); s != 0 || e != 3 {
+		t.Fatalf("short list should be fully shown, got [%d,%d)", s, e)
+	}
+}

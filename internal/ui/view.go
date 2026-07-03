@@ -453,37 +453,97 @@ func (m Model) renderSeeding(w, h int) string {
 
 func (m Model) renderSettings(w, h int) string {
 	items := settingItems()
-	var b strings.Builder
+
+	// Render each row into its own block of lines (a group header, preceded by a
+	// blank separator, leads the first row of each group).
+	blocks := make([][]string, len(items))
+	counts := make([]int, len(items))
 	lastGroup := ""
 	for i, it := range items {
+		var ls []string
 		if it.group != lastGroup {
 			if lastGroup != "" {
-				b.WriteString("\n")
+				ls = append(ls, "")
 			}
-			b.WriteString(st.SectionHead.Render(it.group) + "\n")
+			ls = append(ls, st.SectionHead.Render(it.group))
 			lastGroup = it.group
 		}
-
 		sel := i == m.setCursor
 		cursor, labStyle := "  ", st.SetLabel
 		if sel {
 			cursor, labStyle = st.Accent.Render(glyphCursor+" "), st.SetLabelSel
 		}
 		label := labStyle.Render(padOrTrim(it.label, 13))
-
 		var val string
 		if sel && m.editingSetting {
 			val = m.setInput.View()
 		} else {
 			val = m.renderSettingValue(it)
 		}
-		b.WriteString(cursor + label + "  " + val + "\n")
+		ls = append(ls, cursor+label+"  "+val)
+		blocks[i], counts[i] = ls, len(ls)
 	}
 
-	// ABOUT is informational, not navigable.
-	b.WriteString("\n" + st.SectionHead.Render("ABOUT") + "\n")
-	b.WriteString("  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"))
-	return b.String()
+	// ABOUT is informational, not navigable — always pinned at the bottom.
+	about := []string{
+		"",
+		st.SectionHead.Render("ABOUT"),
+		"  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"),
+	}
+
+	// Window the navigable rows around the cursor so the selection is always
+	// visible even when the list is taller than the pane (e.g. many SOURCES rows).
+	avail := h - len(about)
+	if avail < 1 {
+		avail = 1
+	}
+	start, end := settingsWindow(counts, m.setCursor, avail)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		for _, ln := range blocks[i] {
+			b.WriteString(ln + "\n")
+		}
+	}
+	for _, ln := range about {
+		b.WriteString(ln + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// settingsWindow returns the [start,end) range of setting rows to render so that
+// the cursor is visible and the total line count fits in avail, growing outward
+// from the cursor (downward first, then upward).
+func settingsWindow(counts []int, cursor, avail int) (start, end int) {
+	n := len(counts)
+	if n == 0 {
+		return 0, 0
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= n {
+		cursor = n - 1
+	}
+	used := counts[cursor]
+	start, end = cursor, cursor+1
+	for {
+		grew := false
+		if end < n && used+counts[end] <= avail {
+			used += counts[end]
+			end++
+			grew = true
+		}
+		if start > 0 && used+counts[start-1] <= avail {
+			used += counts[start-1]
+			start--
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+	return start, end
 }
 
 func (m Model) renderSettingValue(it setItem) string {
