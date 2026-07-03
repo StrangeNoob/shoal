@@ -25,6 +25,12 @@ from any provider. To restrict to one, use `--source <name>` (case-insensitive
 substring), e.g. `--source archive`, `--source yts`, `--source nyaa`; an unknown
 name prints the available list.
 
+**EZTV is browse-only** — the EZTV API has no keyword search, so it returns
+nothing for `shoal search "<query>"` and never appears in results. That is by
+design, not an outage; don't treat its absence as a broken source. (For anime,
+rely on Nyaa and SubsPlease; for TV keyword search, The Pirate Bay, 1337x, and
+SolidTorrents cover it.)
+
 ## Flow
 
 1. **Search** — always with `--json`:
