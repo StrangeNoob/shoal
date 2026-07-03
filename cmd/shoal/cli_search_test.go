@@ -18,7 +18,7 @@ func TestToRowsSortsAndDerivesID(t *testing.T) {
 	in := []source.Result{
 		{Title: "Low", Seeders: 2, Magnet: "magnet:?xt=urn:btih:" + ih},
 		{Title: "High", Seeders: 40, Magnet: "magnet:?xt=urn:btih:" + ih},
-		{Title: "NoMagnet", Seeders: 99}, // no magnet -> id "—"
+		{Title: "NoMagnet", Seeders: 1}, // no magnet -> id "—", fewest seeders
 	}
 	rows := toRows(in, 30)
 	if rows[0].Title != "High" {

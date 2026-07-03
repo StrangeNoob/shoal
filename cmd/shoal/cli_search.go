@@ -32,11 +32,6 @@ type searchRow struct {
 // on them, so they're not "best" no matter how popular.
 func toRows(results []source.Result, limit int) []searchRow {
 	sort.SliceStable(results, func(i, j int) bool {
-		hi := source.ParseMagnetInfoHash(results[i].Magnet) != ""
-		hj := source.ParseMagnetInfoHash(results[j].Magnet) != ""
-		if hi != hj {
-			return hi
-		}
 		if results[i].Seeders != results[j].Seeders {
 			return results[i].Seeders > results[j].Seeders
 		}
@@ -115,12 +110,13 @@ func runSearch(args []string, out io.Writer) int {
 		return 2
 	}
 
-	srcs := source.DefaultSources()
+	all := source.DefaultSources()
+	srcs := all
 	if *srcName != "" {
-		srcs = filterSources(srcs, *srcName)
+		srcs = filterSources(all, *srcName)
 		if len(srcs) == 0 {
 			fmt.Fprintf(os.Stderr, "no source matches %q; available: %s\n",
-				*srcName, strings.Join(sourceNames(source.DefaultSources()), ", "))
+				*srcName, strings.Join(sourceNames(all), ", "))
 			return 1
 		}
 	}
