@@ -61,7 +61,7 @@ func (s Status) Ratio() float64 {
 // persisted config (internal/config); the UI never touches it directly.
 type Config struct {
 	DataDir    string  // where downloaded files land
-	ListenPort int     // BitTorrent listen port (0 = library default)
+	ListenPort int     // BitTorrent listen port (0 = library default, <0 = OS-assigned ephemeral)
 	MaxPeers   int     // max established connections per torrent (0 = default)
 	Seed       bool    // keep seeding finished torrents
 	SeedRatio  float64 // stop seeding a torrent once uploaded/size reaches this (0 = seed forever)

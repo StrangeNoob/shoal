@@ -168,7 +168,7 @@ func downloadWorker(id, target, dir, base string) int {
 	cfg := config.Load()
 	eng, err := engine.NewAnacrolix(engine.Config{
 		DataDir:    dir,
-		ListenPort: cfg.ListenPort,
+		ListenPort: -1, // OS-assigned ephemeral port: never collide with the TUI (6881) or another worker
 		MaxPeers:   cfg.MaxPeers,
 		Seed:       false, // one-shot: stop at 100%, don't seed forever
 		SeedRatio:  0,
