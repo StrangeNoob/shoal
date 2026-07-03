@@ -63,3 +63,35 @@ func TestSearchCoreWritesCacheAndJSON(t *testing.T) {
 		t.Fatalf("bad json: %s", b)
 	}
 }
+
+func TestSelectSearchSources(t *testing.T) {
+	all := source.DefaultSources() // offline: constructors only build structs
+
+	// --source overrides a disabled provider (searches the full set)
+	srcs, unknown, allDis := selectSearchSources(all, "eztv", []string{"EZTV"})
+	if unknown || allDis || len(srcs) == 0 {
+		t.Fatalf("--source should override disabled: srcs=%d unknown=%v allDis=%v", len(srcs), unknown, allDis)
+	}
+
+	// default (no --source) respects the disabled set
+	srcs, _, _ = selectSearchSources(all, "", []string{"EZTV"})
+	for _, s := range srcs {
+		if s.Name() == "EZTV" {
+			t.Fatal("disabled EZTV should not be searched by default")
+		}
+	}
+
+	// all disabled → allDisabled flag
+	var names []string
+	for _, s := range all {
+		names = append(names, s.Name())
+	}
+	if _, _, allDis = selectSearchSources(all, "", names); !allDis {
+		t.Fatal("disabling every source should report allDisabled")
+	}
+
+	// unknown --source
+	if _, unknown, _ = selectSearchSources(all, "zzzz", nil); !unknown {
+		t.Fatal("an unmatched --source should report unknownSource")
+	}
+}

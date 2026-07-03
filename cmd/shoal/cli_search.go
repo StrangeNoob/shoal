@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
@@ -96,6 +97,24 @@ func sourceNames(srcs []source.Source) []string {
 	return names
 }
 
+// selectSearchSources decides which providers a search hits. An explicit --source
+// filters the full set (overriding any disabled state); otherwise the config's
+// enabled set is used.
+func selectSearchSources(all []source.Source, srcName string, disabled []string) (srcs []source.Source, unknownSource, allDisabled bool) {
+	if srcName != "" {
+		srcs = filterSources(all, srcName)
+		if len(srcs) == 0 {
+			return nil, true, false
+		}
+		return srcs, false, false
+	}
+	srcs = source.EnabledSources(disabled)
+	if len(srcs) == 0 {
+		return nil, false, true
+	}
+	return srcs, false, false
+}
+
 func runSearch(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -111,15 +130,18 @@ func runSearch(args []string, out io.Writer) int {
 		return 2
 	}
 
+	cfg := config.Load()
 	all := source.DefaultSources()
-	srcs := all
-	if *srcName != "" {
-		srcs = filterSources(all, *srcName)
-		if len(srcs) == 0 {
-			fmt.Fprintf(os.Stderr, "no source matches %q; available: %s\n",
-				*srcName, strings.Join(sourceNames(all), ", "))
-			return 1
-		}
+	srcs, unknownSource, allDisabled := selectSearchSources(all, *srcName, cfg.DisabledSources)
+	if unknownSource {
+		fmt.Fprintf(os.Stderr, "no source matches %q; available: %s\n",
+			*srcName, strings.Join(sourceNames(all), ", "))
+		return 1
+	}
+	if allDisabled {
+		fmt.Fprintln(os.Stderr, "all sources are disabled — enable one with 'shoal sources enable <name>'")
+		printSearch(out, []searchRow{}, *jsonOut) // empty result set ("[]" for --json)
+		return 0
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
