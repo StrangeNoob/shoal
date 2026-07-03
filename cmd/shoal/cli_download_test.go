@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
+)
 
 func TestResolveTarget(t *testing.T) {
 	lookup := func(id string) (string, bool) {
@@ -55,5 +61,63 @@ func TestResolveTargetNilLookup(t *testing.T) {
 	got, err := resolveTarget("deadbeef", nil)
 	if err == nil {
 		t.Fatalf("nil lookup should error, got %+v", got)
+	}
+}
+
+type fakeEngine struct {
+	frames [][]engine.Status
+	i      int
+}
+
+func (f *fakeEngine) AddTorrentURL(string, string) error { return nil }
+func (f *fakeEngine) AddMagnet(string) error             { return nil }
+func (f *fakeEngine) Remove(string, bool) error          { return nil }
+func (f *fakeEngine) Pause(string) error                 { return nil }
+func (f *fakeEngine) Resume(string) error                { return nil }
+func (f *fakeEngine) Close() error                       { return nil }
+func (f *fakeEngine) Statuses() []engine.Status {
+	if f.i < len(f.frames) {
+		s := f.frames[f.i]
+		f.i++
+		return s
+	}
+	if len(f.frames) == 0 {
+		return nil
+	}
+	return f.frames[len(f.frames)-1]
+}
+
+func TestStepWorkerProgressAndDone(t *testing.T) {
+	base := t.TempDir()
+	eng := &fakeEngine{frames: [][]engine.Status{
+		{{InfoHash: "ffff0000", Name: "Movie", TotalBytes: 100, CompletedBytes: 40, Peers: 3}},
+		{{InfoHash: "ffff0000", Name: "Movie", TotalBytes: 100, CompletedBytes: 100, Done: true, Path: "/data/Movie"}},
+	}}
+	a := Active{ID: "ffff0000"}
+	if done := stepWorker(eng, base, &a); done {
+		t.Fatal("frame 1 should not be done")
+	}
+	got, _ := readActive(base, "ffff0000")
+	if got.Completed != 40 || got.Name != "Movie" || got.Peers != 3 {
+		t.Fatalf("mid-progress not written: %+v", got)
+	}
+	if done := stepWorker(eng, base, &a); !done {
+		t.Fatal("frame 2 should be done")
+	}
+	got, _ = readActive(base, "ffff0000")
+	if !got.Done || got.Path != "/data/Movie" {
+		t.Fatalf("done state not written: %+v", got)
+	}
+}
+
+func TestRunWorkerRecordsHistory(t *testing.T) {
+	base := t.TempDir()
+	eng := &fakeEngine{frames: [][]engine.Status{
+		{{InfoHash: "eeee1111", Name: "Done", TotalBytes: 10, CompletedBytes: 10, Done: true, Path: "/d/Done"}},
+	}}
+	hist := history.Store{Path: base + "/history.json"}
+	runWorker(eng, base, Active{ID: "eeee1111"}, &hist, time.Millisecond)
+	if len(hist.Entries) != 1 || hist.Entries[0].Name != "Done" || hist.Entries[0].Path != "/d/Done" {
+		t.Fatalf("history not recorded: %+v", hist.Entries)
 	}
 }

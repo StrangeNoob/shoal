@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
@@ -50,5 +53,53 @@ func resolveTarget(arg string, lookup func(id string) (string, bool)) (dlTarget,
 		return dlTarget{}, fmt.Errorf("no recent search contains id %s; run `shoal search` first", id)
 	default:
 		return dlTarget{}, fmt.Errorf("unrecognized download target: %s", s)
+	}
+}
+
+func firstStatus(ss []engine.Status) *engine.Status {
+	if len(ss) == 0 {
+		return nil
+	}
+	return &ss[0]
+}
+
+// stepWorker performs one poll: refreshes a from the engine and writes the state
+// file. Returns true once the (single) torrent is done.
+func stepWorker(eng engine.Engine, base string, a *Active) (done bool) {
+	st := firstStatus(eng.Statuses())
+	if st == nil {
+		return false
+	}
+	a.InfoHash = st.InfoHash
+	if st.Name != "" {
+		a.Name = st.Name
+	}
+	a.Total = st.TotalBytes
+	a.Completed = st.CompletedBytes
+	a.Peers = st.Peers
+	a.Seeding = st.Seeding
+	a.Path = st.Path
+	a.Done = st.Done
+	a.UpdatedAt = time.Now()
+	_ = writeActive(base, *a)
+	return st.Done
+}
+
+// runWorker polls until the download completes, then records it to history.
+func runWorker(eng engine.Engine, base string, a Active, hist *history.Store, interval time.Duration) {
+	_ = writeActive(base, a) // show up in `status` immediately
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for range tick.C {
+		if stepWorker(eng, base, &a) {
+			hist.Append(history.Entry{
+				InfoHash:    a.InfoHash,
+				Name:        a.Name,
+				Size:        a.Total,
+				CompletedAt: time.Now(),
+				Path:        a.Path,
+			})
+			return
+		}
 	}
 }
