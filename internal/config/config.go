@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config is the persisted user configuration. Path is where it was loaded from
@@ -27,6 +28,9 @@ type Config struct {
 	MaxPeers   int     `json:"max_peers"`   // max connections per torrent
 	ListenPort int     `json:"listen_port"` // BitTorrent listen port
 
+	// Search
+	DisabledSources []string `json:"disabled_sources,omitempty"` // provider Name()s the user turned off
+
 	// Updates
 	AutoUpdate bool `json:"auto_update"` // apply the latest release automatically on launch
 }
@@ -43,6 +47,33 @@ func Default() Config {
 		MaxPeers:   200,
 		ListenPort: 6881,
 	}
+}
+
+// SourceEnabled reports whether a provider name is enabled (i.e. not present in
+// DisabledSources). Matching is case-insensitive.
+func (c Config) SourceEnabled(name string) bool {
+	for _, d := range c.DisabledSources {
+		if strings.EqualFold(d, name) {
+			return false
+		}
+	}
+	return true
+}
+
+// SetSourceEnabled turns a provider on or off, updating DisabledSources
+// (case-insensitive, deduped, order-stable). Storing the given name verbatim
+// when disabling.
+func (c *Config) SetSourceEnabled(name string, enabled bool) {
+	var kept []string
+	for _, d := range c.DisabledSources {
+		if !strings.EqualFold(d, name) {
+			kept = append(kept, d)
+		}
+	}
+	if !enabled {
+		kept = append(kept, name)
+	}
+	c.DisabledSources = kept
 }
 
 // Load reads the config file, falling back to defaults for the whole file (first
