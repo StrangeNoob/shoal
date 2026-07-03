@@ -29,7 +29,9 @@ type parsedMagnet struct {
 	Magnet   string
 }
 
-var magnetHashRE = regexp.MustCompile(`(?i)xt=urn:btih:([a-f0-9]{40}|[a-z2-7]{32})`)
+// The colons in xt=urn:btih: are literal in raw magnets but percent-encoded to
+// %3a by url.Values.Encode (which buildMagnet uses), so accept either form.
+var magnetHashRE = regexp.MustCompile(`(?i)xt=urn(?::|%3a)btih(?::|%3a)([a-f0-9]{40}|[a-z2-7]{32})`)
 
 // ParseMagnetInfoHash returns the 40-char hex infohash from a magnet URI, or ""
 // when the input isn't a magnet the client understands.

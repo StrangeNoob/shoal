@@ -44,3 +44,27 @@ func TestCLIVersionAndHelp(t *testing.T) {
 		t.Fatal("no-args should not be handled by cli()")
 	}
 }
+
+func TestCLIRoutesNewSubcommands(t *testing.T) {
+	var buf bytes.Buffer
+	for _, name := range []string{"search", "download", "status"} {
+		// Missing operands make these exit non-zero, but they must be *handled*
+		// (not fall through to launching the TUI).
+		handled, _ := cli([]string{"shoal", name}, "1.0.0", &buf)
+		if !handled {
+			t.Errorf("cli did not handle %q", name)
+		}
+	}
+	if handled, _ := cli([]string{"shoal"}, "1.0.0", &buf); handled {
+		t.Error("no-arg invocation should fall through to the TUI")
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	if got := displayName(dlTarget{URL: "https://x/y.torrent"}); got != "https://x/y.torrent" {
+		t.Errorf("url name = %q", got)
+	}
+	if got := displayName(dlTarget{Magnet: "magnet:?xt=urn:btih:abc&dn=Big+Buck"}); got != "Big Buck" {
+		t.Errorf("magnet name = %q, want 'Big Buck'", got)
+	}
+}

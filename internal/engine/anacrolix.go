@@ -82,6 +82,10 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	// EstablishedConnsPerTorrent both exist on ClientConfig.
 	if c.ListenPort > 0 {
 		cfg.SetListenAddr(fmt.Sprintf(":%d", c.ListenPort))
+	} else if c.ListenPort < 0 {
+		// A negative port requests an OS-assigned ephemeral port, so background
+		// CLI download workers never collide with the TUI (6881) or each other.
+		cfg.SetListenAddr(":0")
 	}
 	if c.MaxPeers > 0 {
 		cfg.EstablishedConnsPerTorrent = c.MaxPeers
