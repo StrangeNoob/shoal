@@ -91,6 +91,60 @@ listen port, and auto-update. `↑ ↓` move, `← →` change an option, `enter
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
 indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
+(EZTV has no keyword-search API, so it only appears in empty-query browse, not in a
+keyword search.)
+
+## Command line (scripting)
+
+Besides the fullscreen TUI, `shoal` has non-interactive subcommands so a script — or an
+AI agent — can search and download without the UI. Run `shoal` with no arguments for the
+TUI; with a subcommand for scripting:
+
+```sh
+shoal sources                        # list the search providers (add --json)
+shoal search "big buck bunny"        # search every source (add --json for scripts)
+shoal download <magnet|url|infohash|id> [--out <dir>]   # download in the background
+shoal status [id]                    # progress of background downloads (--json, --clear)
+```
+
+- **`search`** queries all sources concurrently and prints a table (a short id per row),
+  or a JSON array with the full magnet for each result via `--json`. Narrow to one
+  provider with `--source <name>`, cap results with `--limit <N>`.
+- **`download`** accepts a magnet, a `.torrent` URL, a 40-char infohash, or a short id
+  from your last `search`. It starts the download **in the background** and returns
+  immediately with a handle; files land in `~/Downloads/shoal` unless you pass `--out`.
+- **`status`** reports each background download as `downloading | done | error | stalled`;
+  `--clear` prunes finished entries.
+
+### Claude Code skill
+
+This repo ships a [Claude Code](https://claude.com/claude-code) skill
+(`.claude/skills/shoal-download/`) that teaches Claude to drive those commands — so you
+can just say *"find and download Big Buck Bunny"* and it searches, picks the best match,
+downloads in the background, and reports progress.
+
+**No registration or config is required** — Claude Code discovers skills from the
+filesystem. Two ways to use it:
+
+- **Inside this repo:** run `claude` from a shoal checkout and the project-scoped skill in
+  `.claude/skills/` loads automatically — nothing to install.
+- **Everywhere (recommended):** copy it into your personal skills directory so it works in
+  any project. You need the `shoal` binary on your `PATH` (see [Install](#install)) plus
+  the skill file:
+
+  ```sh
+  mkdir -p ~/.claude/skills/shoal-download
+  curl -fsSL https://raw.githubusercontent.com/StrangeNoob/shoal/main/.claude/skills/shoal-download/SKILL.md \
+    -o ~/.claude/skills/shoal-download/SKILL.md
+  ```
+
+  Restart Claude Code once (a brand-new skills directory is picked up on next launch),
+  then ask it to find and download something.
+
+The skill is plain Markdown with `name`/`description` frontmatter: Claude loads that
+summary at startup and reads the full instructions on demand when your request matches.
+See the [Claude Code skills docs](https://code.claude.com/docs/en/skills) for the full
+mechanics.
 
 ## Updating
 
