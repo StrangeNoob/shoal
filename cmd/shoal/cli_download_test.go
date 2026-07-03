@@ -117,7 +117,8 @@ func TestRunWorkerRecordsHistory(t *testing.T) {
 	}}
 	hist := history.Store{Path: base + "/history.json"}
 	runWorker(eng, base, Active{ID: "eeee1111"}, &hist, time.Millisecond)
-	if len(hist.Entries) != 1 || hist.Entries[0].Name != "Done" || hist.Entries[0].Path != "/d/Done" {
-		t.Fatalf("history not recorded: %+v", hist.Entries)
+	got := history.LoadFrom(hist.Path)
+	if len(got.Entries) != 1 || got.Entries[0].Name != "Done" || got.Entries[0].Path != "/d/Done" {
+		t.Fatalf("history not recorded: %+v", got.Entries)
 	}
 }

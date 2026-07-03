@@ -44,7 +44,7 @@ func resolveTarget(arg string, lookup func(id string) (string, bool)) (dlTarget,
 			return dlTarget{}, fmt.Errorf("magnet has no infohash: %s", s)
 		}
 		return dlTarget{Magnet: s, Handle: ih[:8]}, nil
-	case strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "https://"):
+	case strings.HasPrefix(strings.ToLower(s), "http://"), strings.HasPrefix(strings.ToLower(s), "https://"):
 		sum := sha1.Sum([]byte(s))
 		return dlTarget{URL: s, Handle: hex.EncodeToString(sum[:])[:8]}, nil
 	case hex40RE.MatchString(s):
@@ -99,7 +99,11 @@ func runWorker(eng engine.Engine, base string, a Active, hist *history.Store, in
 	defer tick.Stop()
 	for range tick.C {
 		if stepWorker(eng, base, &a) {
-			hist.Append(history.Entry{
+			// This worker may have started hours ago; reload just before appending
+			// so a concurrent worker/TUI completion isn't clobbered by Save (which
+			// overwrites the whole file). Shrinks the race window to milliseconds.
+			fresh := history.LoadFrom(hist.Path)
+			fresh.Append(history.Entry{
 				InfoHash:    a.InfoHash,
 				Name:        a.Name,
 				Size:        a.Total,

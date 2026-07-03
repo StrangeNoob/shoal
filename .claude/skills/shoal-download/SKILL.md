@@ -31,7 +31,8 @@ Shoal exposes three non-interactive commands. Use them; never launch the bare
    Each poll returns `{state, percent, completed, total, peers, ...}`.
    - `state == "done"` → report the final path, stop.
    - `state == "error"` or `"stalled"` → report the failure (check
-     `~/.config/shoal/logs/<handle>.log` if the user wants detail), stop.
+     the log in shoal's config dir — `~/Library/Application Support/shoal/logs/<handle>.log`
+     on macOS, `~/.config/shoal/logs/<handle>.log` on Linux — if the user wants detail), stop.
    - otherwise → keep polling. Give up after a reasonable number of polls with no
      progress and tell the user it is stuck.
 

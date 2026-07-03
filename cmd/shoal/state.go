@@ -2,10 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var idRE = regexp.MustCompile(`^[0-9a-fA-F]{8}$`)
 
 // Active is one background download's live state — one JSON file per download,
 // written only by that download's worker (no locking).
@@ -45,6 +49,9 @@ func configDir() string {
 }
 
 func writeActive(base string, a Active) error {
+	if !idRE.MatchString(a.ID) {
+		return fmt.Errorf("invalid download id %q", a.ID)
+	}
 	dir := activeDir(base)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -66,6 +73,9 @@ func writeActive(base string, a Active) error {
 
 func readActive(base, id string) (Active, error) {
 	var a Active
+	if !idRE.MatchString(id) {
+		return Active{}, fmt.Errorf("invalid download id %q", id)
+	}
 	b, err := os.ReadFile(filepath.Join(activeDir(base), id+".json"))
 	if err != nil {
 		return a, err
