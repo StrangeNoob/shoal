@@ -63,6 +63,7 @@ const usage = `shoal — a calm BitTorrent client for your terminal
 
 Usage:
   shoal                         launch the fullscreen TUI
+  shoal sources                 list the searchable torrent sources (add --json)
   shoal search "<query>"        search torrent sources (add --json for scripts)
   shoal download <id|magnet>    download in the background (add --out <dir>)
   shoal status [id]             show download progress (add --json, --clear)
@@ -86,6 +87,8 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, 0
 	case "update":
 		return true, runUpdate(out, version)
+	case "sources":
+		return true, runSources(args[2:], out)
 	case "search":
 		return true, runSearch(args[2:], out)
 	case "download":
