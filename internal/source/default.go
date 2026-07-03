@@ -16,9 +16,11 @@ func NewTorlinkSources() []Source {
 	}
 }
 
-// NewDefault returns shoal's default multi-source catalogue.
-func NewDefault() *MultiSource {
+// DefaultSources returns shoal's default provider set (archive + curated + torlink).
+func DefaultSources() []Source {
 	sources := []Source{NewArchive(), NewCurated()}
-	sources = append(sources, NewTorlinkSources()...)
-	return NewMulti(sources...)
+	return append(sources, NewTorlinkSources()...)
 }
+
+// NewDefault returns shoal's default multi-source catalogue.
+func NewDefault() *MultiSource { return NewMulti(DefaultSources()...) }
