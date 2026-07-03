@@ -16,6 +16,7 @@ func TestStateOf(t *testing.T) {
 	}{
 		{Active{Error: "boom"}, alive, "error"},
 		{Active{Done: true}, alive, "done"},
+		{Active{Done: true, Pid: 42}, dead, "done"}, // done wins over stalled even with a dead pid
 		{Active{Pid: 42}, dead, "stalled"},
 		{Active{Pid: 42}, alive, "downloading"},
 	}

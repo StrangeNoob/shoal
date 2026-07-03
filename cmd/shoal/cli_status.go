@@ -56,7 +56,7 @@ func printStatus(out io.Writer, items []Active, asJSON bool, alive func(int) boo
 func runStatus(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	clear := fs.Bool("clear", false, "remove finished/errored entries after printing")
+	clear := fs.Bool("clear", false, "remove ALL finished/errored entries after printing")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
