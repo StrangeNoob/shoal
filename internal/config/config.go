@@ -61,19 +61,23 @@ func (c Config) SourceEnabled(name string) bool {
 }
 
 // SetSourceEnabled turns a provider on or off, updating DisabledSources
-// (case-insensitive, deduped, order-stable). Storing the given name verbatim
+// (case-insensitive, deduped, order-stable). Stores the given name verbatim
 // when disabling.
 func (c *Config) SetSourceEnabled(name string, enabled bool) {
-	var kept []string
-	for _, d := range c.DisabledSources {
-		if !strings.EqualFold(d, name) {
-			kept = append(kept, d)
+	idx := -1
+	for i, d := range c.DisabledSources {
+		if strings.EqualFold(d, name) {
+			idx = i
+			break
 		}
 	}
-	if !enabled {
-		kept = append(kept, name)
+	switch {
+	case enabled && idx >= 0: // remove, preserving the order of the rest
+		c.DisabledSources = append(c.DisabledSources[:idx], c.DisabledSources[idx+1:]...)
+	case !enabled && idx < 0: // new disable → append
+		c.DisabledSources = append(c.DisabledSources, name)
 	}
-	c.DisabledSources = kept
+	// enabled && idx<0, and !enabled && idx>=0, are both no-ops (order untouched)
 }
 
 // Load reads the config file, falling back to defaults for the whole file (first

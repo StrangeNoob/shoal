@@ -29,6 +29,18 @@ func TestSourceEnabledToggle(t *testing.T) {
 	}
 }
 
+func TestSetSourceEnabledOrderStable(t *testing.T) {
+	c := Config{DisabledSources: []string{"Alpha", "Beta"}}
+	c.SetSourceEnabled("Alpha", false) // redundant disable must not reorder
+	if len(c.DisabledSources) != 2 || c.DisabledSources[0] != "Alpha" || c.DisabledSources[1] != "Beta" {
+		t.Fatalf("redundant disable reordered: %v", c.DisabledSources)
+	}
+	c.SetSourceEnabled("Alpha", true) // enable removes Alpha, preserves Beta
+	if len(c.DisabledSources) != 1 || c.DisabledSources[0] != "Beta" {
+		t.Fatalf("enable didn't preserve order: %v", c.DisabledSources)
+	}
+}
+
 func TestDisabledSourcesJSONRoundTrip(t *testing.T) {
 	c := Config{DisabledSources: []string{"EZTV", "FitGirl"}}
 	b, _ := json.Marshal(c)
