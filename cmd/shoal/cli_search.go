@@ -100,7 +100,7 @@ func runSearch(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	srcName := fs.String("source", "", "limit to sources matching name")
-	limit := fs.Int("limit", 30, "max results")
+	limit := fs.Int("limit", 30, "max results (0 = no limit)")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2

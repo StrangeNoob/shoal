@@ -85,7 +85,9 @@ func stepWorker(eng engine.Engine, base string, a *Active) (done bool) {
 	a.Completed = st.CompletedBytes
 	a.Peers = st.Peers
 	a.Seeding = st.Seeding
-	a.Path = st.Path
+	if st.Path != "" { // don't clobber a known path with an empty pre-metadata poll (mirrors Name)
+		a.Path = st.Path
+	}
 	a.Done = st.Done
 	a.UpdatedAt = time.Now()
 	_ = writeActive(base, *a)
@@ -143,7 +145,7 @@ func runDownload(args []string, out io.Writer) int {
 	}
 
 	if *worker {
-		return downloadWorker(*id, arg, dir, base)
+		return downloadWorker(*id, arg, dir, base, cfg.MaxPeers)
 	}
 
 	tgt, err := resolveTarget(arg, func(sid string) (string, bool) {
@@ -168,12 +170,11 @@ func runDownload(args []string, out io.Writer) int {
 
 // downloadWorker is the detached child: build the engine, add the one torrent,
 // and run the progress loop to completion.
-func downloadWorker(id, target, dir, base string) int {
-	cfg := config.Load()
+func downloadWorker(id, target, dir, base string, maxPeers int) int {
 	eng, err := engine.NewAnacrolix(engine.Config{
 		DataDir:    dir,
 		ListenPort: -1, // OS-assigned ephemeral port: never collide with the TUI (6881) or another worker
-		MaxPeers:   cfg.MaxPeers,
+		MaxPeers:   maxPeers,
 		Seed:       false, // one-shot: stop at 100%, don't seed forever
 		SeedRatio:  0,
 		QueuePath:  "", // never touch the TUI's persistent queue
