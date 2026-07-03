@@ -284,6 +284,9 @@ func (m *Model) startSearch(query string) tea.Cmd {
 	m.searching = true
 	m.hasSearched = true
 
+	// ponytail: keyed to the concrete *MultiSource that main.go injects. If the
+	// production wiring ever wraps or replaces that source, live toggles silently
+	// stop — re-thread the config into the source there instead.
 	if _, ok := m.src.(*source.MultiSource); ok {
 		m.src = m.enabledSource() // honor live source toggles; leave injected (test) sources untouched
 	}

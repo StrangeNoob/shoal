@@ -44,3 +44,19 @@ func TestEnabledSourceHonorsConfig(t *testing.T) {
 		t.Fatal("only one disabled — the set should be non-empty")
 	}
 }
+
+func TestStartSearchRebuildsFromConfig(t *testing.T) {
+	var names []string
+	for _, s := range source.DefaultSources() {
+		names = append(names, s.Name())
+	}
+	// production-shaped: m.src is a real *MultiSource; every provider disabled
+	m := &Model{src: source.NewDefault(), cfg: config.Config{DisabledSources: names}}
+	_ = m.startSearch("anything")
+	if m.src.Name() != "no sources" {
+		t.Fatalf("startSearch should rebuild m.src from config; got %q", m.src.Name())
+	}
+	if m.searchCancel != nil {
+		m.searchCancel() // clean up the context startSearch created
+	}
+}
