@@ -47,7 +47,7 @@ func TestCLIVersionAndHelp(t *testing.T) {
 
 func TestCLIRoutesNewSubcommands(t *testing.T) {
 	var buf bytes.Buffer
-	for _, name := range []string{"sources", "search", "download", "status"} {
+	for _, name := range []string{"skill", "sources", "search", "download", "status"} {
 		// Missing operands make these exit non-zero, but they must be *handled*
 		// (not fall through to launching the TUI).
 		handled, _ := cli([]string{"shoal", name}, "1.0.0", &buf)

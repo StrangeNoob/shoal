@@ -67,6 +67,7 @@ Usage:
   shoal search "<query>"        search torrent sources (add --json for scripts)
   shoal download <id|magnet>    download in the background (add --out <dir>)
   shoal status [id]             show download progress (add --json, --clear)
+  shoal skill install           install the Claude Code skill (~/.claude/skills)
   shoal update                  update shoal to the latest release
   shoal version                 print the version
   shoal help                    show this help
@@ -87,6 +88,8 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, 0
 	case "update":
 		return true, runUpdate(out, version)
+	case "skill":
+		return true, runSkill(args[2:], out)
 	case "sources":
 		return true, runSources(args[2:], out)
 	case "search":
