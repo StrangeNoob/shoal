@@ -50,3 +50,10 @@ func TestResolveTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveTargetNilLookup(t *testing.T) {
+	got, err := resolveTarget("deadbeef", nil)
+	if err == nil {
+		t.Fatalf("nil lookup should error, got %+v", got)
+	}
+}
