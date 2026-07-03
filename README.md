@@ -128,18 +128,17 @@ filesystem. Two ways to use it:
 
 - **Inside this repo:** run `claude` from a shoal checkout and the project-scoped skill in
   `.claude/skills/` loads automatically — nothing to install.
-- **Everywhere (recommended):** copy it into your personal skills directory so it works in
-  any project. You need the `shoal` binary on your `PATH` (see [Install](#install)) plus
-  the skill file:
+- **Everywhere (recommended):** with the `shoal` binary on your `PATH` (see
+  [Install](#install)), run:
 
   ```sh
-  mkdir -p ~/.claude/skills/shoal-download
-  curl -fsSL https://raw.githubusercontent.com/StrangeNoob/shoal/main/.claude/skills/shoal-download/SKILL.md \
-    -o ~/.claude/skills/shoal-download/SKILL.md
+  shoal skill install      # → ~/.claude/skills/shoal-download/SKILL.md
   ```
 
-  Restart Claude Code once (a brand-new skills directory is picked up on next launch),
-  then ask it to find and download something.
+  The skill is embedded in the binary, so this works offline and installs the version that
+  matches your `shoal`. Restart Claude Code once (a brand-new skills directory is picked up
+  on next launch), then ask it to find and download something. Re-run with `--force` after a
+  `shoal update` to refresh the installed skill.
 
 The skill is plain Markdown with `name`/`description` frontmatter: Claude loads that
 summary at startup and reads the full instructions on demand when your request matches.
