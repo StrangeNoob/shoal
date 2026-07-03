@@ -284,6 +284,9 @@ func (m *Model) startSearch(query string) tea.Cmd {
 	m.searching = true
 	m.hasSearched = true
 
+	if _, ok := m.src.(*source.MultiSource); ok {
+		m.src = m.enabledSource() // honor live source toggles; leave injected (test) sources untouched
+	}
 	ss, ok := m.src.(streamSearcher)
 	if !ok {
 		return searchCmd(m.src, query)
@@ -295,6 +298,12 @@ func (m *Model) startSearch(query string) tea.Cmd {
 	gen := m.searchGen
 	go ss.SearchStream(ctx, query, ch)
 	return waitForUpdate(gen, ch)
+}
+
+// enabledSource builds the search source set from the current config, so source
+// toggles take effect on the next search without a restart.
+func (m *Model) enabledSource() source.Source {
+	return source.NewMulti(source.EnabledSources(m.cfg.DisabledSources)...)
 }
 
 func waitForUpdate(gen int, ch chan source.SourceUpdate) tea.Cmd {
@@ -975,7 +984,7 @@ type setItem struct {
 // are a render concern). Editing a value applies its side effect immediately
 // and the change is persisted by the caller.
 func settingItems() []setItem {
-	return []setItem{
+	items := []setItem{
 		{group: "APPEARANCE", label: "Theme", kind: kindEnum, options: []string{"Twilight", "Tide"},
 			get: func(m *Model) string { return m.cfg.Theme },
 			set: func(m *Model, v string) { m.cfg.Theme = v; m.applyTheme() }},
@@ -1027,6 +1036,20 @@ func settingItems() []setItem {
 			},
 			set: func(m *Model, v string) { m.cfg.AutoUpdate = v == "on" }},
 	}
+	for _, s := range source.DefaultSources() {
+		name := s.Name() // capture per iteration (avoid the loop-variable closure bug)
+		items = append(items, setItem{
+			group: "SOURCES", label: name, kind: kindEnum, options: []string{"on", "off"},
+			get: func(m *Model) string {
+				if m.cfg.SourceEnabled(name) {
+					return "on"
+				}
+				return "off"
+			},
+			set: func(m *Model, v string) { m.cfg.SetSourceEnabled(name, v == "on") },
+		})
+	}
+	return items
 }
 
 func (m *Model) settingsChange(dir int) {
