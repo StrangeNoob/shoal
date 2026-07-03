@@ -101,10 +101,11 @@ func runSearch(args []string, out io.Writer) int {
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	srcName := fs.String("source", "", "limit to sources matching name")
 	limit := fs.Int("limit", 30, "max results")
-	if err := fs.Parse(args); err != nil {
+	positionals, err := parseArgs(fs, args)
+	if err != nil {
 		return 2
 	}
-	query := strings.Join(fs.Args(), " ")
+	query := strings.Join(positionals, " ")
 	if query == "" {
 		fmt.Fprintln(os.Stderr, `usage: shoal search "<query>" [--json] [--source name] [--limit N]`)
 		return 2

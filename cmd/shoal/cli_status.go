@@ -57,12 +57,14 @@ func runStatus(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	clear := fs.Bool("clear", false, "remove finished/errored entries after printing")
-	if err := fs.Parse(args); err != nil {
+	positionals, err := parseArgs(fs, args)
+	if err != nil {
 		return 2
 	}
 	base := configDir()
 	var items []Active
-	if id := fs.Arg(0); id != "" {
+	if len(positionals) > 0 && positionals[0] != "" {
+		id := positionals[0]
 		a, err := readActive(base, id)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "no such download: %s\n", id)

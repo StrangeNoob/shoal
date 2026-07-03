@@ -118,10 +118,14 @@ func runDownload(args []string, out io.Writer) int {
 	worker := fs.Bool("worker", false, "") // hidden: marks the detached child
 	id := fs.String("id", "", "")          // hidden: worker handle
 	outDir := fs.String("out", "", "download directory")
-	if err := fs.Parse(args); err != nil {
+	positionals, err := parseArgs(fs, args)
+	if err != nil {
 		return 2
 	}
-	arg := fs.Arg(0)
+	var arg string
+	if len(positionals) > 0 {
+		arg = positionals[0]
+	}
 	if arg == "" {
 		fmt.Fprintln(os.Stderr, "usage: shoal download <magnet|url|infohash|id> [--out dir]")
 		return 2
