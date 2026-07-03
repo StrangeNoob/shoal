@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -38,7 +39,18 @@ func (m *MultiSource) Name() string {
 // Search queries every source concurrently and merges the hits. A source that
 // fails is skipped; an error is only returned if *every* source failed, so one
 // flaky provider never blanks the results.
+// normalizeQuery folds a search query to lowercase before it is fanned out to
+// the providers. Torrent search is case-insensitive by intent, but some upstream
+// APIs are not: apibay (The Pirate Bay) returns nothing for "Her" yet 100 hits
+// for "her". Every source is safe to receive a lowercased query — the local
+// matchers (curated, 1337x) already lowercase internally, and the rest hit
+// case-insensitive remote APIs.
+func normalizeQuery(query string) string {
+	return strings.ToLower(query)
+}
+
 func (m *MultiSource) Search(ctx context.Context, query string) ([]Result, error) {
+	query = normalizeQuery(query)
 	results := make([][]Result, len(m.sources))
 	errs := make([]error, len(m.sources))
 
@@ -89,6 +101,7 @@ type SourceUpdate struct {
 // error travels in SourceUpdate.Err and does not abort the others.
 func (m *MultiSource) SearchStream(ctx context.Context, query string, ch chan<- SourceUpdate) {
 	defer close(ch)
+	query = normalizeQuery(query)
 	total := len(m.sources)
 	if total == 0 {
 		return
