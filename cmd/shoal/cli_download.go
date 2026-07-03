@@ -3,11 +3,18 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"flag"
 	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
@@ -102,4 +109,122 @@ func runWorker(eng engine.Engine, base string, a Active, hist *history.Store, in
 			return
 		}
 	}
+}
+
+// runDownload is the `download` entrypoint. The parent resolves the target and
+// spawns a detached worker; --worker runs the actual download loop.
+func runDownload(args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("download", flag.ContinueOnError)
+	worker := fs.Bool("worker", false, "") // hidden: marks the detached child
+	id := fs.String("id", "", "")          // hidden: worker handle
+	outDir := fs.String("out", "", "download directory")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	arg := fs.Arg(0)
+	if arg == "" {
+		fmt.Fprintln(os.Stderr, "usage: shoal download <magnet|url|infohash|id> [--out dir]")
+		return 2
+	}
+
+	cfg := config.Load()
+	base := configDir()
+	dir := cfg.DataDir
+	if *outDir != "" {
+		dir = *outDir
+	}
+
+	if *worker {
+		return downloadWorker(*id, arg, dir, base)
+	}
+
+	tgt, err := resolveTarget(arg, func(sid string) (string, bool) {
+		e, ok := lookupCache(base, sid)
+		return e.Magnet, ok
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	target := tgt.Magnet
+	if target == "" {
+		target = tgt.URL
+	}
+	if err := spawnWorker(tgt.Handle, target, dir, base); err != nil {
+		fmt.Fprintln(os.Stderr, "failed to start download:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "started: %s (%s)\n", displayName(tgt), tgt.Handle)
+	return 0
+}
+
+// downloadWorker is the detached child: build the engine, add the one torrent,
+// and run the progress loop to completion.
+func downloadWorker(id, target, dir, base string) int {
+	cfg := config.Load()
+	eng, err := engine.NewAnacrolix(engine.Config{
+		DataDir:    dir,
+		ListenPort: cfg.ListenPort,
+		MaxPeers:   cfg.MaxPeers,
+		Seed:       false, // one-shot: stop at 100%, don't seed forever
+		SeedRatio:  0,
+		QueuePath:  "", // never touch the TUI's persistent queue
+	})
+	a := Active{ID: id, Out: dir, Pid: os.Getpid(), UpdatedAt: time.Now()}
+	if err != nil {
+		a.Error = err.Error()
+		_ = writeActive(base, a)
+		return 1
+	}
+	defer eng.Close()
+
+	if strings.HasPrefix(strings.ToLower(target), "magnet:") {
+		err = eng.AddMagnet(target)
+	} else {
+		err = eng.AddTorrentURL(target, "")
+	}
+	if err != nil {
+		a.Error = err.Error()
+		_ = writeActive(base, a)
+		return 1
+	}
+
+	hist := history.Load()
+	runWorker(eng, base, a, &hist, time.Second)
+	return 0
+}
+
+// spawnWorker launches a detached copy of this binary to run the download.
+func spawnWorker(handle, target, dir, base string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(base, "logs"), 0o700); err != nil {
+		return err
+	}
+	logf, err := os.OpenFile(filepath.Join(base, "logs", handle+".log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd := exec.Command(exe, "download", "--worker", "--id", handle, "--out", dir, target)
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	cmd.SysProcAttr = detachSysProcAttr()
+	return cmd.Start() // do not Wait: the child outlives us
+}
+
+// displayName is a friendly label for the "started:" line.
+func displayName(t dlTarget) string {
+	if t.URL != "" {
+		return t.URL
+	}
+	if u, err := url.Parse(t.Magnet); err == nil {
+		if dn := u.Query().Get("dn"); dn != "" {
+			return dn
+		}
+	}
+	return "download"
 }
