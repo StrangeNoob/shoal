@@ -8,6 +8,21 @@ description: Use when the user wants to find and download a movie, show, or othe
 Shoal exposes three non-interactive commands. Use them; never launch the bare
 `shoal` TUI (it is interactive and will hang a scripted session).
 
+## Sources
+
+`shoal search` queries **twelve** torrent providers **concurrently** and merges
+the results (each row carries its own `source` label) — it is not limited to any
+one site. A slow or failing provider is skipped; you only get an error if *every*
+source fails.
+
+Integrated sources: Internet Archive, Open Media (curated), YTS, The Pirate Bay
+(Movies + TV), 1337x (Movies + TV), EZTV, SolidTorrents, Nyaa, SubsPlease, FitGirl.
+
+Results are sorted best-first (seeders, then popularity), so the top hit can come
+from any provider. To restrict to one, use `--source <name>` (case-insensitive
+substring), e.g. `--source archive`, `--source yts`, `--source nyaa`; an unknown
+name prints the available list.
+
 ## Flow
 
 1. **Search** — always with `--json`:
@@ -38,5 +53,7 @@ Shoal exposes three non-interactive commands. Use them; never launch the bare
 
 ## Options
 
+- Restrict to one provider: `shoal search --json "<query>" --source <name>`.
+- Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
 - Save elsewhere: `shoal download '<magnet>' --out <dir>`.
-- Clear finished entries from status: `shoal status --clear`.
+- Clear finished entries from status: `shoal status --clear` (removes all finished/errored entries).
