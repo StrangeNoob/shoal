@@ -10,7 +10,7 @@ import (
 
 type fakeSource struct{ res []source.Result }
 
-func (f fakeSource) Name() string { return "fake" }
+func (f fakeSource) Name() string                                            { return "fake" }
 func (f fakeSource) Search(context.Context, string) ([]source.Result, error) { return f.res, nil }
 
 func TestToRowsSortsAndDerivesID(t *testing.T) {
