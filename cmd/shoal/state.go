@@ -49,6 +49,14 @@ func writeActive(base string, a Active) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// MkdirAll won't chmod an existing dir; tighten the shared shoal dir (holds
+	// config/history/queue) and the active subdir explicitly, like the sibling stores.
+	if err := os.Chmod(base, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {
 		return err
@@ -110,6 +118,10 @@ func clearFinished(base string) (int, error) {
 
 func writeCache(base string, m map[string]cacheEntry) error {
 	if err := os.MkdirAll(base, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll won't chmod an existing dir; tighten the shared shoal dir explicitly.
+	if err := os.Chmod(base, 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(m, "", "  ")
