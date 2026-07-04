@@ -155,7 +155,7 @@ func TestRenderSeedingShowsRatio(t *testing.T) {
 		{Name: "Done", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 2000, Peers: 2, Done: true},
 	}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 	m.section = sectionSeeding
 	v := m.View()
 	if !strings.Contains(v, "ratio") || !strings.Contains(v, "complete") {
@@ -182,7 +182,7 @@ func TestSeedingHistoryDedupsActive(t *testing.T) {
 		{Name: "Now Seeding", InfoHash: "dup", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 500, Done: true},
 	}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 	m.section = sectionSeeding
 	m.history = history.Store{Entries: []history.Entry{
 		{InfoHash: "dup", Name: "Now Seeding", Size: 1000, CompletedAt: time.Now()},

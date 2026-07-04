@@ -151,9 +151,16 @@ func (m Model) headerHeight() int {
 // noticeText is the right-aligned toast (green ✓ for success, error ✗ for
 // errors), truncated to fit maxWidth columns (glyph + space + message). Empty
 // when there's no notice or no room — callers pass the space actually available
-// so the toast is truncated to fit rather than dropped.
+// so the toast is truncated to fit rather than dropped. A lost daemon
+// connection takes over this slot (styled like an error) until it recovers.
 func (m Model) noticeText(maxWidth int) string {
-	if m.notice == "" || maxWidth < 4 {
+	if maxWidth < 4 {
+		return ""
+	}
+	if m.daemonDown {
+		return st.Bad.Render(truncate("⟳ reconnecting to daemon…", maxWidth))
+	}
+	if m.notice == "" {
 		return ""
 	}
 	glyph, style := glyphDone, st.Notice

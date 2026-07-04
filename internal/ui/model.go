@@ -76,6 +76,9 @@ type Model struct {
 	eng engine.Engine
 	cfg config.Config
 
+	poll       statusPoller
+	daemonDown bool
+
 	searching   bool
 	hasSearched bool
 	results     []source.Result
@@ -146,7 +149,7 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	pr := progress.New(progress.WithSolidFill(activePalette.Accent.TrueColor))
 	pr.ShowPercentage = false
 
-	return Model{
+	m := Model{
 		section:  sectionSearch,
 		editing:  false,
 		input:    ti,
@@ -159,6 +162,10 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 		sortDesc: true,
 		booting:  true,
 	}
+	if p, ok := eng.(statusPoller); ok {
+		m.poll = p // production daemonPoller and the test fakeEngine both implement it
+	}
+	return m
 }
 
 // WithHistory attaches a loaded history store (main wires history.Load(); tests
@@ -211,6 +218,26 @@ type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(700*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// statusPoller is implemented by engines that can report status off the UI
+// thread (the production daemon client and the test fake); pollCmd runs it
+// inside a tea.Cmd goroutine instead of blocking Update.
+type statusPoller interface {
+	Poll() ([]engine.Status, error)
+}
+
+type statusMsg struct {
+	at       time.Time // the tick time that fired this poll (drives the speed dt)
+	statuses []engine.Status
+	err      error
+}
+
+func pollCmd(p statusPoller, at time.Time) tea.Cmd {
+	return func() tea.Msg {
+		ss, err := p.Poll()
+		return statusMsg{at: at, statuses: ss, err: err}
+	}
 }
 
 type updateCheckMsg struct {
@@ -486,75 +513,89 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if m.eng != nil {
-			now := time.Time(msg)
-			next := m.eng.Statuses()
-			dt := now.Sub(m.lastTick)
-			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
-			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
-			// Reload history while a finished torrent isn't in it yet — the daemon
-			// records completions on its own ticker, so the flip-to-Done edge can
-			// precede its write. Bounded per torrent so a completion the daemon never
-			// persists (e.g. its history write failed) can't reload forever.
-			if m.historyMisses == nil {
-				m.historyMisses = map[string]int{}
-			}
-			recorded := make(map[string]bool, len(m.history.Entries))
-			for _, e := range m.history.Entries {
-				recorded[e.InfoHash] = true
-			}
-			reload := false
-			for _, s := range next {
-				if s.Done && !recorded[s.InfoHash] && m.historyMisses[s.InfoHash] < maxHistoryReloads {
-					m.historyMisses[s.InfoHash]++
-					reload = true
-				}
-			}
-			if reload {
-				m.history = history.Load()
-			}
-			m.statuses = next
-			m.lastTick = now
-			if n := len(m.downloading()); m.dlCursor >= n {
-				m.dlCursor = max(0, n-1)
-			}
-			if n := len(m.seeding()) + len(m.seedHistory()); m.seedCursor >= n {
-				m.seedCursor = max(0, n-1)
-			}
-			// If the torrent we're asking to cancel finished (or vanished) while the
-			// confirm prompt was open, drop the prompt — it only applies to in-progress downloads.
-			if m.cancelConfirm {
-				stillDownloading := false
-				for _, s := range m.downloading() {
-					if s.InfoHash == m.cancelTarget.InfoHash {
-						stillDownloading = true
-						break
-					}
-				}
-				if !stillDownloading {
-					m.cancelConfirm = false
-				}
-			}
-			// Likewise, if the torrent we're asking to stop is no longer seeding,
-			// drop the stop prompt.
-			if m.stopConfirm {
-				stillSeeding := false
-				for _, s := range m.seeding() {
-					if s.InfoHash == m.stopTarget.InfoHash {
-						stillSeeding = true
-						break
-					}
-				}
-				if !stillSeeding {
-					m.stopConfirm = false
-				}
-			}
-		}
+		now := time.Time(msg)
 		if m.notice != "" && time.Now().After(m.noticeUntil) {
 			m.notice = ""
 			m.noticeErr = false
 		}
-		return m, tickCmd()
+		cmds := []tea.Cmd{tickCmd()}
+		if m.poll != nil {
+			cmds = append(cmds, pollCmd(m.poll, now))
+		} else if m.eng != nil { // no poller (minimal engine): synchronous fallback
+			eng := m.eng
+			cmds = append(cmds, func() tea.Msg { return statusMsg{at: now, statuses: eng.Statuses()} })
+		}
+		return m, tea.Batch(cmds...)
+
+	case statusMsg:
+		if msg.err != nil {
+			m.daemonDown = true
+			return m, nil
+		}
+		m.daemonDown = false
+		now := msg.at
+		next := msg.statuses
+		dt := now.Sub(m.lastTick)
+		m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
+		m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
+		// Reload history while a finished torrent isn't in it yet — the daemon
+		// records completions on its own ticker, so the flip-to-Done edge can
+		// precede its write. Bounded per torrent so a completion the daemon never
+		// persists (e.g. its history write failed) can't reload forever.
+		if m.historyMisses == nil {
+			m.historyMisses = map[string]int{}
+		}
+		recorded := make(map[string]bool, len(m.history.Entries))
+		for _, e := range m.history.Entries {
+			recorded[e.InfoHash] = true
+		}
+		reload := false
+		for _, s := range next {
+			if s.Done && !recorded[s.InfoHash] && m.historyMisses[s.InfoHash] < maxHistoryReloads {
+				m.historyMisses[s.InfoHash]++
+				reload = true
+			}
+		}
+		if reload {
+			m.history = history.Load()
+		}
+		m.statuses = next
+		m.lastTick = now
+		if n := len(m.downloading()); m.dlCursor >= n {
+			m.dlCursor = max(0, n-1)
+		}
+		if n := len(m.seeding()) + len(m.seedHistory()); m.seedCursor >= n {
+			m.seedCursor = max(0, n-1)
+		}
+		// If the torrent we're asking to cancel finished (or vanished) while the
+		// confirm prompt was open, drop the prompt — it only applies to in-progress downloads.
+		if m.cancelConfirm {
+			stillDownloading := false
+			for _, s := range m.downloading() {
+				if s.InfoHash == m.cancelTarget.InfoHash {
+					stillDownloading = true
+					break
+				}
+			}
+			if !stillDownloading {
+				m.cancelConfirm = false
+			}
+		}
+		// Likewise, if the torrent we're asking to stop is no longer seeding,
+		// drop the stop prompt.
+		if m.stopConfirm {
+			stillSeeding := false
+			for _, s := range m.seeding() {
+				if s.InfoHash == m.stopTarget.InfoHash {
+					stillSeeding = true
+					break
+				}
+			}
+			if !stillSeeding {
+				m.stopConfirm = false
+			}
+		}
+		return m, nil
 
 	case updateCheckMsg:
 		if msg.newer {
