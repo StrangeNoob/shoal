@@ -182,3 +182,12 @@ func TestClientSetDeadlineBoundsCalls(t *testing.T) {
 		t.Fatal("Status hung despite the deadline")
 	}
 }
+
+func TestStatusesErrSurfacesError(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{{InfoHash: "a"}}}
+	c := serveTest(t, fake)
+	ss, err := c.StatusesErr()
+	if err != nil || len(ss) != 1 || ss[0].InfoHash != "a" {
+		t.Fatalf("StatusesErr on a live daemon = (%v, %v), want ([a], nil)", ss, err)
+	}
+}

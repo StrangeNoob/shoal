@@ -45,6 +45,14 @@ func (c *Client) Statuses() []engine.Status {
 	}
 	return r.Statuses
 }
+
+// StatusesErr is Statuses with the RPC error exposed, for callers (the TUI poll)
+// that must distinguish a dead daemon from an empty engine.
+func (c *Client) StatusesErr() ([]engine.Status, error) {
+	var r StatusesReply
+	err := c.rpc.Call("Engine.Statuses", Empty{}, &r)
+	return r.Statuses, err
+}
 func (c *Client) Remove(hash string, deleteData bool) error {
 	return c.rpc.Call("Engine.Remove", RemoveArgs{InfoHash: hash, DeleteData: deleteData}, &Empty{})
 }
