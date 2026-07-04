@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -49,7 +50,14 @@ func TestCLIRoutesDaemonGuarded(t *testing.T) {
 }
 
 func TestEnsureDaemonUsesRunning(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "d.sock")
+	// os.MkdirTemp (not t.TempDir()) keeps the socket path short — t.TempDir()
+	// embeds the test name and can overflow macOS's ~104-byte unix sun_path limit.
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
 	t.Setenv("SHOAL_DAEMON_SOCK", sock)
 	l, err := net.Listen("unix", sock)
 	if err != nil {
