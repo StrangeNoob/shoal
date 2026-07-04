@@ -17,7 +17,9 @@ func SocketPath() string {
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
-		return filepath.Join(".", "shoal-daemon.sock")
+		// Absolute + deterministic so the daemon and clients agree regardless of
+		// each process's working directory.
+		return filepath.Join(os.TempDir(), "shoal-daemon.sock")
 	}
 	return filepath.Join(dir, "shoal", "daemon.sock")
 }

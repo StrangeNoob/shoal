@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"errors"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -42,7 +43,10 @@ func Serve(l net.Listener, eng engine.Engine) error {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			return err // listener closed
+			if errors.Is(err, net.ErrClosed) {
+				return nil // graceful shutdown: the listener was closed
+			}
+			return err
 		}
 		go srv.ServeCodec(jsonrpc.NewServerCodec(conn))
 	}

@@ -138,6 +138,25 @@ func TestStatusesOnClosedConn(t *testing.T) {
 	}
 }
 
+func TestServeReturnsNilOnClose(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "s.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- Serve(l, &fakeEngine{}) }()
+	l.Close() // graceful shutdown
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("graceful close should return nil, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after the listener closed")
+	}
+}
+
 func TestSocketPathEnvOverride(t *testing.T) {
 	t.Setenv("SHOAL_DAEMON_SOCK", "/tmp/custom.sock")
 	if SocketPath() != "/tmp/custom.sock" {
