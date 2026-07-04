@@ -8,15 +8,9 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
-	"github.com/StrangeNoob/shoal/internal/config"
-	"github.com/StrangeNoob/shoal/internal/engine"
-	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
@@ -63,67 +57,9 @@ func resolveTarget(arg string, lookup func(id string) (string, bool)) (dlTarget,
 	}
 }
 
-func firstStatus(ss []engine.Status) *engine.Status {
-	if len(ss) == 0 {
-		return nil
-	}
-	return &ss[0]
-}
-
-// stepWorker performs one poll: refreshes a from the engine and writes the state
-// file. Returns true once the (single) torrent is done.
-func stepWorker(eng engine.Engine, base string, a *Active) (done bool) {
-	st := firstStatus(eng.Statuses())
-	if st == nil {
-		return false
-	}
-	a.InfoHash = st.InfoHash
-	if st.Name != "" {
-		a.Name = st.Name
-	}
-	a.Total = st.TotalBytes
-	a.Completed = st.CompletedBytes
-	a.Peers = st.Peers
-	a.Seeding = st.Seeding
-	if st.Path != "" { // don't clobber a known path with an empty pre-metadata poll (mirrors Name)
-		a.Path = st.Path
-	}
-	a.Done = st.Done
-	a.UpdatedAt = time.Now()
-	_ = writeActive(base, *a)
-	return st.Done
-}
-
-// runWorker polls until the download completes, then records it to history.
-func runWorker(eng engine.Engine, base string, a Active, hist *history.Store, interval time.Duration) {
-	_ = writeActive(base, a) // show up in `status` immediately
-	tick := time.NewTicker(interval)
-	defer tick.Stop()
-	for range tick.C {
-		if stepWorker(eng, base, &a) {
-			// This worker may have started hours ago; reload just before appending
-			// so a concurrent worker/TUI completion isn't clobbered by Save (which
-			// overwrites the whole file). Shrinks the race window to milliseconds.
-			fresh := history.LoadFrom(hist.Path)
-			fresh.Append(history.Entry{
-				InfoHash:    a.InfoHash,
-				Name:        a.Name,
-				Size:        a.Total,
-				CompletedAt: time.Now(),
-				Path:        a.Path,
-			})
-			return
-		}
-	}
-}
-
-// runDownload is the `download` entrypoint. The parent resolves the target and
-// spawns a detached worker; --worker runs the actual download loop.
 func runDownload(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("download", flag.ContinueOnError)
-	worker := fs.Bool("worker", false, "") // hidden: marks the detached child
-	id := fs.String("id", "", "")          // hidden: worker handle
-	outDir := fs.String("out", "", "download directory")
+	outDir := fs.String("out", "", "(deprecated) downloads use the configured folder")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
@@ -133,96 +69,44 @@ func runDownload(args []string, out io.Writer) int {
 		arg = positionals[0]
 	}
 	if arg == "" {
-		fmt.Fprintln(os.Stderr, "usage: shoal download <magnet|url|infohash|id> [--out dir]")
+		fmt.Fprintln(os.Stderr, "usage: shoal download <magnet|url|infohash|id>")
 		return 2
 	}
-
-	cfg := config.Load()
-	base := configDir()
-	dir := cfg.DataDir
 	if *outDir != "" {
-		dir = *outDir
-	}
-
-	if *worker {
-		return downloadWorker(*id, arg, dir, base, cfg.MaxPeers)
+		fmt.Fprintln(os.Stderr, "note: downloads use the configured folder (change it in Settings or config.json)")
 	}
 
 	tgt, err := resolveTarget(arg, func(sid string) (string, bool) {
-		e, ok := lookupCache(base, sid)
+		e, ok := lookupCache(configDir(), sid)
 		return e.Magnet, ok
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	target := tgt.Magnet
-	if target == "" {
-		target = tgt.URL
-	}
-	if err := spawnWorker(tgt.Handle, target, dir, base); err != nil {
-		fmt.Fprintln(os.Stderr, "failed to start download:", err)
-		return 1
-	}
-	fmt.Fprintf(out, "started: %s (%s)\n", displayName(tgt), tgt.Handle)
-	return 0
-}
 
-// downloadWorker is the detached child: build the engine, add the one torrent,
-// and run the progress loop to completion.
-func downloadWorker(id, target, dir, base string, maxPeers int) int {
-	eng, err := engine.NewAnacrolix(engine.Config{
-		DataDir:    dir,
-		ListenPort: -1, // OS-assigned ephemeral port: never collide with the TUI (6881) or another worker
-		MaxPeers:   maxPeers,
-		Seed:       false, // one-shot: stop at 100%, don't seed forever
-		SeedRatio:  0,
-		QueuePath:  "", // never touch the TUI's persistent queue
-	})
-	a := Active{ID: id, Out: dir, Pid: os.Getpid(), UpdatedAt: time.Now()}
+	eng, err := ensureDaemon()
 	if err != nil {
-		a.Error = err.Error()
-		_ = writeActive(base, a)
+		fmt.Fprintln(os.Stderr, "shoal download:", err)
 		return 1
 	}
 	defer eng.Close()
 
-	if strings.HasPrefix(strings.ToLower(target), "magnet:") {
-		err = eng.AddMagnet(target)
+	if tgt.Magnet != "" {
+		err = eng.AddMagnet(tgt.Magnet)
 	} else {
-		err = eng.AddTorrentURL(target, "")
+		err = eng.AddTorrentURL(tgt.URL, "")
 	}
 	if err != nil {
-		a.Error = err.Error()
-		_ = writeActive(base, a)
+		fmt.Fprintln(os.Stderr, "shoal download:", err)
 		return 1
 	}
-
-	hist := history.Load()
-	runWorker(eng, base, a, &hist, time.Second)
+	if tgt.Handle != "" {
+		fmt.Fprintf(out, "started: %s (%s)\n", displayName(tgt), tgt.Handle)
+	} else {
+		fmt.Fprintf(out, "started: %s\n", displayName(tgt))
+	}
 	return 0
-}
-
-// spawnWorker launches a detached copy of this binary to run the download.
-func spawnWorker(handle, target, dir, base string) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(base, "logs"), 0o700); err != nil {
-		return err
-	}
-	logf, err := os.OpenFile(filepath.Join(base, "logs", handle+".log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	defer logf.Close()
-	cmd := exec.Command(exe, "download", "--worker", "--id", handle, "--out", dir, target)
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	cmd.SysProcAttr = detachSysProcAttr()
-	return cmd.Start() // do not Wait: the child outlives us
 }
 
 // displayName is a friendly label for the "started:" line.
