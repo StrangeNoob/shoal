@@ -27,6 +27,10 @@ import (
 
 const sidebarWidth = 20
 
+// maxHistoryReloads bounds how many ticks we reload history for a still-unrecorded
+// finished torrent (~14s at the tick interval; the daemon normally records within ~1s).
+const maxHistoryReloads = 20
+
 // copyToClipboard is a package var so tests can stub the system clipboard.
 var copyToClipboard = clipboard.WriteAll
 
@@ -90,14 +94,15 @@ type Model struct {
 	sortField sortField
 	sortDesc  bool
 
-	statuses    []engine.Status
-	dlSpeed     map[string]int64 // download byte/sec per Status.Name, sampled between ticks
-	ulSpeed     map[string]int64 // upload (seeding) byte/sec per Status.Name
-	lastTick    time.Time        // timestamp of the previous tick, for the rate delta
-	history     history.Store    // completed-download record; injected via WithHistory
-	setCursor   int              // index into settingItems()
-	version     string           // build version (ldflags), "" or "dev" for local builds
-	updateAvail string           // latest version when a newer release is available
+	statuses      []engine.Status
+	dlSpeed       map[string]int64 // download byte/sec per Status.Name, sampled between ticks
+	ulSpeed       map[string]int64 // upload (seeding) byte/sec per Status.Name
+	lastTick      time.Time        // timestamp of the previous tick, for the rate delta
+	history       history.Store    // completed-download record; injected via WithHistory
+	historyMisses map[string]int   // per-InfoHash count of history reloads while awaiting the daemon's write
+	setCursor     int              // index into settingItems()
+	version       string           // build version (ldflags), "" or "dev" for local builds
+	updateAvail   string           // latest version when a newer release is available
 
 	dlCursor      int // selection in the Downloads pane
 	seedCursor    int // selection in the Seeding pane
@@ -389,24 +394,6 @@ func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cm
 	}
 }
 
-// newlyCompleted returns torrents that flipped Done false→true (or first appeared
-// already Done) between two snapshots, keyed by InfoHash.
-func newlyCompleted(prev, next []engine.Status) []engine.Status {
-	was := make(map[string]bool, len(prev))
-	for _, s := range prev {
-		if s.Done {
-			was[s.InfoHash] = true
-		}
-	}
-	var out []engine.Status
-	for _, s := range next {
-		if s.Done && s.InfoHash != "" && !was[s.InfoHash] {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // --- update ----------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -505,8 +492,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dt := now.Sub(m.lastTick)
 			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
-			for _, s := range newlyCompleted(m.statuses, next) {
-				m.history.Append(history.Entry{InfoHash: s.InfoHash, Name: s.Name, Size: s.TotalBytes, CompletedAt: now, Path: s.Path})
+			// Reload history while a finished torrent isn't in it yet — the daemon
+			// records completions on its own ticker, so the flip-to-Done edge can
+			// precede its write. Bounded per torrent so a completion the daemon never
+			// persists (e.g. its history write failed) can't reload forever.
+			if m.historyMisses == nil {
+				m.historyMisses = map[string]int{}
+			}
+			recorded := make(map[string]bool, len(m.history.Entries))
+			for _, e := range m.history.Entries {
+				recorded[e.InfoHash] = true
+			}
+			reload := false
+			for _, s := range next {
+				if s.Done && !recorded[s.InfoHash] && m.historyMisses[s.InfoHash] < maxHistoryReloads {
+					m.historyMisses[s.InfoHash]++
+					reload = true
+				}
+			}
+			if reload {
+				m.history = history.Load()
 			}
 			m.statuses = next
 			m.lastTick = now

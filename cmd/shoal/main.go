@@ -16,9 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/StrangeNoob/shoal/internal/config"
-	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
-	"github.com/StrangeNoob/shoal/internal/queue"
 	"github.com/StrangeNoob/shoal/internal/source"
 	"github.com/StrangeNoob/shoal/internal/ui"
 	"github.com/StrangeNoob/shoal/internal/update"
@@ -137,22 +135,14 @@ func main() {
 
 	cfg := config.Load()
 
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+	// The TUI drives the shared daemon (auto-started), so it stays in sync with the
+	// CLI. ensureDaemon errors on Windows (unix-socket transport only, until Phase 4)
+	// and when the daemon can't start.
+	eng, err := ensureDaemon()
+	if err != nil {
 		fatal(err)
 	}
-
-	eng, err := engine.NewAnacrolix(engine.Config{
-		DataDir:    cfg.DataDir,
-		ListenPort: cfg.ListenPort,
-		MaxPeers:   cfg.MaxPeers,
-		Seed:       cfg.Seed,
-		SeedRatio:  cfg.SeedRatio,
-		QueuePath:  queue.DefaultPath(),
-	})
-	if err != nil {
-		fatal(fmt.Errorf("starting torrent engine: %w", err))
-	}
-	defer eng.Close()
+	defer eng.Close() // closes the connection only; the daemon and its downloads persist
 
 	src := source.NewDefault()
 

@@ -16,6 +16,18 @@ import (
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "shoal-ui-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", dir)
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // --- fakes implementing the two interfaces the UI depends on ---------------
 
 type fakeSource struct {
@@ -820,28 +832,46 @@ func TestComputeRates(t *testing.T) {
 	}
 }
 
-func TestNewlyCompleted(t *testing.T) {
-	prev := []engine.Status{{InfoHash: "a", Done: false}, {InfoHash: "b", Done: true}}
-	next := []engine.Status{{InfoHash: "a", Done: true}, {InfoHash: "b", Done: true}}
-	got := newlyCompleted(prev, next)
-	if len(got) != 1 || got[0].InfoHash != "a" {
-		t.Fatalf("newlyCompleted = %+v, want just a", got)
+func TestTickReloadsHistoryOnCompletion(t *testing.T) {
+	// Isolate the history file; the daemon (simulated by the pre-write below) is the recorder.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "disk1", Name: "FromDaemon"}) // writes history.json
+
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048}}}
+	m := ready(New(&fakeSource{}, eng))
+	t0 := time.Unix(1_000_000, 0)
+	m, _ = update(m, tickMsg(t0)) // not done → no reload
+
+	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}
+	m, _ = update(m, tickMsg(t0.Add(time.Second))) // completes → TUI reloads history from disk
+
+	// The TUI must NOT append the completed torrent ("hh"); it reloads the daemon's file ("disk1").
+	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "disk1" {
+		t.Fatalf("expected reload from disk (disk1), got %+v", m.history.Entries)
 	}
 }
 
-func TestTickRecordsHistory(t *testing.T) {
-	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 0}}}
+func TestTickReloadsHistoryUntilRecorded(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	// history starts empty; a torrent completes but the daemon hasn't recorded it yet.
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}}
 	m := ready(New(&fakeSource{}, eng))
 	t0 := time.Unix(1_000_000, 0)
-	m, _ = update(m, tickMsg(t0)) // not done yet → no history
-	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}
-	m, _ = update(m, tickMsg(t0.Add(time.Second))) // completes → recorded
-	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "hh" {
-		t.Fatalf("history = %+v, want one entry for hh", m.history.Entries)
+	m, _ = update(m, tickMsg(t0)) // Done but not in history → reload (disk still empty)
+	if len(m.history.Entries) != 0 {
+		t.Fatalf("history should still be empty (daemon hasn't recorded), got %+v", m.history.Entries)
 	}
-	m, _ = update(m, tickMsg(t0.Add(2*time.Second))) // still done → no dup
-	if len(m.history.Entries) != 1 {
-		t.Fatalf("history duplicated: %+v", m.history.Entries)
+	rec := history.Load() // simulate the daemon recording it
+	rec.Append(history.Entry{InfoHash: "hh", Name: "Movie"})
+	m, _ = update(m, tickMsg(t0.Add(time.Second))) // still missing from m.history → reload → now present
+	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "hh" {
+		t.Fatalf("reload should pick up the daemon's record, got %+v", m.history.Entries)
 	}
 }
 
@@ -1035,18 +1065,6 @@ func TestOpenFolderNotices(t *testing.T) {
 	_, cmd := update(m, key("o"))
 	if cmd == nil {
 		t.Error("o on an existing folder should return an open command")
-	}
-}
-
-func TestTickRecordsHistoryPath(t *testing.T) {
-	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 0, Path: "/save/Movie"}}}
-	m := ready(New(&fakeSource{}, eng))
-	t0 := time.Unix(1_000_000, 0)
-	m, _ = update(m, tickMsg(t0))
-	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true, Path: "/save/Movie"}}
-	m, _ = update(m, tickMsg(t0.Add(time.Second)))
-	if len(m.history.Entries) != 1 || m.history.Entries[0].Path != "/save/Movie" {
-		t.Fatalf("history entry should record the on-disk Path, got %+v", m.history.Entries)
 	}
 }
 

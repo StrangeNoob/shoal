@@ -489,6 +489,7 @@ func (m Model) renderSettings(w, h int) string {
 		"",
 		st.SectionHead.Render("ABOUT"),
 		"  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"),
+		"  " + st.Meta.Render("engine settings (port, peers, save-to, seed) apply when the daemon restarts"),
 	}
 
 	// Window the navigable rows around the cursor so the selection is always

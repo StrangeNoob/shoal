@@ -124,6 +124,10 @@ shoal status [id]                    # progress of background downloads (--json,
   immediately with a handle; files land in shoal's configured folder (Settings → Save to, or `config.json`).
   CLI downloads run in a shared background `shoal daemon` (started automatically on the first `download`),
   so multiple downloads and `shoal status` all share one engine and one download folder.
+  The TUI runs on the same shared `shoal daemon` as the CLI, so downloads and seeding stay in sync
+  between them. Engine settings (listen port, max peers, save-to, seed) configure the daemon and
+  take effect when it restarts. (The daemon-backed TUI is unix/macOS only for now; Windows support
+  is planned.)
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files.
 
