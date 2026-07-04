@@ -505,8 +505,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dt := now.Sub(m.lastTick)
 			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
-			for _, s := range newlyCompleted(m.statuses, next) {
-				m.history.Append(history.Entry{InfoHash: s.InfoHash, Name: s.Name, Size: s.TotalBytes, CompletedAt: now, Path: s.Path})
+			if len(newlyCompleted(m.statuses, next)) > 0 {
+				m.history = history.Load() // the daemon records completions; refresh the History pane
 			}
 			m.statuses = next
 			m.lastTick = now
