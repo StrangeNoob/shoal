@@ -1,5 +1,6 @@
 /shoal
 /shoal-classic
+*.exe
 *.test
 /private
 /dist/
