@@ -3,39 +3,97 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/StrangeNoob/shoal/internal/engine"
 )
 
-func TestStateOf(t *testing.T) {
-	dead := func(int) bool { return false }
-	alive := func(int) bool { return true }
+func TestStatusState(t *testing.T) {
 	cases := []struct {
-		a    Active
-		f    func(int) bool
+		s    engine.Status
 		want string
 	}{
-		{Active{Error: "boom"}, alive, "error"},
-		{Active{Done: true}, alive, "done"},
-		{Active{Done: true, Pid: 42}, dead, "done"}, // done wins over stalled even with a dead pid
-		{Active{Pid: 42}, dead, "stalled"},
-		{Active{Pid: 42}, alive, "downloading"},
+		{engine.Status{Done: true, Seeding: true}, "seeding"},
+		{engine.Status{Done: true}, "done"},
+		{engine.Status{Paused: true}, "paused"},
+		{engine.Status{}, "downloading"},
 	}
 	for _, c := range cases {
-		if got := stateOf(c.a, c.f); got != c.want {
-			t.Errorf("stateOf(%+v) = %q, want %q", c.a, got, c.want)
+		if got := statusState(c.s); got != c.want {
+			t.Errorf("statusState(%+v) = %q, want %q", c.s, got, c.want)
 		}
 	}
 }
 
-func TestPrintStatusJSON(t *testing.T) {
+func TestStatusFromDaemonJSON(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: "abcdef0123456789", TotalBytes: 200, CompletedBytes: 100, Peers: 4},
+	}}
+	serveFakeDaemon(t, fake)
 	var buf bytes.Buffer
-	items := []Active{{ID: "aaaa0000", Name: "M", Total: 200, Completed: 100, Pid: 1}}
-	printStatus(&buf, items, true, func(int) bool { return true })
+	if code := runStatus([]string{"--json"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, buf.String())
 	}
-	if rows[0]["state"] != "downloading" || rows[0]["percent"].(float64) != 0.5 {
+	if len(rows) != 1 || rows[0]["state"] != "downloading" || rows[0]["id"] != "abcdef01" || rows[0]["percent"].(float64) != 0.5 {
 		t.Fatalf("row = %+v", rows[0])
+	}
+}
+
+func TestStatusNoDaemon(t *testing.T) {
+	// point at a socket with no listener → no daemon → "no downloads", exit 0
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runStatus(nil, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "no downloads") {
+		t.Fatalf("expected 'no downloads', got %q", buf.String())
+	}
+}
+
+func TestStatusNoDaemonJSON(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runStatus([]string{"--json"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	out := strings.TrimSpace(buf.String())
+	if out != "[]" {
+		t.Fatalf("expected empty JSON array '[]', got %q", out)
+	}
+}
+
+func TestStatusClearRemovesDone(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{Name: "Done", InfoHash: "aaaa1111bbbb2222", Done: true},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runStatus([]string{"--clear"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if r := fake.gotRemoved(); len(r) != 1 || r[0] != "aaaa1111bbbb2222" {
+		t.Fatalf("--clear should Remove the done torrent, got %v", r)
+	}
+}
+
+func TestStatusClearKeepsSeeding(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "seed1", Done: true, Seeding: true},
+		{InfoHash: "done1", Done: true},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runStatus([]string{"--clear"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if r := fake.gotRemoved(); len(r) != 1 || r[0] != "done1" {
+		t.Fatalf("--clear must keep seeding torrents; removed=%v", r)
 	}
 }

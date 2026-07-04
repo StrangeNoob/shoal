@@ -1,11 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
-	"time"
-
-	"github.com/StrangeNoob/shoal/internal/engine"
-	"github.com/StrangeNoob/shoal/internal/history"
 )
 
 func TestResolveTarget(t *testing.T) {
@@ -64,61 +62,43 @@ func TestResolveTargetNilLookup(t *testing.T) {
 	}
 }
 
-type fakeEngine struct {
-	frames [][]engine.Status
-	i      int
-}
-
-func (f *fakeEngine) AddTorrentURL(string, string) error { return nil }
-func (f *fakeEngine) AddMagnet(string) error             { return nil }
-func (f *fakeEngine) Remove(string, bool) error          { return nil }
-func (f *fakeEngine) Pause(string) error                 { return nil }
-func (f *fakeEngine) Resume(string) error                { return nil }
-func (f *fakeEngine) Close() error                       { return nil }
-func (f *fakeEngine) Statuses() []engine.Status {
-	if f.i < len(f.frames) {
-		s := f.frames[f.i]
-		f.i++
-		return s
+func TestDownloadForwardsMagnetToDaemon(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	const ih = "0123456789abcdef0123456789abcdef01234567"
+	var buf bytes.Buffer
+	if code := runDownload([]string{"magnet:?xt=urn:btih:" + ih}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
 	}
-	if len(f.frames) == 0 {
-		return nil
+	if m := fake.gotMagnets(); len(m) != 1 || !strings.Contains(m[0], ih) {
+		t.Fatalf("daemon did not receive the magnet: %v", m)
 	}
-	return f.frames[len(f.frames)-1]
-}
-
-func TestStepWorkerProgressAndDone(t *testing.T) {
-	base := t.TempDir()
-	eng := &fakeEngine{frames: [][]engine.Status{
-		{{InfoHash: "ffff0000", Name: "Movie", TotalBytes: 100, CompletedBytes: 40, Peers: 3}},
-		{{InfoHash: "ffff0000", Name: "Movie", TotalBytes: 100, CompletedBytes: 100, Done: true, Path: "/data/Movie"}},
-	}}
-	a := Active{ID: "ffff0000"}
-	if done := stepWorker(eng, base, &a); done {
-		t.Fatal("frame 1 should not be done")
-	}
-	got, _ := readActive(base, "ffff0000")
-	if got.Completed != 40 || got.Name != "Movie" || got.Peers != 3 {
-		t.Fatalf("mid-progress not written: %+v", got)
-	}
-	if done := stepWorker(eng, base, &a); !done {
-		t.Fatal("frame 2 should be done")
-	}
-	got, _ = readActive(base, "ffff0000")
-	if !got.Done || got.Path != "/data/Movie" {
-		t.Fatalf("done state not written: %+v", got)
+	if !strings.Contains(buf.String(), "started:") {
+		t.Fatalf("expected a 'started:' line, got %q", buf.String())
 	}
 }
 
-func TestRunWorkerRecordsHistory(t *testing.T) {
-	base := t.TempDir()
-	eng := &fakeEngine{frames: [][]engine.Status{
-		{{InfoHash: "eeee1111", Name: "Done", TotalBytes: 10, CompletedBytes: 10, Done: true, Path: "/d/Done"}},
-	}}
-	hist := history.Store{Path: base + "/history.json"}
-	runWorker(eng, base, Active{ID: "eeee1111"}, &hist, time.Millisecond)
-	got := history.LoadFrom(hist.Path)
-	if len(got.Entries) != 1 || got.Entries[0].Name != "Done" || got.Entries[0].Path != "/d/Done" {
-		t.Fatalf("history not recorded: %+v", got.Entries)
+func TestDownloadForwardsURLToDaemon(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"https://example.com/x.torrent"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if u := fake.gotURLs(); len(u) != 1 || u[0][0] != "https://example.com/x.torrent" {
+		t.Fatalf("daemon did not receive the URL: %v", u)
+	}
+}
+
+func TestDownloadURLPrintsNoHandle(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"https://example.com/x.torrent"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	// a URL download's sha1 handle is not queryable via status, so it must not be printed
+	if strings.Contains(buf.String(), "(") {
+		t.Fatalf("URL download should not print a handle, got %q", buf.String())
 	}
 }

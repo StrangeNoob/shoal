@@ -51,17 +51,20 @@ SolidTorrents cover it.)
 
 5. **Poll** progress every few seconds:
    `shoal status <handle> --json`
-   Each poll returns `{state, percent, completed, total, peers, ...}`.
-   - `state == "done"` → report the final path, stop.
-   - `state == "error"` or `"stalled"` → report the failure (check
-     the log in shoal's config dir — `~/Library/Application Support/shoal/logs/<handle>.log`
-     on macOS, `~/.config/shoal/logs/<handle>.log` on Linux — if the user wants detail), stop.
+   Each poll returns `{state, percent, completed, total, peers, ...}` where
+   `state` is one of `downloading | done | seeding | paused`.
+   - `state == "done" || state == "seeding"` → report the final path, stop.
    - otherwise → keep polling. Give up after a reasonable number of polls with no
-     progress and tell the user it is stuck.
+     progress and tell the user it is stuck (check the daemon log —
+     `~/Library/Application Support/shoal/logs/daemon.log` on macOS,
+     `~/.config/shoal/logs/daemon.log` on Linux).
 
 ## Options
 
 - Restrict to one provider: `shoal search --json "<query>" --source <name>`.
 - Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
-- Save elsewhere: `shoal download '<magnet>' --out <dir>`.
-- Clear finished entries from status: `shoal status --clear` (removes all finished/errored entries).
+- Clear finished entries from status: `shoal status --clear` (removes finished/done torrents, keeping files).
+
+## Notes
+
+All downloads run in a shared background `shoal daemon` (auto-started on the first `download` command). This means multiple downloads and all `shoal status` queries share a single engine and download folder. All downloads land in shoal's configured folder (Settings → Save to, or in `config.json`).
