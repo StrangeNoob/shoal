@@ -855,6 +855,10 @@ func TestTickReloadsHistoryOnCompletion(t *testing.T) {
 }
 
 func TestTickReloadsHistoryUntilRecorded(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
 	// history starts empty; a torrent completes but the daemon hasn't recorded it yet.
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}}
 	m := ready(New(&fakeSource{}, eng))
