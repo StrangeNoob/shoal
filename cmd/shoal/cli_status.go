@@ -82,7 +82,7 @@ func runStatus(args []string, out io.Writer) int {
 
 	c, err := daemon.Dial(daemon.SocketPath())
 	if err != nil {
-		printStatus(out, nil, *jsonOut) // no daemon running → nothing to show
+		printStatus(out, toStatusRows(nil), *jsonOut) // no daemon running → nothing to show
 		return 0
 	}
 	defer c.Close()

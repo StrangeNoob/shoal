@@ -57,6 +57,18 @@ func TestStatusNoDaemon(t *testing.T) {
 	}
 }
 
+func TestStatusNoDaemonJSON(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runStatus([]string{"--json"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	out := strings.TrimSpace(buf.String())
+	if out != "[]" {
+		t.Fatalf("expected empty JSON array '[]', got %q", out)
+	}
+}
+
 func TestStatusClearRemovesDone(t *testing.T) {
 	fake := &fakeEngine{statuses: []engine.Status{
 		{Name: "Done", InfoHash: "aaaa1111bbbb2222", Done: true},
