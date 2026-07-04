@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
@@ -39,3 +40,11 @@ type RemoveArgs struct {
 type HashArgs struct{ InfoHash string }
 type Empty struct{}
 type StatusesReply struct{ Statuses []engine.Status }
+
+type StatusReply struct {
+	Uptime      time.Duration
+	Torrents    int
+	Downloading int
+	Seeding     int
+	Pid         int
+}

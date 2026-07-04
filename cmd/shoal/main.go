@@ -66,6 +66,8 @@ Usage:
   shoal download <id|magnet>    download in the background (add --out <dir>)
   shoal status [id]             show download progress (add --json, --clear)
   shoal daemon                  run the shared background engine (experimental)
+  shoal daemon stop             stop the shared daemon
+  shoal daemon status           show the daemon's status
   shoal skill install           install the Claude Code skill (~/.claude/skills)
   shoal update                  update shoal to the latest release
   shoal version                 print the version
@@ -98,7 +100,7 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 	case "status":
 		return true, runStatus(args[2:], out)
 	case "daemon":
-		return true, runDaemon(args[2:], out)
+		return true, runDaemonCmd(args[2:], out)
 	default:
 		return false, 0
 	}

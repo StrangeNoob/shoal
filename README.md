@@ -110,6 +110,8 @@ shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (add --json for scripts)
 shoal download <magnet|url|infohash|id>   # download in the background
 shoal status [id]                    # progress of background downloads (--json, --clear)
+shoal daemon status                  # show daemon status, uptime, and torrent counts
+shoal daemon stop                    # stop the shared daemon
 ```
 
 - **`sources`** lists all available providers with their on/off state (enable `--json` for
@@ -130,6 +132,13 @@ shoal status [id]                    # progress of background downloads (--json,
   is planned.)
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files.
+- **`daemon status`** — show whether the shared daemon is running, its uptime, and torrent counts.
+- **`daemon stop`** — stop the shared daemon (it also stops on its own when idle).
+
+The daemon auto-starts on the first `download` or when the TUI launches, and
+**auto-stops when it's been empty (no torrents) with no connected clients for
+`daemon_idle_minutes` (default 10; set `0` in `config.json` to disable)**. A
+torrent or any connected client keeps it running.
 
 ### Claude Code skill
 

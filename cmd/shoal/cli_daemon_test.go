@@ -5,9 +5,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/StrangeNoob/shoal/internal/daemon"
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
 )
@@ -93,4 +95,95 @@ func TestRecordCompletions(t *testing.T) {
 		}
 	}
 	close(stop)
+}
+
+func TestListenDaemonReclaimsStaleSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	// A stale socket *file* with nothing listening (create then close a listener).
+	l0, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l0.Close() // leaves (or removes) the file; either way no daemon answers
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := listenDaemon(sock)
+	if err != nil {
+		t.Fatalf("listenDaemon should reclaim a stale socket: %v", err)
+	}
+	l.Close()
+}
+
+func TestDaemonStopStopsRunning(t *testing.T) {
+	serveFakeDaemon(t, &fakeEngine{}) // serves via daemon.Serve (registers Control)
+	var buf bytes.Buffer
+	if code := runDaemonStop(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon stopped") {
+		t.Fatalf("output = %q, want 'daemon stopped'", buf.String())
+	}
+}
+
+func TestDaemonStopNoDaemon(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runDaemonStop(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon not running") {
+		t.Fatalf("output = %q, want 'daemon not running'", buf.String())
+	}
+}
+
+func TestDaemonStatusReportsCounts(t *testing.T) {
+	serveFakeDaemon(t, &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "a", Done: false},
+		{InfoHash: "b", Done: true},
+	}})
+	var buf bytes.Buffer
+	if code := runDaemonStatus(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "running") || !strings.Contains(out, "2 torrents") ||
+		!strings.Contains(out, "1 downloading") || !strings.Contains(out, "1 seeding") {
+		t.Fatalf("status output = %q", out)
+	}
+}
+
+func TestDaemonStatusNoDaemon(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runDaemonStatus(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon not running") {
+		t.Fatalf("output = %q, want 'daemon not running'", buf.String())
+	}
+}
+
+func TestListenDaemonRefusesLiveDaemon(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	fake := &fakeEngine{}
+	l0, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go daemon.Serve(l0, fake) // a live daemon is answering
+	t.Cleanup(func() { l0.Close() })
+	if _, err := listenDaemon(sock); err == nil {
+		t.Fatal("listenDaemon should refuse when a live daemon already answers")
+	}
 }

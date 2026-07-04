@@ -5,12 +5,16 @@ import (
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
 
 // Client talks to a daemon over a unix socket and implements engine.Engine.
-type Client struct{ rpc *rpc.Client }
+type Client struct {
+	conn net.Conn
+	rpc  *rpc.Client
+}
 
 // Client is a drop-in engine.Engine, checked at compile time.
 var _ engine.Engine = (*Client)(nil)
@@ -21,8 +25,12 @@ func Dial(path string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{rpc: jsonrpc.NewClient(conn)}, nil
+	return &Client{conn: conn, rpc: jsonrpc.NewClient(conn)}, nil
 }
+
+// SetDeadline bounds subsequent RPC calls (zero value = no deadline). CLI control
+// commands set it so they fail fast against a stuck daemon instead of hanging.
+func (c *Client) SetDeadline(t time.Time) error { return c.conn.SetDeadline(t) }
 
 func (c *Client) AddMagnet(m string) error {
 	return c.rpc.Call("Engine.AddMagnet", AddMagnetArgs{Magnet: m}, &Empty{})
@@ -49,3 +57,15 @@ func (c *Client) Resume(hash string) error {
 
 // Close closes the RPC connection only — it does not stop the shared engine.
 func (c *Client) Close() error { return c.rpc.Close() }
+
+// Shutdown asks the daemon to stop gracefully.
+func (c *Client) Shutdown() error {
+	return c.rpc.Call("Control.Shutdown", Empty{}, &Empty{})
+}
+
+// Status reports the daemon's uptime and torrent counts.
+func (c *Client) Status() (StatusReply, error) {
+	var r StatusReply
+	err := c.rpc.Call("Control.Status", Empty{}, &r)
+	return r, err
+}
