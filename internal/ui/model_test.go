@@ -16,6 +16,18 @@ import (
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "shoal-ui-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", dir)
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // --- fakes implementing the two interfaces the UI depends on ---------------
 
 type fakeSource struct {
