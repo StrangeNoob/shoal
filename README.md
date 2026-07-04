@@ -108,7 +108,7 @@ shoal sources                        # list providers with on/off state (add --j
 shoal sources enable  <name>         # turn a provider on
 shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (add --json for scripts)
-shoal download <magnet|url|infohash|id> [--out <dir>]   # download in the background
+shoal download <magnet|url|infohash|id>   # download in the background
 shoal status [id]                    # progress of background downloads (--json, --clear)
 ```
 
@@ -121,7 +121,9 @@ shoal status [id]                    # progress of background downloads (--json,
   provider with `--source <name>`, cap results with `--limit <N>`.
 - **`download`** accepts a magnet, a `.torrent` URL, a 40-char infohash, or a short id
   from your last `search`. It starts the download **in the background** and returns
-  immediately with a handle; files land in `~/Downloads/shoal` unless you pass `--out`.
+  immediately with a handle; files land in shoal's configured folder (Settings → Save to, or `config.json`).
+  CLI downloads run in a shared background `shoal daemon` (started automatically on the first `download`),
+  so multiple downloads and `shoal status` all share one engine and one download folder.
 - **`status`** reports each background download as `downloading | done | error | stalled`;
   `--clear` prunes finished entries.
 
