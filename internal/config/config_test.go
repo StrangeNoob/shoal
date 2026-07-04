@@ -126,3 +126,9 @@ func TestAutoUpdateDefaultsFalseAndRoundTrips(t *testing.T) {
 		t.Fatal("AutoUpdate did not survive save/load")
 	}
 }
+
+func TestDaemonIdleMinutesDefault(t *testing.T) {
+	if got := Default().DaemonIdleMinutes; got != 10 {
+		t.Fatalf("Default().DaemonIdleMinutes = %d, want 10", got)
+	}
+}

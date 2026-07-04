@@ -28,6 +28,9 @@ type Config struct {
 	MaxPeers   int     `json:"max_peers"`   // max connections per torrent
 	ListenPort int     `json:"listen_port"` // BitTorrent listen port
 
+	// Daemon
+	DaemonIdleMinutes int `json:"daemon_idle_minutes"` // minutes idle (no torrents, no client) before auto-shutdown; 0 disables
+
 	// Search
 	DisabledSources []string `json:"disabled_sources,omitempty"` // provider Name()s the user turned off
 
@@ -38,14 +41,15 @@ type Config struct {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Path:       defaultPath(),
-		Theme:      "Twilight",
-		ColorMode:  "auto",
-		DataDir:    defaultDataDir(),
-		Seed:       true,
-		SeedRatio:  2.0,
-		MaxPeers:   200,
-		ListenPort: 6881,
+		Path:              defaultPath(),
+		Theme:             "Twilight",
+		ColorMode:         "auto",
+		DataDir:           defaultDataDir(),
+		Seed:              true,
+		SeedRatio:         2.0,
+		MaxPeers:          200,
+		ListenPort:        6881,
+		DaemonIdleMinutes: 10,
 	}
 }
 
