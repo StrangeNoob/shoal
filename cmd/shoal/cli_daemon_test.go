@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +116,55 @@ func TestListenDaemonReclaimsStaleSocket(t *testing.T) {
 		t.Fatalf("listenDaemon should reclaim a stale socket: %v", err)
 	}
 	l.Close()
+}
+
+func TestDaemonStopStopsRunning(t *testing.T) {
+	serveFakeDaemon(t, &fakeEngine{}) // serves via daemon.Serve (registers Control)
+	var buf bytes.Buffer
+	if code := runDaemonStop(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon stopped") {
+		t.Fatalf("output = %q, want 'daemon stopped'", buf.String())
+	}
+}
+
+func TestDaemonStopNoDaemon(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runDaemonStop(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon not running") {
+		t.Fatalf("output = %q, want 'daemon not running'", buf.String())
+	}
+}
+
+func TestDaemonStatusReportsCounts(t *testing.T) {
+	serveFakeDaemon(t, &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "a", Done: false},
+		{InfoHash: "b", Done: true},
+	}})
+	var buf bytes.Buffer
+	if code := runDaemonStatus(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "running") || !strings.Contains(out, "2 torrents") ||
+		!strings.Contains(out, "1 downloading") || !strings.Contains(out, "1 seeding") {
+		t.Fatalf("status output = %q", out)
+	}
+}
+
+func TestDaemonStatusNoDaemon(t *testing.T) {
+	t.Setenv("SHOAL_DAEMON_SOCK", filepath.Join(t.TempDir(), "absent.sock"))
+	var buf bytes.Buffer
+	if code := runDaemonStatus(&buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "daemon not running") {
+		t.Fatalf("output = %q, want 'daemon not running'", buf.String())
+	}
 }
 
 func TestListenDaemonRefusesLiveDaemon(t *testing.T) {

@@ -111,6 +111,58 @@ func listenDaemon(sock string) (net.Listener, error) {
 	return net.Listen("unix", sock)
 }
 
+// runDaemonCmd dispatches `daemon` (run), `daemon stop`, and `daemon status`.
+func runDaemonCmd(args []string, out io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "stop":
+			return runDaemonStop(out)
+		case "status":
+			return runDaemonStatus(out)
+		}
+	}
+	return runDaemon(args, out)
+}
+
+func runDaemonStop(out io.Writer) int {
+	c, err := daemon.Dial(daemon.SocketPath())
+	if err != nil {
+		fmt.Fprintln(out, "daemon not running")
+		return 0
+	}
+	defer c.Close()
+	if err := c.Shutdown(); err != nil {
+		fmt.Fprintln(os.Stderr, "shoal daemon stop:", err)
+		return 1
+	}
+	for i := 0; i < 25; i++ { // poll ~5s for it to exit
+		time.Sleep(200 * time.Millisecond)
+		if !daemonRunning(daemon.SocketPath()) {
+			fmt.Fprintln(out, "daemon stopped")
+			return 0
+		}
+	}
+	fmt.Fprintln(out, "daemon stop requested (still shutting down)")
+	return 0
+}
+
+func runDaemonStatus(out io.Writer) int {
+	c, err := daemon.Dial(daemon.SocketPath())
+	if err != nil {
+		fmt.Fprintln(out, "daemon not running")
+		return 0
+	}
+	defer c.Close()
+	st, err := c.Status()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shoal daemon status:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "running  ·  up %s  ·  %d torrents (%d downloading, %d seeding)  ·  pid %d\n",
+		st.Uptime.Round(time.Second), st.Torrents, st.Downloading, st.Seeding, st.Pid)
+	return 0
+}
+
 // runDaemon runs the shared engine and serves it on the unix socket (foreground).
 func runDaemon(args []string, out io.Writer) int {
 	if runtime.GOOS == "windows" {
