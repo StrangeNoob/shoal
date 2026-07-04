@@ -52,7 +52,8 @@ type fakeEngine struct {
 	removedDelete bool
 	removeErr     error
 
-	paused map[string]bool
+	paused  map[string]bool
+	pollErr error
 }
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
@@ -63,7 +64,8 @@ func (e *fakeEngine) AddMagnet(magnet string) error {
 	e.addedMagnet = magnet
 	return e.magErr
 }
-func (e *fakeEngine) Statuses() []engine.Status { return e.statuses }
+func (e *fakeEngine) Statuses() []engine.Status      { return e.statuses }
+func (e *fakeEngine) Poll() ([]engine.Status, error) { return e.statuses, e.pollErr }
 func (e *fakeEngine) Remove(infoHash string, deleteData bool) error {
 	e.removedHash = infoHash
 	e.removedDelete = deleteData
@@ -121,6 +123,16 @@ func ready(m Model) Model {
 func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	out, cmd := m.Update(msg)
 	return out.(Model), cmd
+}
+
+// tick advances one poll cycle: it fires the tick, then delivers the async poll
+// result as the model would, carrying the tick time so speed sampling is exact.
+func tick(m Model, t time.Time) Model {
+	out, _ := update(m, tickMsg(t))
+	m = out
+	ss, err := m.poll.Poll()
+	out, _ = update(m, statusMsg{at: t, statuses: ss, err: err})
+	return out
 }
 
 func titles(rs []source.Result) []string {
@@ -452,7 +464,7 @@ func TestDownloadsAndSeedingSplit(t *testing.T) {
 		{Name: "Finished", TotalBytes: 1000, CompletedBytes: 1000, Done: true},
 	}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 
 	if len(m.downloading()) != 1 || m.downloading()[0].Name != "Downloading" {
 		t.Errorf("downloading() = %v, want [Downloading]", m.downloading())
@@ -477,7 +489,7 @@ func TestDownloadsCursorMoves(t *testing.T) {
 		{Name: "B", InfoHash: "bb", TotalBytes: 100, CompletedBytes: 20},
 	}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now())) // load statuses
+	m = tick(m, time.Now()) // load statuses
 	m.editing = false
 	m.section = sectionDownloads
 	m, _ = update(m, key("down"))
@@ -493,7 +505,7 @@ func TestDownloadsCursorMoves(t *testing.T) {
 func TestCancelConfirmDeletePath(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "abc123", TotalBytes: 100, CompletedBytes: 10}}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 	m.editing = false
 	m.section = sectionDownloads
 	m.dlCursor = 0
@@ -518,7 +530,7 @@ func TestCancelConfirmDeletePath(t *testing.T) {
 func TestCancelKeepAndAbort(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "h1", TotalBytes: 100, CompletedBytes: 10}}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 	m.editing = false
 	m.section = sectionDownloads
 
@@ -542,7 +554,7 @@ func TestCancelKeepAndAbort(t *testing.T) {
 func TestCancelConfirmClearsWhenTargetCompletes(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "h1", TotalBytes: 100, CompletedBytes: 10}}}
 	m := ready(New(&fakeSource{}, eng))
-	m, _ = update(m, tickMsg(time.Now()))
+	m = tick(m, time.Now())
 	m.editing = false
 	m.section = sectionDownloads
 	m, _ = update(m, key("x"))
@@ -551,7 +563,7 @@ func TestCancelConfirmClearsWhenTargetCompletes(t *testing.T) {
 	}
 	// the download completes before the user confirms
 	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "h1", TotalBytes: 100, CompletedBytes: 100, Done: true}}
-	m, _ = update(m, tickMsg(time.Now().Add(time.Second)))
+	m = tick(m, time.Now().Add(time.Second))
 	if m.cancelConfirm {
 		t.Fatal("cancel confirm should clear once the target is no longer downloading")
 	}
@@ -562,7 +574,7 @@ func TestPauseKeyPausesSelectedDownload(t *testing.T) {
 		{Name: "dl", InfoHash: "aaa", TotalBytes: 100, CompletedBytes: 10},
 	}}
 	m := ready(New(&fakeSource{}, fe))
-	m, _ = update(m, tickMsg(time.Now())) // load statuses
+	m = tick(m, time.Now()) // load statuses
 	m.editing = false
 	m.section = sectionDownloads
 	m.dlCursor = 0
@@ -580,7 +592,7 @@ func TestPauseKeyPausesSelectedDownload(t *testing.T) {
 	// A paused status → p resumes.
 	fe.statuses[0].Paused = true
 	m3 := ready(New(&fakeSource{}, fe))
-	m3, _ = update(m3, tickMsg(time.Now())) // load statuses
+	m3 = tick(m3, time.Now()) // load statuses
 	m3.editing = false
 	m3.section = sectionDownloads
 	m3.dlCursor = 0
@@ -599,22 +611,92 @@ func TestPausedDownloadRendersPaused(t *testing.T) {
 		{Name: "dl", InfoHash: "aaa", TotalBytes: 100, CompletedBytes: 10, Paused: true},
 	}}
 	m := ready(New(&fakeSource{}, fe))
-	m, _ = update(m, tickMsg(time.Now())) // load statuses
+	m = tick(m, time.Now()) // load statuses
 	m.section = sectionDownloads
 	if !strings.Contains(m.View(), "paused") {
 		t.Fatalf("a paused download should render 'paused':\n%s", m.View())
 	}
 }
 
+func TestTickFiresAsyncPoll(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "X", TotalBytes: 100, CompletedBytes: 50}}}
+	m := ready(New(&fakeSource{}, eng))
+	out, cmd := update(m, tickMsg(time.Now()))
+	m = out
+	if cmd == nil {
+		t.Fatal("tick should return a Cmd (reschedule + poll)")
+	}
+	if len(m.statuses) != 0 {
+		t.Fatalf("tick must NOT update statuses synchronously (poll is async), got %+v", m.statuses)
+	}
+}
+
+func TestPollErrorSetsDaemonDownAndKeepsView(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "X", InfoHash: "x", TotalBytes: 100, CompletedBytes: 50}}}
+	m := ready(New(&fakeSource{}, eng))
+	m = tick(m, time.Unix(1000, 0)) // healthy poll seeds the view
+	if len(m.statuses) != 1 || m.daemonDown {
+		t.Fatalf("after a healthy poll: statuses=%+v daemonDown=%v", m.statuses, m.daemonDown)
+	}
+	eng.statuses = []engine.Status{{Name: "Y", InfoHash: "y"}} // errored poll carries a different payload
+	eng.pollErr = errors.New("daemon gone")
+	m = tick(m, time.Unix(1001, 0)) // failing poll returns ([Y], err)
+	if !m.daemonDown {
+		t.Fatal("a failed poll should set daemonDown")
+	}
+	if len(m.statuses) != 1 || m.statuses[0].Name != "X" {
+		t.Fatalf("a failed poll must keep the last view, got %+v", m.statuses)
+	}
+}
+
+func TestPollRecoveryClearsDaemonDown(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "X", InfoHash: "x"}}, pollErr: errors.New("gone")}
+	m := ready(New(&fakeSource{}, eng))
+	m = tick(m, time.Unix(1000, 0)) // fails
+	if !m.daemonDown {
+		t.Fatal("expected daemonDown after the failing poll")
+	}
+	eng.pollErr = nil
+	eng.statuses = []engine.Status{{Name: "Y", InfoHash: "y"}}
+	m = tick(m, time.Unix(1001, 0)) // recovers
+	if m.daemonDown {
+		t.Fatal("a successful poll should clear daemonDown")
+	}
+	if len(m.statuses) != 1 || m.statuses[0].Name != "Y" {
+		t.Fatalf("recovered poll should update the view, got %+v", m.statuses)
+	}
+}
+
+func TestStalePollIgnored(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "new", InfoHash: "n"}}}
+	m := ready(New(&fakeSource{}, eng))
+	m = tick(m, time.Unix(2000, 0)) // lastTick=2000, statuses=[new]
+	out, _ := update(m, statusMsg{at: time.Unix(1000, 0), statuses: []engine.Status{{Name: "old", InfoHash: "o"}}})
+	m = out
+	if len(m.statuses) != 1 || m.statuses[0].Name != "new" {
+		t.Fatalf("a stale (older-at) poll should be ignored, got %+v", m.statuses)
+	}
+}
+
+func TestDaemonDownShowsReconnecting(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.daemonDown = true
+	if !strings.Contains(m.View(), "reconnecting") {
+		t.Fatalf("daemonDown should render a reconnecting indicator:\n%s", m.View())
+	}
+}
+
 func TestTickPollsEngineAndReschedules(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "X", TotalBytes: 100, CompletedBytes: 50}}}
 	m := ready(New(&fakeSource{}, eng))
-	m, cmd := update(m, tickMsg(time.Now()))
-	if len(m.statuses) != 1 || m.statuses[0].Name != "X" {
-		t.Errorf("tick did not poll statuses: %+v", m.statuses)
-	}
+	out, cmd := update(m, tickMsg(time.Now()))
 	if cmd == nil {
-		t.Error("tick should reschedule itself")
+		t.Error("tick should reschedule itself (and fire a poll)")
+	}
+	m = tick(out, time.Now()) // deliver a poll cycle
+	if len(m.statuses) != 1 || m.statuses[0].Name != "X" {
+		t.Errorf("poll did not load statuses: %+v", m.statuses)
 	}
 }
 
@@ -843,10 +925,10 @@ func TestTickReloadsHistoryOnCompletion(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048}}}
 	m := ready(New(&fakeSource{}, eng))
 	t0 := time.Unix(1_000_000, 0)
-	m, _ = update(m, tickMsg(t0)) // not done → no reload
+	m = tick(m, t0) // not done → no reload
 
 	eng.statuses = []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}
-	m, _ = update(m, tickMsg(t0.Add(time.Second))) // completes → TUI reloads history from disk
+	m = tick(m, t0.Add(time.Second)) // completes → TUI reloads history from disk
 
 	// The TUI must NOT append the completed torrent ("hh"); it reloads the daemon's file ("disk1").
 	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "disk1" {
@@ -863,13 +945,13 @@ func TestTickReloadsHistoryUntilRecorded(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}}
 	m := ready(New(&fakeSource{}, eng))
 	t0 := time.Unix(1_000_000, 0)
-	m, _ = update(m, tickMsg(t0)) // Done but not in history → reload (disk still empty)
+	m = tick(m, t0) // Done but not in history → reload (disk still empty)
 	if len(m.history.Entries) != 0 {
 		t.Fatalf("history should still be empty (daemon hasn't recorded), got %+v", m.history.Entries)
 	}
 	rec := history.Load() // simulate the daemon recording it
 	rec.Append(history.Entry{InfoHash: "hh", Name: "Movie"})
-	m, _ = update(m, tickMsg(t0.Add(time.Second))) // still missing from m.history → reload → now present
+	m = tick(m, t0.Add(time.Second)) // still missing from m.history → reload → now present
 	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "hh" {
 		t.Fatalf("reload should pick up the daemon's record, got %+v", m.history.Entries)
 	}
@@ -879,10 +961,10 @@ func TestTickComputesTransferSpeeds(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{{Name: "A", TotalBytes: 100_000_000, CompletedBytes: 0, Uploaded: 0}}}
 	m := ready(New(&fakeSource{}, eng))
 	t0 := time.Unix(1_000_000, 0)
-	m, _ = update(m, tickMsg(t0)) // seeds the prev snapshot; no speed yet
+	m = tick(m, t0) // seeds the prev snapshot; no speed yet
 	// download speed samples Downloaded (live payload), upload samples Uploaded
 	eng.statuses = []engine.Status{{Name: "A", TotalBytes: 100_000_000, Downloaded: 2 * 1024 * 1024, Uploaded: 4 * 1024 * 1024}}
-	m, _ = update(m, tickMsg(t0.Add(2*time.Second))) // +2 MiB down, +4 MiB up over 2s
+	m = tick(m, t0.Add(2*time.Second)) // +2 MiB down, +4 MiB up over 2s
 	if got := m.dlSpeed["A"]; got != 1024*1024 {
 		t.Fatalf("dlSpeed[A] = %d, want %d (1 MiB/s)", got, 1024*1024)
 	}

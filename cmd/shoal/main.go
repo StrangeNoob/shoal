@@ -140,8 +140,8 @@ func main() {
 	// The TUI drives the shared daemon (auto-started), so it stays in sync with the
 	// CLI. ensureDaemon errors on Windows (unix-socket transport only, until Phase 4)
 	// and when the daemon can't start.
-	eng, err := ensureDaemon()
-	if err != nil {
+	eng := newDaemonPoller()
+	if _, err := eng.client(); err != nil { // startup connect (auto-starts); Windows/failure → fatal
 		fatal(err)
 	}
 	defer eng.Close() // closes the connection only; the daemon and its downloads persist
