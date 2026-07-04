@@ -4,6 +4,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
@@ -17,9 +18,14 @@ func SocketPath() string {
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
-		// Absolute + deterministic so the daemon and clients agree regardless of
-		// each process's working directory.
-		return filepath.Join(os.TempDir(), "shoal-daemon.sock")
+		// Fallback when the config dir is unavailable (e.g. $HOME unset). Namespace
+		// by uid in a subdir rather than dropping a predictable name in a possibly
+		// world-writable temp root (/tmp is 1777 on Linux) — the daemon creates that
+		// subdir 0700 (runDaemon), so another user can't squat the socket path.
+		// ponytail: a pre-existing attacker-owned /tmp/shoal-<uid> would defeat this;
+		// full hardening (ownership check) belongs in Phase 4 if the fallback ever matters.
+		dir = filepath.Join(os.TempDir(), "shoal-"+strconv.Itoa(os.Getuid()))
+		return filepath.Join(dir, "daemon.sock")
 	}
 	return filepath.Join(dir, "shoal", "daemon.sock")
 }
