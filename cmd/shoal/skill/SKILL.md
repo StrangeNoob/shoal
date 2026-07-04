@@ -63,5 +63,8 @@ SolidTorrents cover it.)
 
 - Restrict to one provider: `shoal search --json "<query>" --source <name>`.
 - Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
-- Save elsewhere: `shoal download '<magnet>' --out <dir>`.
 - Clear finished entries from status: `shoal status --clear` (removes all finished/errored entries).
+
+## Notes
+
+All downloads run in a shared background `shoal daemon` (auto-started on the first `download` command). This means multiple downloads and all `shoal status` queries share a single engine and download folder. All downloads land in shoal's configured folder (Settings → Save to, or in `config.json`).
