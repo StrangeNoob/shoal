@@ -53,9 +53,9 @@ SolidTorrents cover it.)
    `shoal status <handle> --json`
    Each poll returns `{state, percent, completed, total, peers, ...}` where
    `state` is one of `downloading | done | seeding | paused`.
-   - `state == "done"` → report the final path, stop.
+   - `state == "done" || state == "seeding"` → report the final path, stop.
    - otherwise → keep polling. Give up after a reasonable number of polls with no
-     progress and tell the user it is stuck (check the daemon log for detail —
+     progress and tell the user it is stuck (check the daemon log —
      `~/Library/Application Support/shoal/logs/daemon.log` on macOS,
      `~/.config/shoal/logs/daemon.log` on Linux).
 

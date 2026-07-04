@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/StrangeNoob/shoal/internal/daemon"
@@ -90,8 +91,10 @@ func runStatus(args []string, out io.Writer) int {
 	statuses := c.Statuses()
 	if *clear {
 		for _, s := range statuses {
-			if s.Done {
-				_ = c.Remove(s.InfoHash, false)
+			if s.Done && !s.Seeding {
+				if err := c.Remove(s.InfoHash, false); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to clear %s: %v\n", s.InfoHash, err)
+				}
 			}
 		}
 		statuses = c.Statuses() // refresh after removals

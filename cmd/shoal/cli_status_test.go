@@ -82,3 +82,18 @@ func TestStatusClearRemovesDone(t *testing.T) {
 		t.Fatalf("--clear should Remove the done torrent, got %v", r)
 	}
 }
+
+func TestStatusClearKeepsSeeding(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "seed1", Done: true, Seeding: true},
+		{InfoHash: "done1", Done: true},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runStatus([]string{"--clear"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if r := fake.gotRemoved(); len(r) != 1 || r[0] != "done1" {
+		t.Fatalf("--clear must keep seeding torrents; removed=%v", r)
+	}
+}

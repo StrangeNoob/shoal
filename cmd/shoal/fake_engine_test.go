@@ -33,7 +33,7 @@ func (f *fakeEngine) AddTorrentURL(u, n string) error {
 func (f *fakeEngine) Statuses() []engine.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.statuses
+	return append([]engine.Status(nil), f.statuses...)
 }
 func (f *fakeEngine) Remove(h string, _ bool) error {
 	f.mu.Lock()
