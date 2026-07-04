@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/StrangeNoob/shoal/internal/daemon"
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
 )
@@ -93,4 +94,44 @@ func TestRecordCompletions(t *testing.T) {
 		}
 	}
 	close(stop)
+}
+
+func TestListenDaemonReclaimsStaleSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	// A stale socket *file* with nothing listening (create then close a listener).
+	l0, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l0.Close()                         // leaves (or removes) the file; either way no daemon answers
+	_ = os.WriteFile(sock, nil, 0o600) // ensure a leftover file is present to reclaim
+	l, err := listenDaemon(sock)
+	if err != nil {
+		t.Fatalf("listenDaemon should reclaim a stale socket: %v", err)
+	}
+	l.Close()
+}
+
+func TestListenDaemonRefusesLiveDaemon(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "d.sock")
+	fake := &fakeEngine{}
+	l0, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go daemon.Serve(l0, fake) // a live daemon is answering
+	t.Cleanup(func() { l0.Close() })
+	if _, err := listenDaemon(sock); err == nil {
+		t.Fatal("listenDaemon should refuse when a live daemon already answers")
+	}
 }

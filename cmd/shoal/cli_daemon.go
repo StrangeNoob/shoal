@@ -97,24 +97,38 @@ func recordCompletions(eng engine.Engine, hist *history.Store, interval time.Dur
 	}
 }
 
+// listenDaemon binds the daemon socket, refusing to start if a live daemon
+// already answers and reclaiming a stale socket file otherwise (bind-first, so a
+// racing second daemon fails here instead of via a check-then-listen TOCTOU).
+func listenDaemon(sock string) (net.Listener, error) {
+	if l, err := net.Listen("unix", sock); err == nil {
+		return l, nil
+	}
+	if daemonRunning(sock) {
+		return nil, fmt.Errorf("shoal daemon already running at %s", sock)
+	}
+	_ = os.Remove(sock) // stale socket file — reclaim it
+	return net.Listen("unix", sock)
+}
+
 // runDaemon runs the shared engine and serves it on the unix socket (foreground).
 func runDaemon(args []string, out io.Writer) int {
 	if runtime.GOOS == "windows" {
 		fmt.Fprintln(os.Stderr, "the shoal daemon is not yet supported on Windows")
 		return 1
 	}
+	cfg := config.Load()
 	sock := daemon.SocketPath()
-	if daemonRunning(sock) {
-		fmt.Fprintln(os.Stderr, "shoal daemon already running at", sock)
-		return 1
-	}
-	_ = os.Remove(sock) // clear a stale socket file
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, "shoal daemon:", err)
 		return 1
 	}
+	l, err := listenDaemon(sock) // bind first — a second daemon fails here
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shoal daemon:", err)
+		return 1
+	}
 
-	cfg := config.Load()
 	eng, err := engine.NewAnacrolix(engine.Config{
 		DataDir:    cfg.DataDir,
 		ListenPort: cfg.ListenPort,
@@ -124,24 +138,19 @@ func runDaemon(args []string, out io.Writer) int {
 		QueuePath:  queue.DefaultPath(),
 	})
 	if err != nil {
+		l.Close()
+		_ = os.Remove(sock)
 		fmt.Fprintln(os.Stderr, "shoal daemon: engine:", err)
 		return 1
 	}
 	defer eng.Close()
 
-	l, err := net.Listen("unix", sock)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "shoal daemon: listen:", err)
-		return 1
-	}
+	srv := daemon.NewServer(eng, time.Now(), time.Duration(cfg.DaemonIdleMinutes)*time.Minute)
 	fmt.Fprintln(out, "shoal daemon listening on", sock)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sig
-		l.Close()
-	}()
+	go func() { <-sig; srv.Shutdown() }()
 
 	hist := history.Load()
 	stop := make(chan struct{})
@@ -151,9 +160,9 @@ func runDaemon(args []string, out io.Writer) int {
 		close(done)
 	}()
 
-	_ = daemon.Serve(l, eng) // returns when the listener closes
+	_ = srv.Serve(l) // returns when the listener closes (stop/idle/signal)
 	close(stop)
-	<-done // wait for recordCompletions to exit before eng.Close() runs (deferred above)
+	<-done // wait for recordCompletions to exit before eng.Close() runs (deferred)
 	_ = os.Remove(sock)
 	return 0
 }
