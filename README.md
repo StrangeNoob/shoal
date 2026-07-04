@@ -88,6 +88,9 @@ followed by a **History** of everything you've downloaded (persisted across runs
 
 **Settings** — theme (Twilight / Tide), color mode, save location, seed ratio, max peers,
 listen port, and auto-update. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
+A **SOURCES** group lists every provider with an on/off toggle (`← →` to change);
+turning one off removes it from searches immediately, and the change is shared with
+the `shoal sources` CLI.
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
 indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
@@ -101,12 +104,18 @@ AI agent — can search and download without the UI. Run `shoal` with no argumen
 TUI; with a subcommand for scripting:
 
 ```sh
-shoal sources                        # list the search providers (add --json)
+shoal sources                        # list providers with on/off state (add --json)
+shoal sources enable  <name>         # turn a provider on
+shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (add --json for scripts)
 shoal download <magnet|url|infohash|id> [--out <dir>]   # download in the background
 shoal status [id]                    # progress of background downloads (--json, --clear)
 ```
 
+- **`sources`** lists all available providers with their on/off state (enable `--json` for
+  machines); `enable <name>` and `disable <name>` toggle a provider. Toggles are shared
+  with the TUI (stored in `config.json`) and take effect on the next search — no restart.
+  A one-shot `--source <name>` still searches a provider even if it's disabled.
 - **`search`** queries all sources concurrently and prints a table (a short id per row),
   or a JSON array with the full magnet for each result via `--json`. Narrow to one
   provider with `--source <name>`, cap results with `--limit <N>`.
