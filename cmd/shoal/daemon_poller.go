@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/rpc"
 	"sync"
 	"time"
 
@@ -21,6 +23,14 @@ type daemonPoller struct {
 }
 
 func newDaemonPoller() *daemonPoller { return &daemonPoller{timeout: 2 * time.Second} }
+
+// isAppError reports whether err is an application error the daemon's handler
+// returned (rpc.ServerError) rather than a transport/connection failure. App
+// errors (e.g. an invalid magnet) leave the connection healthy, so keep it.
+func isAppError(err error) bool {
+	var se rpc.ServerError
+	return errors.As(err, &se)
+}
 
 var _ engine.Engine = (*daemonPoller)(nil)
 
@@ -80,8 +90,8 @@ func (p *daemonPoller) callWithTimeout(fn func(*daemon.Client) error) error {
 	go func() { done <- fn(c) }()
 	select {
 	case err := <-done:
-		if err != nil {
-			p.dropIf(c)
+		if err != nil && !isAppError(err) {
+			p.dropIf(c) // transport failure → reconnect; app error → keep the client
 		}
 		return err
 	case <-time.After(p.timeout):

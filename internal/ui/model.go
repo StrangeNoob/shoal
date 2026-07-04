@@ -528,12 +528,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case statusMsg:
+		if msg.at.Before(m.lastTick) {
+			return m, nil // stale/out-of-order poll — ignore, even an error
+		}
 		if msg.err != nil {
 			m.daemonDown = true
 			return m, nil
-		}
-		if msg.at.Before(m.lastTick) {
-			return m, nil // stale/out-of-order poll — don't regress timing or the view
 		}
 		m.daemonDown = false
 		now := msg.at

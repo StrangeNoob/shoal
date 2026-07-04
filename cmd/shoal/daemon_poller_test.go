@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"net"
+	"net/rpc"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,5 +58,17 @@ func TestDaemonPollerPollTimesOut(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Poll hung despite the timeout")
+	}
+}
+
+func TestIsAppError(t *testing.T) {
+	if !isAppError(rpc.ServerError("invalid magnet")) {
+		t.Error("an rpc.ServerError (application error) should classify as an app error")
+	}
+	if isAppError(io.EOF) {
+		t.Error("a transport error (EOF) must NOT classify as an app error")
+	}
+	if isAppError(errors.New("daemon request timed out")) {
+		t.Error("a generic/timeout error must NOT classify as an app error")
 	}
 }

@@ -136,9 +136,9 @@ shoal daemon stop                    # stop the shared daemon
 - **`daemon stop`** — stop the shared daemon (it also stops on its own when idle).
 
 The daemon auto-starts on the first `download` or when the TUI launches. If the
-daemon stops or crashes while the TUI is open, the TUI shows a brief
-"reconnecting…" indicator and automatically restarts it, so downloads resume.
-(To fully stop the daemon, close the TUI first, then `shoal daemon stop`.)
+daemon stops or crashes while the TUI is open, the TUI shows a reconnecting
+indicator until the daemon comes back and automatically restarts it, so downloads
+resume. (To fully stop the daemon, close the TUI first, then `shoal daemon stop`.)
 
 The daemon also **auto-stops when it's been empty (no torrents) with no connected
 clients for `daemon_idle_minutes` (default 10; set `0` in `config.json` to
