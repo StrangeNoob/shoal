@@ -98,14 +98,22 @@ func recordCompletions(eng engine.Engine, hist *history.Store, interval time.Dur
 }
 
 // listenDaemon binds the daemon socket, refusing to start if a live daemon
-// already answers and reclaiming a stale socket file otherwise (bind-first, so a
-// racing second daemon fails here instead of via a check-then-listen TOCTOU).
+// already answers. A leftover socket file (from a crashed daemon) is reclaimed
+// under a lock file so two cold-starting daemons can't both remove-and-rebind it.
 func listenDaemon(sock string) (net.Listener, error) {
 	if l, err := net.Listen("unix", sock); err == nil {
 		return l, nil
 	}
 	if daemonRunning(sock) {
-		return nil, fmt.Errorf("shoal daemon already running at %s", sock)
+		return nil, fmt.Errorf("already running at %s", sock)
+	}
+	lock, err := flockExclusive(sock + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if daemonRunning(sock) { // re-check under the lock: another starter may have won
+		return nil, fmt.Errorf("already running at %s", sock)
 	}
 	_ = os.Remove(sock) // stale socket file — reclaim it
 	return net.Listen("unix", sock)
@@ -119,6 +127,9 @@ func runDaemonCmd(args []string, out io.Writer) int {
 			return runDaemonStop(out)
 		case "status":
 			return runDaemonStatus(out)
+		default:
+			fmt.Fprintf(os.Stderr, "shoal daemon: unknown subcommand %q (use stop|status, or no argument to run the daemon)\n", args[0])
+			return 2
 		}
 	}
 	return runDaemon(args, out)

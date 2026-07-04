@@ -60,6 +60,7 @@ func (s *Server) Shutdown() { s.once.Do(func() { close(s.shutdown) }) }
 // Serve registers Engine.* and Control.*, runs the idle monitor, and accepts
 // connections (tracking the open count) until the listener closes.
 func (s *Server) Serve(l net.Listener) error {
+	defer s.Shutdown() // reap the shutdown-watcher and idle monitor on any return
 	srv := rpc.NewServer()
 	if err := srv.RegisterName("Engine", &EngineService{eng: s.eng}); err != nil {
 		return err

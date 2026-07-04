@@ -109,8 +109,10 @@ func TestListenDaemonReclaimsStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l0.Close()                         // leaves (or removes) the file; either way no daemon answers
-	_ = os.WriteFile(sock, nil, 0o600) // ensure a leftover file is present to reclaim
+	l0.Close() // leaves (or removes) the file; either way no daemon answers
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	l, err := listenDaemon(sock)
 	if err != nil {
 		t.Fatalf("listenDaemon should reclaim a stale socket: %v", err)
