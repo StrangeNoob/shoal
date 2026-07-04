@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
@@ -85,8 +86,9 @@ func serveTest(t *testing.T, eng engine.Engine) *Client {
 }
 
 func TestRoundTrip(t *testing.T) {
+	wantAdded := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	fake := &fakeEngine{statuses: []engine.Status{
-		{Name: "Movie", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 40, Peers: 3},
+		{Name: "Movie", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 40, Peers: 3, AddedAt: wantAdded},
 	}}
 	c := serveTest(t, fake)
 
@@ -116,7 +118,7 @@ func TestRoundTrip(t *testing.T) {
 	if len(paused) != 1 || paused[0] != "h2" || len(resumed) != 1 || resumed[0] != "h3" {
 		t.Errorf("paused=%v resumed=%v", paused, resumed)
 	}
-	if len(st) != 1 || st[0].Name != "Movie" || st[0].CompletedBytes != 40 || st[0].Peers != 3 {
+	if len(st) != 1 || st[0].Name != "Movie" || st[0].CompletedBytes != 40 || st[0].Peers != 3 || !st[0].AddedAt.Equal(wantAdded) {
 		t.Errorf("statuses=%+v", st)
 	}
 }
@@ -142,5 +144,3 @@ func TestSocketPathEnvOverride(t *testing.T) {
 		t.Fatalf("env override ignored: %s", SocketPath())
 	}
 }
-
-var _ engine.Engine = (*Client)(nil)

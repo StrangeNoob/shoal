@@ -12,6 +12,9 @@ import (
 // Client talks to a daemon over a unix socket and implements engine.Engine.
 type Client struct{ rpc *rpc.Client }
 
+// Client is a drop-in engine.Engine, checked at compile time.
+var _ engine.Engine = (*Client)(nil)
+
 // Dial connects to the daemon listening at the unix socket path.
 func Dial(path string) (*Client, error) {
 	conn, err := net.Dial("unix", path)
