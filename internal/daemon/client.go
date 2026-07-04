@@ -49,3 +49,15 @@ func (c *Client) Resume(hash string) error {
 
 // Close closes the RPC connection only — it does not stop the shared engine.
 func (c *Client) Close() error { return c.rpc.Close() }
+
+// Shutdown asks the daemon to stop gracefully.
+func (c *Client) Shutdown() error {
+	return c.rpc.Call("Control.Shutdown", Empty{}, &Empty{})
+}
+
+// Status reports the daemon's uptime and torrent counts.
+func (c *Client) Status() (StatusReply, error) {
+	var r StatusReply
+	err := c.rpc.Call("Control.Status", Empty{}, &r)
+	return r, err
+}
