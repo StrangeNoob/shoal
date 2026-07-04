@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/daemon"
 	"github.com/StrangeNoob/shoal/internal/engine"
@@ -12,11 +14,12 @@ import (
 // demand, and exposes Poll() so the TUI can distinguish a dead daemon from an
 // empty engine and show a reconnecting state.
 type daemonPoller struct {
-	mu sync.Mutex
-	c  *daemon.Client // nil when disconnected
+	mu      sync.Mutex
+	c       *daemon.Client // nil when disconnected
+	timeout time.Duration
 }
 
-func newDaemonPoller() *daemonPoller { return &daemonPoller{} }
+func newDaemonPoller() *daemonPoller { return &daemonPoller{timeout: 2 * time.Second} }
 
 var _ engine.Engine = (*daemonPoller)(nil)
 
@@ -35,58 +38,104 @@ func (p *daemonPoller) client() (*daemon.Client, error) {
 	return c, nil
 }
 
-// drop closes and forgets the client so the next call reconnects.
-func (p *daemonPoller) drop() {
+// dropIf closes and forgets the client only if it's still the one that failed,
+// so a slow straggler can't close a client another goroutine just reconnected.
+func (p *daemonPoller) dropIf(bad *daemon.Client) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.c == bad {
+		p.c.Close()
+		p.c = nil
+	}
+}
+
+// callWithTimeout runs fn against a live client, bounding it so a hung daemon
+// can't block the caller forever. On error or timeout it drops that client
+// (closing it, which unblocks the in-flight goroutine) to force a reconnect.
+//
+// We don't use daemon.Client.SetDeadline for this: it's a persistent net/rpc
+// client whose background reader would then time out between polls and tear
+// the client down even when the daemon is healthy.
+func (p *daemonPoller) callWithTimeout(fn func(*daemon.Client) error) error {
+	c, err := p.client()
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- fn(c) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			p.dropIf(c)
+		}
+		return err
+	case <-time.After(p.timeout):
+		p.dropIf(c) // closing c unblocks the goroutine's call, which then exits
+		return fmt.Errorf("daemon request timed out")
+	}
+}
+
+// Poll returns the daemon's statuses and any connection error, dropping the
+// client on error to force a reconnect next time.
+//
+// This doesn't go through callWithTimeout: that helper only carries an error
+// across its done channel, but Poll also needs the statuses value. Capturing
+// it into a variable outside the per-call goroutine (as an outer closure
+// write) would race with this function reading it after a timeout, since the
+// abandoned goroutine can still be writing when we return. Instead the
+// result is carried through the channel itself, so it's only ever touched by
+// one goroutine at a time.
+func (p *daemonPoller) Poll() ([]engine.Status, error) {
+	c, err := p.client()
+	if err != nil {
+		return nil, err
+	}
+	type result struct {
+		ss  []engine.Status
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		ss, err := c.StatusesErr()
+		done <- result{ss, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			p.dropIf(c)
+		}
+		return r.ss, r.err
+	case <-time.After(p.timeout):
+		p.dropIf(c) // closing c unblocks the goroutine's call, which then exits
+		return nil, fmt.Errorf("daemon request timed out")
+	}
+}
+
+func (p *daemonPoller) Statuses() []engine.Status { ss, _ := p.Poll(); return ss }
+
+func (p *daemonPoller) AddMagnet(m string) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.AddMagnet(m) })
+}
+func (p *daemonPoller) AddTorrentURL(u, n string) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.AddTorrentURL(u, n) })
+}
+func (p *daemonPoller) Remove(h string, del bool) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.Remove(h, del) })
+}
+func (p *daemonPoller) Pause(h string) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.Pause(h) })
+}
+func (p *daemonPoller) Resume(h string) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.Resume(h) })
+}
+
+// Close unconditionally drops the current client, regardless of identity.
+func (p *daemonPoller) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.c != nil {
 		p.c.Close()
 		p.c = nil
 	}
-}
-
-// Poll returns the daemon's statuses and any connection error, dropping the
-// client on error to force a reconnect next time.
-func (p *daemonPoller) Poll() ([]engine.Status, error) {
-	c, err := p.client()
-	if err != nil {
-		return nil, err
-	}
-	ss, err := c.StatusesErr()
-	if err != nil {
-		p.drop()
-	}
-	return ss, err
-}
-
-func (p *daemonPoller) Statuses() []engine.Status { ss, _ := p.Poll(); return ss }
-
-// do runs an engine op through a live client, dropping the client on error.
-func (p *daemonPoller) do(fn func(*daemon.Client) error) error {
-	c, err := p.client()
-	if err != nil {
-		return err
-	}
-	if err := fn(c); err != nil {
-		p.drop()
-		return err
-	}
 	return nil
 }
-
-func (p *daemonPoller) AddMagnet(m string) error {
-	return p.do(func(c *daemon.Client) error { return c.AddMagnet(m) })
-}
-func (p *daemonPoller) AddTorrentURL(u, n string) error {
-	return p.do(func(c *daemon.Client) error { return c.AddTorrentURL(u, n) })
-}
-func (p *daemonPoller) Remove(h string, del bool) error {
-	return p.do(func(c *daemon.Client) error { return c.Remove(h, del) })
-}
-func (p *daemonPoller) Pause(h string) error {
-	return p.do(func(c *daemon.Client) error { return c.Pause(h) })
-}
-func (p *daemonPoller) Resume(h string) error {
-	return p.do(func(c *daemon.Client) error { return c.Resume(h) })
-}
-func (p *daemonPoller) Close() error { p.drop(); return nil }

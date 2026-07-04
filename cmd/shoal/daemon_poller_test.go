@@ -1,8 +1,12 @@
 package main
 
 import (
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
@@ -24,4 +28,32 @@ func TestDaemonPollerPollsAndReconnects(t *testing.T) {
 		t.Fatalf("daemon did not receive the magnet: %v", got)
 	}
 	p.Close()
+}
+
+func TestDaemonPollerPollTimesOut(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "d.sock")
+	t.Setenv("SHOAL_DAEMON_SOCK", sock)
+	l, err := net.Listen("unix", sock) // accepts connections but never serves RPC → calls hang
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	p := newDaemonPoller()
+	p.timeout = 100 * time.Millisecond
+	errc := make(chan error, 1)
+	go func() { _, err := p.Poll(); errc <- err }()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("Poll should time out against an unresponsive daemon")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Poll hung despite the timeout")
+	}
 }
