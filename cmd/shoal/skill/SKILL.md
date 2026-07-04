@@ -51,19 +51,19 @@ SolidTorrents cover it.)
 
 5. **Poll** progress every few seconds:
    `shoal status <handle> --json`
-   Each poll returns `{state, percent, completed, total, peers, ...}`.
+   Each poll returns `{state, percent, completed, total, peers, ...}` where
+   `state` is one of `downloading | done | seeding | paused`.
    - `state == "done"` → report the final path, stop.
-   - `state == "error"` or `"stalled"` → report the failure (check
-     the log in shoal's config dir — `~/Library/Application Support/shoal/logs/<handle>.log`
-     on macOS, `~/.config/shoal/logs/<handle>.log` on Linux — if the user wants detail), stop.
    - otherwise → keep polling. Give up after a reasonable number of polls with no
-     progress and tell the user it is stuck.
+     progress and tell the user it is stuck (check the daemon log for detail —
+     `~/Library/Application Support/shoal/logs/daemon.log` on macOS,
+     `~/.config/shoal/logs/daemon.log` on Linux).
 
 ## Options
 
 - Restrict to one provider: `shoal search --json "<query>" --source <name>`.
 - Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
-- Clear finished entries from status: `shoal status --clear` (removes all finished/errored entries).
+- Clear finished entries from status: `shoal status --clear` (removes finished/done torrents, keeping files).
 
 ## Notes
 

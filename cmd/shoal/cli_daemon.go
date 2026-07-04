@@ -16,6 +16,7 @@ import (
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/daemon"
 	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/queue"
 )
 
@@ -68,6 +69,33 @@ func ensureDaemon() (*daemon.Client, error) {
 	return nil, fmt.Errorf("could not start shoal daemon (see %s)", filepath.Join(logDir, "daemon.log"))
 }
 
+// recordCompletions polls the engine and appends newly-completed torrents to
+// history, so CLI downloads land in the shared history like the TUI's do.
+func recordCompletions(eng engine.Engine, hist *history.Store, interval time.Duration, stop <-chan struct{}) {
+	recorded := map[string]bool{}
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			for _, s := range eng.Statuses() {
+				if s.Done && !recorded[s.InfoHash] {
+					recorded[s.InfoHash] = true
+					hist.Append(history.Entry{
+						InfoHash:    s.InfoHash,
+						Name:        s.Name,
+						Size:        s.TotalBytes,
+						CompletedAt: time.Now(),
+						Path:        s.Path,
+					})
+				}
+			}
+		}
+	}
+}
+
 // runDaemon runs the shared engine and serves it on the unix socket (foreground).
 func runDaemon(args []string, out io.Writer) int {
 	if runtime.GOOS == "windows" {
@@ -114,7 +142,12 @@ func runDaemon(args []string, out io.Writer) int {
 		l.Close()
 	}()
 
+	hist := history.Load()
+	stop := make(chan struct{})
+	go recordCompletions(eng, &hist, time.Second, stop)
+
 	_ = daemon.Serve(l, eng) // returns when the listener closes
+	close(stop)
 	_ = os.Remove(sock)
 	return 0
 }

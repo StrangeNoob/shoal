@@ -124,8 +124,8 @@ shoal status [id]                    # progress of background downloads (--json,
   immediately with a handle; files land in shoal's configured folder (Settings → Save to, or `config.json`).
   CLI downloads run in a shared background `shoal daemon` (started automatically on the first `download`),
   so multiple downloads and `shoal status` all share one engine and one download folder.
-- **`status`** reports each background download as `downloading | done | error | stalled`;
-  `--clear` prunes finished entries.
+- **`status`** reports each background download as `downloading | done | seeding | paused`;
+  `--clear` prunes finished (done) torrents, keeping files.
 
 ### Claude Code skill
 

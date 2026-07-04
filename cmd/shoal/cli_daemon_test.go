@@ -5,6 +5,10 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
 )
 
 func TestDaemonRunningGuard(t *testing.T) {
@@ -57,4 +61,28 @@ func TestEnsureDaemonUsesRunning(t *testing.T) {
 		t.Fatalf("ensureDaemon should connect to the running daemon: %v", err)
 	}
 	c.Close()
+}
+
+func TestRecordCompletions(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "abcdef", Name: "Movie", TotalBytes: 100, Done: true, Path: "/d/Movie"},
+	}}
+	hist := history.Store{Path: filepath.Join(t.TempDir(), "history.json")}
+	stop := make(chan struct{})
+	go recordCompletions(fake, &hist, time.Millisecond, stop)
+	deadline := time.After(2 * time.Second)
+	for {
+		if got := history.LoadFrom(hist.Path); len(got.Entries) == 1 {
+			if got.Entries[0].Name != "Movie" || got.Entries[0].Path != "/d/Movie" {
+				t.Fatalf("bad entry: %+v", got.Entries[0])
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("completion was not recorded to history")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	close(stop)
 }
