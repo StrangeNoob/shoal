@@ -43,3 +43,18 @@ func TestCLIRoutesDaemonGuarded(t *testing.T) {
 		t.Errorf("already-running guard should exit 1, got %d", code)
 	}
 }
+
+func TestEnsureDaemonUsesRunning(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	t.Setenv("SHOAL_DAEMON_SOCK", sock)
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	c, err := ensureDaemon() // must connect to the already-running socket, not spawn
+	if err != nil {
+		t.Fatalf("ensureDaemon should connect to the running daemon: %v", err)
+	}
+	c.Close()
+}
