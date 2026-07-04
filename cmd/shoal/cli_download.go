@@ -101,7 +101,7 @@ func runDownload(args []string, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "shoal download:", err)
 		return 1
 	}
-	if tgt.Handle != "" {
+	if tgt.Magnet != "" && tgt.Handle != "" {
 		fmt.Fprintf(out, "started: %s (%s)\n", displayName(tgt), tgt.Handle)
 	} else {
 		fmt.Fprintf(out, "started: %s\n", displayName(tgt))

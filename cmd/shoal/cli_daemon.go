@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -53,7 +54,7 @@ func ensureDaemon() (*daemon.Client, error) {
 		return nil, err
 	}
 	defer logf.Close()
-	cmd := exec.Command(exe, "daemon")
+	cmd := exec.CommandContext(context.Background(), exe, "daemon")
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	cmd.SysProcAttr = detachSysProcAttr()
@@ -144,10 +145,15 @@ func runDaemon(args []string, out io.Writer) int {
 
 	hist := history.Load()
 	stop := make(chan struct{})
-	go recordCompletions(eng, &hist, time.Second, stop)
+	done := make(chan struct{})
+	go func() {
+		recordCompletions(eng, &hist, time.Second, stop)
+		close(done)
+	}()
 
 	_ = daemon.Serve(l, eng) // returns when the listener closes
 	close(stop)
+	<-done // wait for recordCompletions to exit before eng.Close() runs (deferred above)
 	_ = os.Remove(sock)
 	return 0
 }

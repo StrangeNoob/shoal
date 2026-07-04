@@ -89,3 +89,16 @@ func TestDownloadForwardsURLToDaemon(t *testing.T) {
 		t.Fatalf("daemon did not receive the URL: %v", u)
 	}
 }
+
+func TestDownloadURLPrintsNoHandle(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"https://example.com/x.torrent"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	// a URL download's sha1 handle is not queryable via status, so it must not be printed
+	if strings.Contains(buf.String(), "(") {
+		t.Fatalf("URL download should not print a handle, got %q", buf.String())
+	}
+}
