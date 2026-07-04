@@ -832,15 +832,6 @@ func TestComputeRates(t *testing.T) {
 	}
 }
 
-func TestNewlyCompleted(t *testing.T) {
-	prev := []engine.Status{{InfoHash: "a", Done: false}, {InfoHash: "b", Done: true}}
-	next := []engine.Status{{InfoHash: "a", Done: true}, {InfoHash: "b", Done: true}}
-	got := newlyCompleted(prev, next)
-	if len(got) != 1 || got[0].InfoHash != "a" {
-		t.Fatalf("newlyCompleted = %+v, want just a", got)
-	}
-}
-
 func TestTickReloadsHistoryOnCompletion(t *testing.T) {
 	// Isolate the history file; the daemon (simulated by the pre-write below) is the recorder.
 	tmp := t.TempDir()
@@ -860,6 +851,23 @@ func TestTickReloadsHistoryOnCompletion(t *testing.T) {
 	// The TUI must NOT append the completed torrent ("hh"); it reloads the daemon's file ("disk1").
 	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "disk1" {
 		t.Fatalf("expected reload from disk (disk1), got %+v", m.history.Entries)
+	}
+}
+
+func TestTickReloadsHistoryUntilRecorded(t *testing.T) {
+	// history starts empty; a torrent completes but the daemon hasn't recorded it yet.
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "Movie", InfoHash: "hh", TotalBytes: 2048, CompletedBytes: 2048, Done: true}}}
+	m := ready(New(&fakeSource{}, eng))
+	t0 := time.Unix(1_000_000, 0)
+	m, _ = update(m, tickMsg(t0)) // Done but not in history → reload (disk still empty)
+	if len(m.history.Entries) != 0 {
+		t.Fatalf("history should still be empty (daemon hasn't recorded), got %+v", m.history.Entries)
+	}
+	rec := history.Load() // simulate the daemon recording it
+	rec.Append(history.Entry{InfoHash: "hh", Name: "Movie"})
+	m, _ = update(m, tickMsg(t0.Add(time.Second))) // still missing from m.history → reload → now present
+	if len(m.history.Entries) != 1 || m.history.Entries[0].InfoHash != "hh" {
+		t.Fatalf("reload should pick up the daemon's record, got %+v", m.history.Entries)
 	}
 }
 

@@ -80,5 +80,9 @@ func (s Store) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, b, 0o600)
+	tmp := s.Path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.Path) // atomic: readers see the old or new file, never a torn one
 }

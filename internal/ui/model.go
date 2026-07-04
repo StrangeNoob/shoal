@@ -389,22 +389,19 @@ func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cm
 	}
 }
 
-// newlyCompleted returns torrents that flipped Done false→true (or first appeared
-// already Done) between two snapshots, keyed by InfoHash.
-func newlyCompleted(prev, next []engine.Status) []engine.Status {
-	was := make(map[string]bool, len(prev))
-	for _, s := range prev {
-		if s.Done {
-			was[s.InfoHash] = true
+// completionMissingFromHistory reports whether any finished torrent isn't yet in
+// the history store — i.e. the daemon hasn't recorded it, so a reload is worthwhile.
+func (m Model) completionMissingFromHistory(statuses []engine.Status) bool {
+	recorded := make(map[string]bool, len(m.history.Entries))
+	for _, e := range m.history.Entries {
+		recorded[e.InfoHash] = true
+	}
+	for _, s := range statuses {
+		if s.Done && !recorded[s.InfoHash] {
+			return true
 		}
 	}
-	var out []engine.Status
-	for _, s := range next {
-		if s.Done && s.InfoHash != "" && !was[s.InfoHash] {
-			out = append(out, s)
-		}
-	}
-	return out
+	return false
 }
 
 // --- update ----------------------------------------------------------------
@@ -505,8 +502,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dt := now.Sub(m.lastTick)
 			m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 			m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
-			if len(newlyCompleted(m.statuses, next)) > 0 {
-				m.history = history.Load() // the daemon records completions; refresh the History pane
+			// The daemon records completions on its own ticker; reload until every
+			// finished torrent is present (a one-shot on the Done edge could read the
+			// file before the daemon's write lands and then never retry).
+			if m.completionMissingFromHistory(next) {
+				m.history = history.Load()
 			}
 			m.statuses = next
 			m.lastTick = now
