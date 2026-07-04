@@ -15,6 +15,7 @@ import (
 // empty engine and show a reconnecting state.
 type daemonPoller struct {
 	mu      sync.Mutex
+	connMu  sync.Mutex     // serializes reconnect attempts; never held with mu across ensureDaemon
 	c       *daemon.Client // nil when disconnected
 	timeout time.Duration
 }
@@ -23,19 +24,33 @@ func newDaemonPoller() *daemonPoller { return &daemonPoller{timeout: 2 * time.Se
 
 var _ engine.Engine = (*daemonPoller)(nil)
 
-// client returns a live client, reconnecting via ensureDaemon (auto-start) if none.
+// client returns a live client, reconnecting via ensureDaemon (auto-start) when
+// none is cached. mu (guarding c) is never held across ensureDaemon; connMu
+// serializes reconnect attempts so concurrent callers don't each spawn a daemon.
 func (p *daemonPoller) client() (*daemon.Client, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.c != nil {
-		return p.c, nil
+	c := p.c
+	p.mu.Unlock()
+	if c != nil {
+		return c, nil
 	}
-	c, err := ensureDaemon()
+
+	p.connMu.Lock()
+	defer p.connMu.Unlock()
+	p.mu.Lock()
+	c = p.c
+	p.mu.Unlock()
+	if c != nil { // another goroutine reconnected while we waited on connMu
+		return c, nil
+	}
+	nc, err := ensureDaemon()
 	if err != nil {
 		return nil, err
 	}
-	p.c = c
-	return c, nil
+	p.mu.Lock()
+	p.c = nc
+	p.mu.Unlock()
+	return nc, nil
 }
 
 // dropIf closes and forgets the client only if it's still the one that failed,

@@ -638,8 +638,9 @@ func TestPollErrorSetsDaemonDownAndKeepsView(t *testing.T) {
 	if len(m.statuses) != 1 || m.daemonDown {
 		t.Fatalf("after a healthy poll: statuses=%+v daemonDown=%v", m.statuses, m.daemonDown)
 	}
+	eng.statuses = []engine.Status{{Name: "Y", InfoHash: "y"}} // errored poll carries a different payload
 	eng.pollErr = errors.New("daemon gone")
-	m = tick(m, time.Unix(1001, 0)) // failing poll
+	m = tick(m, time.Unix(1001, 0)) // failing poll returns ([Y], err)
 	if !m.daemonDown {
 		t.Fatal("a failed poll should set daemonDown")
 	}
@@ -663,6 +664,17 @@ func TestPollRecoveryClearsDaemonDown(t *testing.T) {
 	}
 	if len(m.statuses) != 1 || m.statuses[0].Name != "Y" {
 		t.Fatalf("recovered poll should update the view, got %+v", m.statuses)
+	}
+}
+
+func TestStalePollIgnored(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{{Name: "new", InfoHash: "n"}}}
+	m := ready(New(&fakeSource{}, eng))
+	m = tick(m, time.Unix(2000, 0)) // lastTick=2000, statuses=[new]
+	out, _ := update(m, statusMsg{at: time.Unix(1000, 0), statuses: []engine.Status{{Name: "old", InfoHash: "o"}}})
+	m = out
+	if len(m.statuses) != 1 || m.statuses[0].Name != "new" {
+		t.Fatalf("a stale (older-at) poll should be ignored, got %+v", m.statuses)
 	}
 }
 

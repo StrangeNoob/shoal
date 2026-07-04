@@ -532,6 +532,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.daemonDown = true
 			return m, nil
 		}
+		if msg.at.Before(m.lastTick) {
+			return m, nil // stale/out-of-order poll — don't regress timing or the view
+		}
 		m.daemonDown = false
 		now := msg.at
 		next := msg.statuses
