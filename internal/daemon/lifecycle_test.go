@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -131,7 +132,8 @@ func TestIdleHeldOffByConnection(t *testing.T) {
 	srv := NewServer(&fakeEngine{}, time.Now(), 60*time.Millisecond)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
-	conn, err := net.Dial("unix", sock) // hold a connection open
+	var d net.Dialer
+	conn, err := d.DialContext(context.Background(), "unix", sock) // hold a connection open
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,5 +148,37 @@ func TestIdleHeldOffByConnection(t *testing.T) {
 	case <-errc:
 	case <-time.After(2 * time.Second):
 		t.Fatal("idle shutdown did not fire after the connection closed")
+	}
+}
+
+func TestClientSetDeadlineBoundsCalls(t *testing.T) {
+	dir, err := os.MkdirTemp("", "shoal-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "d.sock")
+	l, err := net.Listen("unix", sock) // listen but never Accept/serve → RPC would hang
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	c, err := Dial(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := c.Status(); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Status should fail on the deadline against an unresponsive server")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Status hung despite the deadline")
 	}
 }

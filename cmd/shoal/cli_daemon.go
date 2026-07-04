@@ -142,6 +142,7 @@ func runDaemonStop(out io.Writer) int {
 		return 0
 	}
 	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	if err := c.Shutdown(); err != nil {
 		fmt.Fprintln(os.Stderr, "shoal daemon stop:", err)
 		return 1
@@ -164,6 +165,7 @@ func runDaemonStatus(out io.Writer) int {
 		return 0
 	}
 	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	st, err := c.Status()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "shoal daemon status:", err)
