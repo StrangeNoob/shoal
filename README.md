@@ -101,7 +101,9 @@ keyword search.)
 
 Besides the fullscreen TUI, `shoal` has non-interactive subcommands so a script — or an
 AI agent — can search and download without the UI. Run `shoal` with no arguments for the
-TUI; with a subcommand for scripting:
+TUI; with a subcommand for scripting. The listing commands (`sources`, `search`,
+`status`, `history`) print an aligned, headered table for humans; add `--json` for
+machine-readable output:
 
 ```sh
 shoal sources                        # list providers with on/off state (add --json)
@@ -125,9 +127,17 @@ shoal daemon stop                    # stop the shared daemon
   machines); `enable <name>` and `disable <name>` toggle a provider. Toggles are shared
   with the TUI (stored in `config.json`) and take effect on the next search — no restart.
   A one-shot `--source <name>` still searches a provider even if it's disabled.
-- **`search`** queries all sources concurrently and prints a table (a short id per row),
-  or a JSON array with the full magnet for each result via `--json`. Narrow to one
-  provider with `--source <name>`, cap results with `--limit <N>`.
+- **`search`** queries all sources concurrently and prints an aligned table
+  (`ID · TITLE · SIZE · SEED · LEECH · SOURCE`, best-first), or a JSON array with the
+  full magnet for each result via `--json`. Narrow to one provider with `--source <name>`,
+  cap results with `--limit <N>`. The short `ID` from any row is what you pass to
+  `download`:
+
+  ```
+  ID        TITLE                                    SIZE       SEED  LEECH  SOURCE
+  88594aaa  Big Buck Bunny (2008) 1080p BluRay x264  723.0 MiB  412   18     YTS
+  deadbeef  big_buck_bunny_480p.mp4                  158.0 MiB  3     0      Internet Archive
+  ```
 - **`download`** accepts a magnet, a `.torrent` URL, a 40-char infohash, or a short id
   from your last `search`. It starts the download **in the background** and returns
   immediately with a handle; files land in shoal's configured folder (Settings → Save to, or `config.json`).
@@ -253,6 +263,8 @@ Shipped:
 - **Pause / resume** with a persisted download queue across restarts.
 - **Per-source toggles** in Settings, shared with the `shoal sources` CLI.
 - **Self-update** — `shoal update` plus opt-in Auto-update.
+- **Tabular CLI output** — `sources`, `search`, `status`, and `history` print aligned,
+  headered tables (`--json` still available for scripts).
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
