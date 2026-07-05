@@ -138,10 +138,10 @@ func main() {
 	cfg := config.Load()
 
 	// The TUI drives the shared daemon (auto-started), so it stays in sync with the
-	// CLI. ensureDaemon errors on Windows (unix-socket transport only, until Phase 4)
-	// and when the daemon can't start.
+	// CLI. The transport is a unix-domain socket on all platforms — including
+	// Windows 10 1803+, where Go supports AF_UNIX.
 	eng := newDaemonPoller()
-	if _, err := eng.client(); err != nil { // startup connect (auto-starts); Windows/failure → fatal
+	if _, err := eng.client(); err != nil { // startup connect (auto-starts); fatal if it can't start
 		fatal(err)
 	}
 	defer eng.Close() // closes the connection only; the daemon and its downloads persist
