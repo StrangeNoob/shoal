@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
@@ -104,6 +105,30 @@ func TestDownloadWaitBlocksUntilDone(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "done:") {
 		t.Fatalf("--wait should print a 'done:' line, got %q", buf.String())
+	}
+}
+
+func TestDownloadWaitURLBailsInsteadOfHanging(t *testing.T) {
+	// A URL --wait where no new torrent ever appears (already present, or the
+	// fake never adds one) must give up after waitResolveTries, not hang.
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	fake := &fakeEngine{statuses: []engine.Status{
+		{Name: "Old", InfoHash: "1111111111111111111111111111111111111111"},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runDownload([]string{"--wait", "https://example.com/x.torrent"}, &buf) }()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("download --wait hung instead of bailing")
 	}
 }
 

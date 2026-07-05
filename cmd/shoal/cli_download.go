@@ -126,27 +126,57 @@ func runDownload(args []string, out io.Writer) int {
 	return 0
 }
 
+// waitResolveTries bounds how long awaitDone looks for a URL download's torrent
+// to appear before giving up (so it can't hang on an already-present torrent).
+const waitResolveTries = 5
+
 // awaitDone blocks until the target torrent reports Done, printing a progress
 // line to stderr as it goes. Returns 0 on completion, 1 if the daemon becomes
-// unreachable. A magnet/hash/id target is matched by its infohash prefix; a URL
-// target (no known infohash up front) is matched as the torrent absent from pre.
+// unreachable.
+//
+// It follows one concrete infohash. A magnet/hash/id target is known up front
+// (tgt.Handle is its prefix). A URL target's infohash isn't known until the
+// daemon fetches the metainfo, so we lock onto the torrent that appears after
+// the add (absent from pre). If none appears within waitResolveTries polls the
+// torrent was already present and we can't tell which is ours — return with a
+// note rather than hang.
+//
+// ponytail: the URL "first new torrent" heuristic could latch onto an unrelated
+// concurrent add; the clean fix is for AddTorrentURL to return the infohash
+// (a daemon-protocol change). Locking onto it once, plus the bounded resolve,
+// keeps the current design correct for the common single-download case.
 func awaitDone(eng interface {
 	StatusesErr() ([]engine.Status, error)
 }, tgt dlTarget, pre map[string]bool, out io.Writer) int {
-	match := func(infohash string) bool {
-		if tgt.Magnet != "" && tgt.Handle != "" {
-			return strings.HasPrefix(strings.ToLower(infohash), tgt.Handle)
-		}
-		return !pre[strings.ToLower(infohash)]
+	handle := "" // the infohash (prefix) we're following; "" until resolved
+	if tgt.Magnet != "" && tgt.Handle != "" {
+		handle = tgt.Handle
 	}
+	tries := 0
 	for {
 		statuses, err := eng.StatusesErr()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "\nshoal download: daemon unreachable:", err)
 			return 1
 		}
+		if handle == "" { // URL target: lock onto the newly-appeared torrent
+			for _, s := range statuses {
+				if !pre[strings.ToLower(s.InfoHash)] {
+					handle = strings.ToLower(s.InfoHash)
+					break
+				}
+			}
+			if handle == "" {
+				if tries++; tries >= waitResolveTries {
+					fmt.Fprintln(os.Stderr, "note: download already in progress; not waiting")
+					return 0
+				}
+				time.Sleep(waitPollInterval)
+				continue
+			}
+		}
 		for _, s := range statuses {
-			if !match(s.InfoHash) {
+			if !strings.HasPrefix(strings.ToLower(s.InfoHash), handle) {
 				continue
 			}
 			if s.Done {
