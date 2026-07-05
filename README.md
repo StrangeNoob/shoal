@@ -286,8 +286,8 @@ Still planned — contributions welcome:
 - **ETA column** in the Downloads pane (time remaining next to speed).
 - **Details screen for active downloads** — per-file progress, peers, and trackers
   on `enter` in the Downloads pane, mirroring the search-result details screen.
-- **Search quality-of-life** — a min-seeders filter, a hide-0-seed toggle, and an
-  in-results fuzzy filter that narrows loaded results without re-querying sources.
+- **Search quality-of-life** — a hide-0-seed toggle and an in-results fuzzy filter
+  that narrows loaded results without re-querying sources.
 - **Queue controls** — max concurrent downloads with the rest queued, plus manual
   reordering.
 - **Completion notifications** — terminal bell / desktop notification when a

@@ -101,8 +101,12 @@ func runDownload(args []string, out io.Writer) int {
 
 	// Snapshot existing infohashes so --wait can identify a URL download (whose
 	// handle is a URL hash, not the infohash) as the torrent that newly appears.
+	// StatusesErr (not Statuses) so a failed snapshot doesn't masquerade as an
+	// empty daemon — an empty pre from an error would let --wait lock onto an
+	// unrelated pre-existing torrent.
 	pre := map[string]bool{}
-	for _, s := range eng.Statuses() {
+	preStatuses, preErr := eng.StatusesErr()
+	for _, s := range preStatuses {
 		pre[strings.ToLower(s.InfoHash)] = true
 	}
 
@@ -121,7 +125,7 @@ func runDownload(args []string, out io.Writer) int {
 		fmt.Fprintf(out, "started: %s\n", displayName(tgt))
 	}
 	if *wait {
-		return awaitDone(eng, tgt, pre, out)
+		return awaitDone(eng, tgt, pre, preErr == nil, out)
 	}
 	return 0
 }
@@ -147,10 +151,16 @@ const waitResolveTries = 5
 // keeps the current design correct for the common single-download case.
 func awaitDone(eng interface {
 	StatusesErr() ([]engine.Status, error)
-}, tgt dlTarget, pre map[string]bool, out io.Writer) int {
+}, tgt dlTarget, pre map[string]bool, preOK bool, out io.Writer) int {
 	handle := "" // the infohash (prefix) we're following; "" until resolved
 	if tgt.Magnet != "" && tgt.Handle != "" {
 		handle = tgt.Handle
+	}
+	// A URL target relies on diffing against pre to spot its torrent; if that
+	// baseline snapshot failed, we can't diff safely — don't guess.
+	if handle == "" && !preOK {
+		fmt.Fprintln(os.Stderr, "note: could not read daemon state; not waiting")
+		return 0
 	}
 	tries := 0
 	for {
