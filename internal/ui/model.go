@@ -114,6 +114,8 @@ type Model struct {
 	cancelTarget  engine.Status
 	stopConfirm   bool          // Seeding pane: confirm "stop seeding"
 	stopTarget    engine.Status // the torrent being stopped
+	histConfirm   bool          // Seeding pane: confirm deleting a HISTORY entry
+	histTarget    history.Entry // the history entry being deleted
 
 	notice      string
 	noticeErr   bool
@@ -553,7 +555,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, e := range m.history.Entries {
 			recorded[e.InfoHash] = true
 		}
-		reload := false
+		// Also reload on the very first poll if history was never loaded (e.g. a
+		// model built via New() without WithHistory, as tests do) so the Seeding
+		// pane's HISTORY rows are populated without waiting for a completion.
+		reload := m.history.Path == ""
 		for _, s := range next {
 			if s.Done && !recorded[s.InfoHash] && m.historyMisses[s.InfoHash] < maxHistoryReloads {
 				m.historyMisses[s.InfoHash]++
@@ -704,6 +709,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleStopKey(msg)
 	}
 
+	if m.histConfirm {
+		return m.handleHistKey(msg)
+	}
+
 	// Command mode: single keys are actions.
 	switch msg.String() {
 	case "q":
@@ -755,6 +764,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(ss) > 0 && m.seedCursor < len(ss) {
 				m.stopConfirm = true
 				m.stopTarget = ss[m.seedCursor]
+			} else if hist := m.seedHistory(); len(hist) > 0 {
+				if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
+					m.histConfirm = true
+					m.histTarget = hist[hi]
+				}
 			}
 		}
 		return m, nil
@@ -852,6 +866,53 @@ func (m Model) handleStopKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// handleHistKey handles the HISTORY-row delete confirm: k = remove entry (keep
+// files), d = remove entry + delete files, esc = cancel.
+func (m Model) handleHistKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	e := m.histTarget
+	switch msg.String() {
+	case "k":
+		m.histConfirm = false
+		m.history.Remove(e.InfoHash)
+		m.history = history.Load()
+		m.setNotice("Removed from history: " + truncate(e.Name, 40))
+		return m, nil
+	case "d":
+		m.histConfirm = false
+		var cmd tea.Cmd
+		live := false
+		for _, s := range m.statuses {
+			if s.InfoHash == e.InfoHash {
+				live = true
+				break
+			}
+		}
+		if live {
+			cmd = removeCmd(m.eng, e.InfoHash, e.Name, true) // daemon stops + deletes
+		} else {
+			cmd = deleteHistoryFilesCmd(m.cfg.DataDir, e.Name)
+		}
+		m.history.Remove(e.InfoHash)
+		m.history = history.Load()
+		m.setNotice("Deleted: " + truncate(e.Name, 40))
+		return m, cmd
+	case "esc":
+		m.histConfirm = false
+		return m, nil
+	}
+	return m, nil
+}
+
+// deleteHistoryFilesCmd removes a finished download's files off the UI thread.
+func deleteHistoryFilesCmd(dataDir, name string) tea.Cmd {
+	return func() tea.Msg {
+		if name != "" {
+			_ = engine.RemoveUnderDir(dataDir, name)
+		}
+		return nil
+	}
 }
 
 func (m Model) handleCancelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

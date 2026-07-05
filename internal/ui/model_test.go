@@ -1240,3 +1240,29 @@ func TestOpenHistoryGuessesFolderByName(t *testing.T) {
 		t.Errorf("an exact folder match should not trigger the downloads-folder fallback, got %q", m2.notice)
 	}
 }
+
+func TestHistoryRowDeleteConfirm(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "Old Movie"})
+
+	// no active torrents → the seeding pane shows only the history row
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m = tick(m, time.Unix(1000, 0)) // loads statuses (none) + m.history from disk
+	m.section = sectionSeeding
+	m.seedCursor = 0 // the single history row
+
+	m, _ = update(m, key("x"))
+	if !m.histConfirm {
+		t.Fatal("x on a history row should open the delete confirm")
+	}
+	m, _ = update(m, key("k")) // [k] remove entry, keep files
+	if m.histConfirm {
+		t.Fatal("confirm should close after a choice")
+	}
+	if len(history.Load().Entries) != 0 {
+		t.Fatalf("history entry should be removed, got %+v", history.Load().Entries)
+	}
+}
