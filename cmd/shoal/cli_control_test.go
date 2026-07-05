@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/history"
 )
 
 func TestPauseResumeRemoveForwardRPC(t *testing.T) {
@@ -54,6 +58,24 @@ func TestOpenAmbiguous(t *testing.T) {
 	var buf bytes.Buffer
 	if code := runOpen([]string{"aa"}, &buf); code == 0 {
 		t.Fatal("open with an ambiguous prefix should exit non-zero")
+	}
+}
+
+func TestOpenRefusesEscapingPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	// A history entry whose name escapes the data dir, with the escape target existing.
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "esc1", Name: "../evil"})
+	dataDir := config.Load().DataDir
+	escape := filepath.Join(filepath.Dir(dataDir), "evil")
+	if err := os.MkdirAll(escape, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := runOpen([]string{"esc1"}, &buf); code == 0 {
+		t.Fatal("open must not resolve a path escaping the data dir")
 	}
 }
 

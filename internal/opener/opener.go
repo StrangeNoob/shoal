@@ -23,5 +23,9 @@ func Command(goos, path string) (name string, args []string) {
 // (e.g. headless with no opener installed).
 func Open(path string) error {
 	name, args := Command(runtime.GOOS, path)
-	return exec.Command(name, args...).Start()
+	cmd := exec.Command(name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }

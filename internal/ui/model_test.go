@@ -1265,3 +1265,11 @@ func TestHistoryRowDeleteConfirm(t *testing.T) {
 		t.Fatalf("history entry should be removed, got %+v", history.Load().Entries)
 	}
 }
+
+func TestHistDeletedMsgReportsError(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	got, _ := update(m, histDeletedMsg{name: "X", err: errors.New("boom")})
+	if !got.noticeErr {
+		t.Fatal("a failed file delete should surface an error, not a success notice")
+	}
+}

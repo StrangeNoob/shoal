@@ -5,7 +5,8 @@ description: Use when the user wants to find and download a movie, show, or othe
 
 # Downloading with shoal
 
-Shoal exposes three non-interactive commands. Use them; never launch the bare
+Shoal exposes several non-interactive commands (search, download, status,
+history, pause/resume/remove/open, ...). Use them; never launch the bare
 `shoal` TUI (it is interactive and will hang a scripted session).
 
 ## Sources

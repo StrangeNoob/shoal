@@ -137,22 +137,31 @@ func runOpen(args []string, out io.Writer) int {
 	return 0
 }
 
+// underDataDir reports whether path is inside dir (allowing dir itself),
+// rejecting traversal escapes — the same discipline as engine.RemoveUnderDir.
+func underDataDir(dir, path string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // resolveOpenPath finds the unique folder to open for idPrefix, across live
-// torrents (preferred) and history entries, deduped by infohash. 0 matches → an
-// error; 2+ distinct torrents → ambiguous.
+// torrents (preferred) and history entries, deduped by infohash. Every candidate
+// must resolve under the configured data dir — a history entry with a
+// traversal name must never point `open` outside it. 0 matches → an error;
+// 2+ distinct torrents → ambiguous.
 func resolveOpenPath(idPrefix string) (string, error) {
 	prefix := strings.ToLower(idPrefix)
+	dataDir := config.Load().DataDir
 	paths := map[string]string{} // infohash → best path
 	if c, err := daemon.Dial(daemon.SocketPath()); err == nil {
 		defer c.Close()
 		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 		for _, s := range c.Statuses() {
-			if strings.HasPrefix(strings.ToLower(s.InfoHash), prefix) && s.Path != "" {
+			if strings.HasPrefix(strings.ToLower(s.InfoHash), prefix) && s.Path != "" && underDataDir(dataDir, s.Path) {
 				paths[s.InfoHash] = s.Path
 			}
 		}
 	}
-	dataDir := config.Load().DataDir
 	for _, e := range history.Load().Entries {
 		if !strings.HasPrefix(strings.ToLower(e.InfoHash), prefix) {
 			continue
@@ -160,10 +169,10 @@ func resolveOpenPath(idPrefix string) (string, error) {
 		if _, ok := paths[e.InfoHash]; ok {
 			continue // already have a (live) path for this torrent
 		}
-		if e.Path != "" && pathExists(e.Path) {
+		if e.Path != "" && underDataDir(dataDir, e.Path) && pathExists(e.Path) {
 			paths[e.InfoHash] = e.Path
 		} else if e.Name != "" {
-			if guess := filepath.Join(dataDir, e.Name); pathExists(guess) {
+			if guess := filepath.Join(dataDir, e.Name); underDataDir(dataDir, guess) && pathExists(guess) {
 				paths[e.InfoHash] = guess
 			}
 		}

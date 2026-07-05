@@ -509,6 +509,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case histDeletedMsg:
+		if msg.err != nil {
+			m.setError("Couldn't delete files: " + msg.err.Error())
+		} else {
+			m.setNotice("Deleted: " + truncate(msg.name, 40))
+		}
+		return m, nil
+
 	case folderOpenedMsg:
 		if msg.err != nil {
 			m.setError("couldn't open the folder")
@@ -890,28 +898,36 @@ func (m Model) handleHistKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if live {
-			cmd = removeCmd(m.eng, e.InfoHash, e.Name, true) // daemon stops + deletes
+			cmd = removeCmd(m.eng, e.InfoHash, e.Name, true) // daemon stops + deletes; removedMsg reports
 		} else {
-			cmd = deleteHistoryFilesCmd(m.cfg.DataDir, e.Name)
+			cmd = deleteHistoryFilesCmd(e.Name, m.cfg.DataDir) // histDeletedMsg reports
 		}
 		m.history.Remove(e.InfoHash)
 		m.history = history.Load()
-		m.setNotice("Deleted: " + truncate(e.Name, 40))
 		return m, cmd
-	case "esc":
+	case "esc", "n":
 		m.histConfirm = false
 		return m, nil
+	case "q", "ctrl+c":
+		return m, tea.Quit
 	}
 	return m, nil
 }
 
+// histDeletedMsg reports the outcome of deleteHistoryFilesCmd.
+type histDeletedMsg struct {
+	name string
+	err  error
+}
+
 // deleteHistoryFilesCmd removes a finished download's files off the UI thread.
-func deleteHistoryFilesCmd(dataDir, name string) tea.Cmd {
+func deleteHistoryFilesCmd(name, dataDir string) tea.Cmd {
 	return func() tea.Msg {
+		var err error
 		if name != "" {
-			_ = engine.RemoveUnderDir(dataDir, name)
+			err = engine.RemoveUnderDir(dataDir, name)
 		}
-		return nil
+		return histDeletedMsg{name: name, err: err}
 	}
 }
 
