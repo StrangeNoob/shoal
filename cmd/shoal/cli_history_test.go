@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/history"
 )
 
@@ -54,17 +55,24 @@ func TestHistoryClear(t *testing.T) {
 }
 
 func TestHistoryRmDeleteFilesRefusesEscape(t *testing.T) {
-	s := isolateHistory(t)
-	// An entry whose Name escapes the data dir must not delete anything outside it.
+	s := isolateHistory(t) // isolates HOME/XDG so config.Load().DataDir is under a temp dir too
 	s.Append(history.Entry{InfoHash: "cccc3333", Name: "../evil"})
-	// create a file OUTSIDE the data dir that must survive
-	outside := filepath.Join(t.TempDir(), "evil")
-	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+
+	// Where Name="../evil" would land if the containment guard were bypassed:
+	// engine.RemoveUnderDir(dataDir, "../evil") targets <parent-of-dataDir>/evil.
+	dataDir := config.Load().DataDir
+	escape := filepath.Join(filepath.Dir(dataDir), "evil")
+	if err := os.MkdirAll(filepath.Dir(escape), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(escape, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	var buf bytes.Buffer
-	runHistory([]string{"rm", "cccc", "--delete-files"}, &buf) // no daemon running → direct delete path
-	if _, err := os.Stat(outside); err != nil {
-		t.Fatal("--delete-files must never delete a path escaping the data dir")
+	runHistory([]string{"rm", "cccc", "--delete-files"}, &buf) // no daemon → direct delete path
+
+	if _, err := os.Stat(escape); err != nil {
+		t.Fatal("--delete-files deleted a path escaping the data dir; containment guard failed")
 	}
 }
