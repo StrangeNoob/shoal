@@ -257,6 +257,32 @@ Shipped:
 
 Still planned — contributions welcome:
 
+- **Per-file selection** — pick which files of a multi-file torrent to download:
+  a file tree with checkboxes in the TUI details screen, and
+  `shoal download --files <glob>` / `shoal files <id>` in the CLI.
+- **Speed limits** — global upload/download rate caps in Settings and `config.json`.
+- **Streaming** — `shoal stream <id|magnet>`: sequential piece priority so you can
+  play a file while it downloads (e.g. pipe the path to `mpv`).
+- **ETA column** in the Downloads pane (time remaining next to speed).
+- **Details screen for active downloads** — per-file progress, peers, and trackers
+  on `enter` in the Downloads pane, mirroring the search-result details screen.
+- **Search quality-of-life** — a min-seeders filter, a hide-0-seed toggle, and an
+  in-results fuzzy filter that narrows loaded results without re-querying sources.
+- **Queue controls** — max concurrent downloads with the rest queued, plus manual
+  reordering.
+- **Completion notifications** — terminal bell / desktop notification when a
+  download finishes in another pane or in the background.
+- **Mouse support** in the TUI — click to select, wheel to scroll.
+- **`shoal download --wait`** — block until the download completes with a progress
+  line and a meaningful exit code, so scripts don't have to poll `status`.
+- **`shoal status --follow`** — live-updating status without the full TUI.
+- **Shell completions** — `shoal completion bash|zsh|fish`, including id prefixes
+  from `status`/`history`.
+- **Local `.torrent` files** — accept a path on disk in `shoal download`.
+- **`--sort` / `--min-seeders` on `shoal search`** — the sorting the TUI already has,
+  for scripts.
+- **Daemon socket hardening** — prefer `XDG_RUNTIME_DIR` (and the user cache dir on
+  macOS) over a per-uid temp dir, verifying ownership and mode before use.
 - **More sources** behind the existing `source.Source` interface.
 - **Homebrew tap** as an additional install channel.
 
