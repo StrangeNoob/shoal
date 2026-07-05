@@ -37,10 +37,22 @@ func filterStatuses(ss []engine.Status, prefix string) []engine.Status {
 
 // followStatus redraws the status table every statusPollInterval until ctx is
 // canceled (Ctrl+C), clearing the screen between frames. Returns 0.
+//
+// fetch runs in a goroutine so a blocked daemon RPC can't keep Ctrl+C from
+// exiting: both the fetch and the inter-frame wait are raced against ctx.Done().
+// The channel is buffered so a late-returning fetch doesn't leak on the send.
+// (fetch is also given a per-poll deadline by the caller, so it does return.)
 func followStatus(ctx context.Context, fetch func() []statusRow, out io.Writer) int {
 	for {
-		fmt.Fprint(out, "\033[H\033[2J") // cursor home + clear screen
-		printStatus(out, fetch(), false)
+		ch := make(chan []statusRow, 1)
+		go func() { ch <- fetch() }()
+		select {
+		case <-ctx.Done():
+			return 0
+		case rows := <-ch:
+			fmt.Fprint(out, "\033[H\033[2J") // cursor home + clear screen
+			printStatus(out, rows, false)
+		}
 		select {
 		case <-ctx.Done():
 			return 0
@@ -157,10 +169,12 @@ func runStatus(args []string, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "warning: --follow is ignored when --json is set")
 	}
 	if *follow && !*jsonOut {
-		_ = c.SetDeadline(time.Time{}) // follow polls indefinitely; drop the one-shot deadline
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		return followStatus(ctx, func() []statusRow {
+			// Bound each poll so a wedged daemon can't block a frame forever;
+			// followStatus still races this against ctx for a prompt Ctrl+C.
+			_ = c.SetDeadline(time.Now().Add(3 * time.Second))
 			return toStatusRows(filterStatuses(c.Statuses(), prefix))
 		}, out)
 	}

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"regexp"
@@ -30,7 +31,13 @@ var errNotTorrentFile = errors.New("not a local file")
 // the persisted queue entry no longer depends on the file staying on disk.
 func torrentFileMagnet(path string) (magnetURI, infoHash string, err error) {
 	fi, statErr := os.Stat(path)
-	if statErr != nil || fi.IsDir() {
+	if statErr != nil {
+		if errors.Is(statErr, fs.ErrNotExist) {
+			return "", "", errNotTorrentFile // not a path → fall through to "unrecognized target"
+		}
+		return "", "", fmt.Errorf("stat %s: %w", path, statErr) // permission/IO error → surface it
+	}
+	if fi.IsDir() {
 		return "", "", errNotTorrentFile
 	}
 	mi, err := metainfo.LoadFromFile(path)

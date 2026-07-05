@@ -71,6 +71,8 @@ _shoal() {
         status|pause|resume|remove|open|download)
             ids=(${(f)"$( { shoal status 2>/dev/null | awk 'NR>1{print $1}'; shoal history 2>/dev/null | awk 'NR>1{print $1}'; } | sort -u )"})
             compadd -- $ids
+            # download also accepts a path to a local .torrent file
+            [[ $words[2] == download ]] && _files -g '*.torrent'
             ;;
         history) compadd -- rm clear ;;
         sources) compadd -- enable disable ;;
@@ -81,7 +83,9 @@ compdef _shoal shoal
 
 const fishCompletion = `# fish completion for shoal
 complete -c shoal -f -n __fish_use_subcommand -a 'sources search download status history pause resume remove open daemon skill update version help completion'
-complete -c shoal -f -n '__fish_seen_subcommand_from status pause resume remove open download' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
+complete -c shoal -f -n '__fish_seen_subcommand_from status pause resume remove open' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
+# download also accepts a local .torrent path, so leave file completion on (no -f)
+complete -c shoal -n '__fish_seen_subcommand_from download' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
 complete -c shoal -f -n '__fish_seen_subcommand_from history' -a 'rm clear'
 complete -c shoal -f -n '__fish_seen_subcommand_from sources' -a 'enable disable'
 `

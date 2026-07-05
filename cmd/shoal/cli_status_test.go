@@ -17,17 +17,57 @@ func TestFollowStatusRendersThenStops(t *testing.T) {
 	statusPollInterval = time.Millisecond
 	t.Cleanup(func() { statusPollInterval = old })
 
+	statusPollInterval = time.Hour // so the loop parks in the inter-frame wait, not the tick
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already canceled → render once, then return
-
-	var buf bytes.Buffer
 	rows := []statusRow{{ID: "abcd1234", Name: "Movie", State: "downloading"}}
-	code := followStatus(ctx, func() []statusRow { return rows }, &buf)
-	if code != 0 {
+	first := make(chan struct{}, 1)
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- followStatus(ctx, func() []statusRow {
+			select {
+			case first <- struct{}{}:
+			default:
+			}
+			return rows
+		}, &buf)
+	}()
+	<-first                           // fetch produced the first frame
+	time.Sleep(20 * time.Millisecond) // let it render and park in the inter-frame select
+	cancel()
+	if code := <-done; code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	if !strings.Contains(buf.String(), "Movie") {
+	if !strings.Contains(buf.String(), "Movie") { // safe to read: goroutine has returned
 		t.Fatalf("follow did not render the row:\n%q", buf.String())
+	}
+}
+
+func TestFollowStatusExitsOnCancelDuringBlockedFetch(t *testing.T) {
+	// A fetch that never returns must not prevent Ctrl+C (ctx cancel) from
+	// exiting the loop.
+	old := statusPollInterval
+	statusPollInterval = time.Hour // ensure exit is via ctx, not the tick
+	t.Cleanup(func() { statusPollInterval = old })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+
+	done := make(chan int, 1)
+	blocked := make(chan struct{})
+	go func() {
+		done <- followStatus(ctx, func() []statusRow {
+			<-blocked // never unblocks → fetch is stuck
+			return nil
+		}, &bytes.Buffer{})
+	}()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("followStatus did not exit on cancel while fetch was blocked")
 	}
 }
 
