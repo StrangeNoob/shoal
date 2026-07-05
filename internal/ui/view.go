@@ -387,6 +387,13 @@ func (m Model) renderSeeding(w, h int) string {
 			st.Key.Render("enter") + st.Meta.Render(" stop (keep files)   ·   ") +
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
 	}
+	if m.histConfirm {
+		b.WriteString("  " + st.Bad.Render("Delete ") +
+			st.Row.Render("\""+truncate(m.histTarget.Name, max(8, w-32))+"\"") + st.Meta.Render(" from history?   ") +
+			st.Key.Render("k") + st.Meta.Render(" remove   ·   ") +
+			st.Key.Render("d") + st.Meta.Render(" +delete files   ·   ") +
+			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+	}
 	shown := min(len(ss), visible)
 	for i := 0; i < shown; i++ {
 		s := ss[i]
@@ -589,6 +596,8 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("k", "keep files"), hint("d", "delete files"), hint("esc", "back")}
 	case m.stopConfirm:
 		parts = []string{hint("enter", "stop"), hint("esc", "back")}
+	case m.histConfirm:
+		parts = []string{hint("k", "remove"), hint("d", "+delete files"), hint("esc", "back")}
 	case m.section == sectionDownloads:
 		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
@@ -603,7 +612,7 @@ func (m Model) renderFooter() string {
 			hint("tab", "panes"), hint("?", "help"), hint("q", "quit"),
 		}
 	case m.section == sectionSeeding:
-		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "stop"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "stop/delete"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	default:
 		parts = []string{hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	}
@@ -619,7 +628,7 @@ func (m Model) helpView() string {
 		{"← → / h l", "switch the media filter · change a setting"},
 		{"d", "download the selected result"},
 		{"p", "pause / resume the selected download or seed"},
-		{"x", "cancel a download · stop seeding the selected torrent"},
+		{"x", "cancel a download · stop seeding · delete a HISTORY entry"},
 		{"o", "open the download's folder"},
 		{"S", "sort results (←→ column · ↑↓ direction)"},
 		{"y", "copy magnet (in details)"},

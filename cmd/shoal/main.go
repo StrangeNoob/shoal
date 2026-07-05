@@ -65,6 +65,13 @@ Usage:
   shoal search "<query>"        search torrent sources (add --json for scripts)
   shoal download <id|magnet>    download in the background (add --out <dir>)
   shoal status [id]             show download progress (add --json, --clear)
+  shoal history [--json]        list completed downloads
+  shoal history rm <id>         remove a history entry (add --delete-files)
+  shoal history clear           clear the history log (add --delete-files)
+  shoal pause <id>              pause a download
+  shoal resume <id>             resume a paused download
+  shoal remove <id>             cancel/remove a download (add --delete-files)
+  shoal open <id>               reveal download folder
   shoal daemon                  run the shared background engine (experimental)
   shoal daemon stop             stop the shared daemon
   shoal daemon status           show the daemon's status
@@ -101,6 +108,16 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, runStatus(args[2:], out)
 	case "daemon":
 		return true, runDaemonCmd(args[2:], out)
+	case "history":
+		return true, runHistory(args[2:], out)
+	case "pause":
+		return true, runPause(args[2:], out)
+	case "resume":
+		return true, runResume(args[2:], out)
+	case "remove":
+		return true, runRemove(args[2:], out)
+	case "open":
+		return true, runOpen(args[2:], out)
 	default:
 		return false, 0
 	}

@@ -434,6 +434,11 @@ func (a *Anacrolix) Resume(infoHash string) error {
 	return nil
 }
 
+// RemoveUnderDir deletes name within dir, refusing any path that escapes dir.
+// Exported so the CLI/TUI can safely delete a finished download's files when the
+// torrent is no longer in the daemon.
+func RemoveUnderDir(dir, name string) error { return removeUnderDir(dir, name) }
+
 // removeUnderDir deletes name within dir, refusing any path that escapes dir or
 // targets the dir root. Torrent names are attacker-influenced, so a name like
 // "../../x" must never let os.RemoveAll reach outside the download folder.

@@ -1240,3 +1240,65 @@ func TestOpenHistoryGuessesFolderByName(t *testing.T) {
 		t.Errorf("an exact folder match should not trigger the downloads-folder fallback, got %q", m2.notice)
 	}
 }
+
+func TestHistoryRowDeleteConfirm(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "Old Movie"})
+
+	// no active torrents → the seeding pane shows only the history row
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
+	m.section = sectionSeeding
+	m.seedCursor = 0 // the single history row
+
+	m, _ = update(m, key("x"))
+	if !m.histConfirm {
+		t.Fatal("x on a history row should open the delete confirm")
+	}
+	m, _ = update(m, key("k")) // [k] remove entry, keep files
+	if m.histConfirm {
+		t.Fatal("confirm should close after a choice")
+	}
+	if len(history.Load().Entries) != 0 {
+		t.Fatalf("history entry should be removed, got %+v", history.Load().Entries)
+	}
+}
+
+func TestHistDeletedMsgReportsError(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	got, _ := update(m, histDeletedMsg{name: "X", err: errors.New("boom")})
+	if !got.noticeErr {
+		t.Fatal("a failed file delete should surface an error, not a success notice")
+	}
+}
+
+func TestHistDeletedMsgKeepsRowOnFailure(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "M"})
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
+	out, _ := update(m, histDeletedMsg{infoHash: "hh", name: "M", err: errors.New("boom")})
+	if !out.noticeErr {
+		t.Fatal("a failed delete should surface an error")
+	}
+	if len(history.Load().Entries) != 1 {
+		t.Fatal("a failed delete must keep the history row")
+	}
+}
+
+func TestHistDeletedMsgRemovesRowOnSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "M"})
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
+	update(m, histDeletedMsg{infoHash: "hh", name: "M"}) // no error
+	if len(history.Load().Entries) != 0 {
+		t.Fatal("a successful delete should remove the history row")
+	}
+}

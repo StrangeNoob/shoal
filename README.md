@@ -110,6 +110,13 @@ shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (add --json for scripts)
 shoal download <magnet|url|infohash|id>   # download in the background
 shoal status [id]                    # progress of background downloads (--json, --clear)
+shoal history [--json]               # list completed downloads
+shoal history rm <id> [--delete-files]    # remove a history entry
+shoal history clear [--delete-files]      # clear the history log
+shoal pause <id>                     # pause a download (requires daemon)
+shoal resume <id>                    # resume a paused download (requires daemon)
+shoal remove <id> [--delete-files]   # cancel/remove a download (requires daemon)
+shoal open <id>                      # reveal download folder (works without a daemon)
 shoal daemon status                  # show daemon status, uptime, and torrent counts
 shoal daemon stop                    # stop the shared daemon
 ```
@@ -131,6 +138,16 @@ shoal daemon stop                    # stop the shared daemon
   take effect when it restarts.
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files.
+- **`history`** lists all completed downloads (`--json` for scripts). `history rm <id>` removes
+  a history entry and optionally deletes its files (`--delete-files`). `history clear` wipes the
+  entire history log and optionally deletes all files (`--delete-files`). By default, deletes are
+  records-only; files stay on disk. History deletion is also available in the TUI (Seeding pane, `x` on a history row).
+- **`pause`, `resume`, `remove`** — control live downloads. Use an infohash prefix
+  from `shoal status` as `<id>`. These commands require a running daemon (they don't auto-start it).
+  `remove` cancels a download or stops seeding; by default it keeps files (`--delete-files` to delete them too).
+- **`open`** reveals a download's folder in your file manager, or prints the path if no manager is
+  available. It works without a daemon: it resolves the folder from history (or the data dir) when
+  no daemon is running, falling back to the live daemon's path if one is up.
 - **`daemon status`** — show whether the shared daemon is running, its uptime, and torrent counts.
 - **`daemon stop`** — stop the shared daemon (it also stops on its own when idle).
 
