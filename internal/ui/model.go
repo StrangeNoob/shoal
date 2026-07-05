@@ -450,6 +450,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case searchDoneMsg:
 		m.searching = false
 		if msg.err != nil {
@@ -1015,6 +1018,23 @@ func (m Model) handleSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.setInput, cmd = m.setInput.Update(msg)
 	return m, cmd
+}
+
+// handleMouse maps the scroll wheel to selection movement in the current pane.
+// Text-entry modes and prompts (which the keyboard also skips) are left alone.
+// ponytail: wheel-scroll only; click-to-select needs per-row Y hit-testing
+// against the box layout — deferred until the layout math is factored out.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.editing || m.editingSetting {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.moveUp()
+	case tea.MouseButtonWheelDown:
+		m.moveDown()
+	}
+	return m, nil
 }
 
 // --- selection movement ----------------------------------------------------

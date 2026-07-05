@@ -363,6 +363,35 @@ func TestNavigationAndDownloadSelection(t *testing.T) {
 	}
 }
 
+func wheel(b tea.MouseButton) tea.MouseMsg {
+	return tea.MouseMsg{Button: b, Action: tea.MouseActionPress}
+}
+
+func TestMouseWheelMovesSelection(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "A"}, {Title: "B"}, {Title: "C"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // populate results, leave editing mode
+
+	m, _ = update(m, wheel(tea.MouseButtonWheelDown))
+	if m.cursor != 1 {
+		t.Errorf("cursor after wheel down = %d, want 1", m.cursor)
+	}
+	m, _ = update(m, wheel(tea.MouseButtonWheelUp))
+	if m.cursor != 0 {
+		t.Errorf("cursor after wheel up = %d, want 0", m.cursor)
+	}
+
+	// While the search box is focused, the wheel must not move the selection.
+	m, _ = update(m, key("/")) // focus input (editing)
+	m, _ = update(m, wheel(tea.MouseButtonWheelDown))
+	if m.cursor != 0 {
+		t.Errorf("wheel should be ignored while editing, cursor = %d", m.cursor)
+	}
+}
+
 func TestFilterNarrowsResults(t *testing.T) {
 	src := &fakeSource{results: []source.Result{
 		{Title: "A Film", Category: "movies"},
