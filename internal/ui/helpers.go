@@ -65,6 +65,26 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// newlyCompleted returns the display names of torrents that flipped from
+// not-done to done between prev and next. A torrent absent from prev (e.g. the
+// first poll, or one added already-complete) does not count, so opening the app
+// on finished downloads doesn't spuriously notify.
+func newlyCompleted(prev, next []engine.Status) []string {
+	wasDownloading := make(map[string]bool, len(prev))
+	for _, s := range prev {
+		if !s.Done {
+			wasDownloading[s.InfoHash] = true
+		}
+	}
+	var names []string
+	for _, s := range next {
+		if s.Done && wasDownloading[s.InfoHash] {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
 // etaSeconds is the time to finish s at the current byte/sec rate, or 0 when it
 // can't be estimated (done, unknown total, or stalled).
 func etaSeconds(s engine.Status, bytesPerSec int64) int64 {

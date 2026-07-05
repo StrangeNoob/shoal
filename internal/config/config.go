@@ -32,6 +32,11 @@ type Config struct {
 	DownloadRateKB int `json:"download_rate_kb"`
 	UploadRateKB   int `json:"upload_rate_kb"`
 
+	// NotifyOnComplete rings the terminal bell / posts a desktop notification
+	// when a download finishes. Defaults on (Load unmarshals over Default(), so
+	// an absent key keeps the default).
+	NotifyOnComplete bool `json:"notify_on_complete"`
+
 	// Daemon
 	DaemonIdleMinutes int `json:"daemon_idle_minutes"` // minutes idle (no torrents, no client) before auto-shutdown; 0 disables
 
@@ -54,6 +59,7 @@ func Default() Config {
 		MaxPeers:          200,
 		ListenPort:        6881,
 		DaemonIdleMinutes: 10,
+		NotifyOnComplete:  true,
 	}
 }
 

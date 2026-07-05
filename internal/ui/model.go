@@ -223,6 +223,17 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(700*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// notifyDoneCmd rings the terminal bell and posts an OSC 9 desktop notification
+// (honoured by iTerm2, kitty, WezTerm, …) when a download finishes. Written to
+// stderr so it doesn't disturb Bubble Tea's stdout render; both share the tty,
+// so the terminal still interprets the sequence. Returns no follow-up message.
+func notifyDoneCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", name)
+		return nil
+	}
+}
+
 // statusPoller is implemented by engines that can report status off the UI
 // thread (the production daemon client and the test fake); pollCmd runs it
 // inside a tea.Cmd goroutine instead of blocking Update.
@@ -554,6 +565,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		dt := now.Sub(m.lastTick)
 		m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 		m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
+		// Detect downloads that just finished (before m.statuses is overwritten) and
+		// notify, if the user hasn't turned it off.
+		var notifyCmds []tea.Cmd
+		if m.cfg.NotifyOnComplete {
+			if done := newlyCompleted(m.statuses, next); len(done) > 0 {
+				m.setNotice("✓ Finished: " + truncate(done[0], 40))
+				notifyCmds = append(notifyCmds, notifyDoneCmd(done[0]))
+			}
+		}
 		// Reload history while a finished torrent isn't in it yet — the daemon
 		// records completions on its own ticker, so the flip-to-Done edge can
 		// precede its write. Bounded per torrent so a completion the daemon never
@@ -614,7 +634,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stopConfirm = false
 			}
 		}
-		return m, nil
+		return m, tea.Batch(notifyCmds...)
 
 	case updateCheckMsg:
 		if msg.newer {
@@ -1175,6 +1195,14 @@ func settingItems() []setItem {
 					m.cfg.UploadRateKB = n
 				}
 			}},
+		{group: "DOWNLOADS", label: "Notify on done", kind: kindEnum, options: []string{"on", "off"},
+			get: func(m *Model) string {
+				if m.cfg.NotifyOnComplete {
+					return "on"
+				}
+				return "off"
+			},
+			set: func(m *Model, v string) { m.cfg.NotifyOnComplete = v == "on" }},
 		{group: "UPDATES", label: "Auto-update", kind: kindEnum, options: []string{"off", "on"},
 			get: func(m *Model) string {
 				if m.cfg.AutoUpdate {

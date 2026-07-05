@@ -12,6 +12,26 @@ import (
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
+func TestNewlyCompleted(t *testing.T) {
+	prev := []engine.Status{
+		{InfoHash: "a", Name: "Alpha", Done: false},
+		{InfoHash: "b", Name: "Beta", Done: true}, // already done before
+	}
+	next := []engine.Status{
+		{InfoHash: "a", Name: "Alpha", Done: true}, // just finished → notify
+		{InfoHash: "b", Name: "Beta", Done: true},  // still done, no re-notify
+		{InfoHash: "c", Name: "Gamma", Done: true}, // new & already done → no notify
+	}
+	got := newlyCompleted(prev, next)
+	if len(got) != 1 || got[0] != "Alpha" {
+		t.Fatalf("newlyCompleted = %v, want [Alpha]", got)
+	}
+	// First poll (empty prev) must not notify for pre-existing finished torrents.
+	if n := newlyCompleted(nil, next); len(n) != 0 {
+		t.Fatalf("first poll should not notify, got %v", n)
+	}
+}
+
 func TestEtaSeconds(t *testing.T) {
 	// 100 MiB left at 10 MiB/s → 10s.
 	got := etaSeconds(engine.Status{TotalBytes: 200 << 20, CompletedBytes: 100 << 20}, 10<<20)
