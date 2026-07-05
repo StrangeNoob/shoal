@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/daemon"
@@ -139,6 +140,7 @@ func findHistoryEntry(entries []history.Entry, prefix string) (history.Entry, bo
 func deleteEntryFiles(e history.Entry) error {
 	if c, err := daemon.Dial(daemon.SocketPath()); err == nil {
 		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 		for _, s := range c.Statuses() {
 			if s.InfoHash == e.InfoHash {
 				return c.Remove(e.InfoHash, true)

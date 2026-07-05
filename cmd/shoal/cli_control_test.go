@@ -45,6 +45,18 @@ func TestControlNoDaemon(t *testing.T) {
 	}
 }
 
+func TestOpenAmbiguous(t *testing.T) {
+	fake := &fakeEngine{statuses: []engine.Status{
+		{InfoHash: "aa11", Path: "/d/one"},
+		{InfoHash: "aa22", Path: "/d/two"},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runOpen([]string{"aa"}, &buf); code == 0 {
+		t.Fatal("open with an ambiguous prefix should exit non-zero")
+	}
+}
+
 func TestControlAmbiguousAndMissing(t *testing.T) {
 	fake := &fakeEngine{statuses: []engine.Status{
 		{InfoHash: "aa11"}, {InfoHash: "aa22"},

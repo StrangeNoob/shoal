@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/daemon"
@@ -24,6 +25,7 @@ func withDaemon(idPrefix string, out io.Writer, fn func(c *daemon.Client, s engi
 		return 0
 	}
 	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	s, err := resolveOne(c, idPrefix)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -124,9 +126,9 @@ func runOpen(args []string, out io.Writer) int {
 	if !ok {
 		return 2
 	}
-	path := resolveOpenPath(id)
-	if path == "" {
-		fmt.Fprintln(os.Stderr, "no such download:", id)
+	path, err := resolveOpenPath(id)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if err := opener.Open(path); err != nil {
@@ -135,15 +137,18 @@ func runOpen(args []string, out io.Writer) int {
 	return 0
 }
 
-// resolveOpenPath finds a folder to open for idPrefix: a live torrent's path,
-// else a history entry's path, else <dataDir>/<name> if it exists.
-func resolveOpenPath(idPrefix string) string {
+// resolveOpenPath finds the unique folder to open for idPrefix, across live
+// torrents (preferred) and history entries, deduped by infohash. 0 matches → an
+// error; 2+ distinct torrents → ambiguous.
+func resolveOpenPath(idPrefix string) (string, error) {
 	prefix := strings.ToLower(idPrefix)
+	paths := map[string]string{} // infohash → best path
 	if c, err := daemon.Dial(daemon.SocketPath()); err == nil {
 		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 		for _, s := range c.Statuses() {
 			if strings.HasPrefix(strings.ToLower(s.InfoHash), prefix) && s.Path != "" {
-				return s.Path
+				paths[s.InfoHash] = s.Path
 			}
 		}
 	}
@@ -152,16 +157,26 @@ func resolveOpenPath(idPrefix string) string {
 		if !strings.HasPrefix(strings.ToLower(e.InfoHash), prefix) {
 			continue
 		}
-		if e.Path != "" && pathExists(e.Path) {
-			return e.Path
+		if _, ok := paths[e.InfoHash]; ok {
+			continue // already have a (live) path for this torrent
 		}
-		if e.Name != "" {
+		if e.Path != "" && pathExists(e.Path) {
+			paths[e.InfoHash] = e.Path
+		} else if e.Name != "" {
 			if guess := filepath.Join(dataDir, e.Name); pathExists(guess) {
-				return guess
+				paths[e.InfoHash] = guess
 			}
 		}
 	}
-	return ""
+	switch len(paths) {
+	case 0:
+		return "", fmt.Errorf("no such download: %s", idPrefix)
+	case 1:
+		for _, p := range paths {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("ambiguous id %q matches %d downloads", idPrefix, len(paths))
 }
 
 func pathExists(p string) bool {
