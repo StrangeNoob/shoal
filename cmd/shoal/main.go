@@ -63,7 +63,7 @@ Usage:
   shoal                         launch the fullscreen TUI
   shoal sources                 list the searchable torrent sources (add --json)
   shoal search "<query>"        search torrent sources (add --json for scripts)
-  shoal download <id|magnet|file.torrent>  download in the background (add --wait)
+  shoal download <magnet|url|infohash|id|file.torrent>  background download (add --wait)
   shoal status [id]             show download progress (--json, --clear, --follow)
   shoal history [--json]        list completed downloads
   shoal history rm <id>         remove a history entry (add --delete-files)

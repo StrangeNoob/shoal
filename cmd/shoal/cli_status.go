@@ -138,6 +138,11 @@ func runStatus(args []string, out io.Writer) int {
 	}
 	defer c.Close()
 
+	// Bound daemon reads so a one-shot `shoal status` (e.g. what shell completion
+	// shells out to) can't hang on a wedged daemon. --follow clears this below,
+	// since it polls indefinitely by design.
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+
 	if *clear {
 		for _, s := range c.Statuses() {
 			if s.Done && !s.Seeding {
@@ -148,7 +153,11 @@ func runStatus(args []string, out io.Writer) int {
 		}
 	}
 
+	if *follow && *jsonOut {
+		fmt.Fprintln(os.Stderr, "warning: --follow is ignored when --json is set")
+	}
 	if *follow && !*jsonOut {
+		_ = c.SetDeadline(time.Time{}) // follow polls indefinitely; drop the one-shot deadline
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		return followStatus(ctx, func() []statusRow {
