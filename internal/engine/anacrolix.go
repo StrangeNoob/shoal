@@ -16,6 +16,8 @@ import (
 
 	g "github.com/anacrolix/generics"
 	alog "github.com/anacrolix/log"
+	"golang.org/x/time/rate"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -42,6 +44,14 @@ type Anacrolix struct {
 	paused   map[metainfo.Hash]bool
 	maxConns int
 	store    *queue.Store
+}
+
+// rateLimiter builds a token-bucket limiter for bytesPerSec (> 0). The burst is
+// at least 256 KiB so a single large piece request still fits and throughput
+// isn't throttled below the target.
+func rateLimiter(bytesPerSec int) *rate.Limiter {
+	burst := max(bytesPerSec, 1<<18)
+	return rate.NewLimiter(rate.Limit(bytesPerSec), burst)
 }
 
 // maxConnsFor is the per-torrent connection cap to restore on resume: the
@@ -89,6 +99,12 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	}
 	if c.MaxPeers > 0 {
 		cfg.EstablishedConnsPerTorrent = c.MaxPeers
+	}
+	if c.DownloadRate > 0 {
+		cfg.DownloadRateLimiter = rateLimiter(c.DownloadRate)
+	}
+	if c.UploadRate > 0 {
+		cfg.UploadRateLimiter = rateLimiter(c.UploadRate)
 	}
 
 	client, err := torrent.NewClient(cfg)

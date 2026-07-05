@@ -187,12 +187,14 @@ func runDaemon(args []string, out io.Writer) int {
 	}
 
 	eng, err := engine.NewAnacrolix(engine.Config{
-		DataDir:    cfg.DataDir,
-		ListenPort: cfg.ListenPort,
-		MaxPeers:   cfg.MaxPeers,
-		Seed:       cfg.Seed,
-		SeedRatio:  cfg.SeedRatio,
-		QueuePath:  queue.DefaultPath(),
+		DataDir:      cfg.DataDir,
+		ListenPort:   cfg.ListenPort,
+		MaxPeers:     cfg.MaxPeers,
+		Seed:         cfg.Seed,
+		SeedRatio:    cfg.SeedRatio,
+		QueuePath:    queue.DefaultPath(),
+		DownloadRate: cfg.DownloadRateKB * 1024,
+		UploadRate:   cfg.UploadRateKB * 1024,
 	})
 	if err != nil {
 		l.Close()

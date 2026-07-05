@@ -28,6 +28,10 @@ type Config struct {
 	MaxPeers   int     `json:"max_peers"`   // max connections per torrent
 	ListenPort int     `json:"listen_port"` // BitTorrent listen port
 
+	// Rate limits in KiB/s; 0 = unlimited. Applied when the daemon (re)starts.
+	DownloadRateKB int `json:"download_rate_kb"`
+	UploadRateKB   int `json:"upload_rate_kb"`
+
 	// Daemon
 	DaemonIdleMinutes int `json:"daemon_idle_minutes"` // minutes idle (no torrents, no client) before auto-shutdown; 0 disables
 

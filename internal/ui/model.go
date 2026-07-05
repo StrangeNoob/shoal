@@ -1161,6 +1161,20 @@ func settingItems() []setItem {
 					m.cfg.ListenPort = n
 				}
 			}},
+		{group: "DOWNLOADS", label: "Down limit KB/s (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.DownloadRateKB) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.DownloadRateKB = n
+				}
+			}},
+		{group: "DOWNLOADS", label: "Up limit KB/s (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.UploadRateKB) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.UploadRateKB = n
+				}
+			}},
 		{group: "UPDATES", label: "Auto-update", kind: kindEnum, options: []string{"off", "on"},
 			get: func(m *Model) string {
 				if m.cfg.AutoUpdate {
