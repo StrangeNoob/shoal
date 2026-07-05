@@ -63,6 +63,25 @@ func (s *Store) Append(e Entry) {
 	_ = s.Save()
 }
 
+// Remove drops the entry with the given InfoHash (exact match) and persists,
+// reporting whether one was removed.
+func (s *Store) Remove(infoHash string) bool {
+	for i, e := range s.Entries {
+		if e.InfoHash == infoHash {
+			s.Entries = append(s.Entries[:i], s.Entries[i+1:]...)
+			_ = s.Save()
+			return true
+		}
+	}
+	return false
+}
+
+// Clear removes all entries and persists.
+func (s *Store) Clear() {
+	s.Entries = nil
+	_ = s.Save()
+}
+
 // Save writes the store to Path (creating the dir). No-op when Path is empty.
 func (s Store) Save() error {
 	if s.Path == "" {

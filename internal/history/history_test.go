@@ -60,3 +60,26 @@ func TestSaveNoopWithoutPath(t *testing.T) {
 		t.Fatalf("Append should still update in-memory entries, got %d", len(s.Entries))
 	}
 }
+
+func TestRemoveAndClear(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "history.json")
+	s := Store{Path: p}
+	s.Append(Entry{InfoHash: "aaa", Name: "A"})
+	s.Append(Entry{InfoHash: "bbb", Name: "B"})
+
+	if !s.Remove("aaa") {
+		t.Fatal("Remove should report true when it removes an entry")
+	}
+	if s.Remove("zzz") {
+		t.Fatal("Remove should report false for an absent infohash")
+	}
+	got := LoadFrom(p)
+	if len(got.Entries) != 1 || got.Entries[0].InfoHash != "bbb" {
+		t.Fatalf("after Remove, entries = %+v, want [bbb]", got.Entries)
+	}
+
+	s.Clear()
+	if reloaded := LoadFrom(p); len(reloaded.Entries) != 0 {
+		t.Fatalf("after Clear, entries = %+v, want none", reloaded.Entries)
+	}
+}
