@@ -241,12 +241,19 @@ make help       # all targets
 
 ## Roadmap
 
-Shipped: CI on every push/PR, tag-triggered GoReleaser releases, self-update
-(`shoal update` + opt-in Auto-update), pause/resume with a persisted download
-queue, per-source toggles in Settings, and a **shared-engine daemon** — the TUI
-and CLI drive one background download engine, so downloads, seeding, and status
-stay in sync live between them (`shoal daemon` + `daemon stop`/`status`, idle
-auto-shutdown, self-healing reconnect; Linux, macOS, and Windows 10 1803+).
+Shipped:
+
+- **Shared-engine daemon** — the TUI and CLI drive one background download engine,
+  so downloads, seeding, and status stay in sync live between them (`shoal daemon`
+  + `daemon stop`/`status`, idle auto-shutdown, self-healing reconnect; Linux,
+  macOS, and Windows 10 1803+).
+- **Full command-line client** — the TUI's actions from the terminal: `search`,
+  `download`, `status`, `history` (list + `rm`/`clear`), `pause`, `resume`,
+  `remove`, and `open`. History deletion works from the TUI too.
+- **Pause / resume** with a persisted download queue across restarts.
+- **Per-source toggles** in Settings, shared with the `shoal sources` CLI.
+- **Self-update** — `shoal update` plus opt-in Auto-update.
+- **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
 
