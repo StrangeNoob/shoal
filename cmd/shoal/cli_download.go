@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,9 +13,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
+
+// errNotTorrentFile means the argument isn't a readable file on disk (so it
+// should fall through to the "unrecognized target" error), as opposed to a file
+// that exists but fails to parse (a real, reportable error).
+var errNotTorrentFile = errors.New("not a local file")
+
+// torrentFileMagnet loads a local .torrent and converts it to a magnet URI
+// (infohash + trackers + name). Converting client-side lets `download` accept a
+// path without a new daemon RPC — the daemon adds it like any other magnet, and
+// the persisted queue entry no longer depends on the file staying on disk.
+func torrentFileMagnet(path string) (magnetURI, infoHash string, err error) {
+	fi, statErr := os.Stat(path)
+	if statErr != nil || fi.IsDir() {
+		return "", "", errNotTorrentFile
+	}
+	mi, err := metainfo.LoadFromFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("read .torrent %s: %w", path, err)
+	}
+	var info *metainfo.Info
+	if i, e := mi.UnmarshalInfo(); e == nil {
+		info = &i // carries the display name into the magnet
+	}
+	// ponytail: Magnet (v1) not MagnetV2 — the daemon adds via client.AddMagnet,
+	// which speaks v1 btih; a v1 magnet is the widely-compatible choice.
+	m := mi.Magnet(nil, info)
+	return m.String(), mi.HashInfoBytes().HexString(), nil
+}
 
 // waitPollInterval is how often `download --wait` re-checks the daemon. A var so
 // tests can shorten it.
@@ -59,6 +90,12 @@ func resolveTarget(arg string, lookup func(id string) (string, bool)) (dlTarget,
 		}
 		return dlTarget{}, fmt.Errorf("no recent search contains id %s; run `shoal search` first", id)
 	default:
+		// A path to a local .torrent file.
+		if magnetURI, ih, err := torrentFileMagnet(s); err == nil {
+			return dlTarget{Magnet: magnetURI, Handle: ih[:8]}, nil
+		} else if !errors.Is(err, errNotTorrentFile) {
+			return dlTarget{}, err // it is a file, but not a valid .torrent
+		}
 		return dlTarget{}, fmt.Errorf("unrecognized download target: %s", s)
 	}
 }
@@ -76,7 +113,7 @@ func runDownload(args []string, out io.Writer) int {
 		arg = positionals[0]
 	}
 	if arg == "" {
-		fmt.Fprintln(os.Stderr, "usage: shoal download [--wait] <magnet|url|infohash|id>")
+		fmt.Fprintln(os.Stderr, "usage: shoal download [--wait] <magnet|url|infohash|id|file.torrent>")
 		return 2
 	}
 	if *outDir != "" {

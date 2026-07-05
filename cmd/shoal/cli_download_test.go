@@ -2,12 +2,67 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
+
+// writeTestTorrent writes a minimal valid single-file .torrent to path.
+func writeTestTorrent(t *testing.T, path string) {
+	t.Helper()
+	info := metainfo.Info{Name: "hello.txt", Length: 5, PieceLength: 32768, Pieces: make([]byte, 20)}
+	b, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mi := metainfo.MetaInfo{InfoBytes: b, Announce: "http://tracker.example/announce"}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := mi.Write(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveTargetLocalTorrentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.torrent")
+	writeTestTorrent(t, path)
+	got, err := resolveTarget(path, nil)
+	if err != nil {
+		t.Fatalf("resolveTarget(local .torrent): %v", err)
+	}
+	if !strings.HasPrefix(got.Magnet, "magnet:?") {
+		t.Errorf("magnet = %q, want a magnet URI", got.Magnet)
+	}
+	if !strings.Contains(got.Magnet, "tracker.example") {
+		t.Errorf("magnet should carry the .torrent's tracker: %q", got.Magnet)
+	}
+	if len(got.Handle) != 8 {
+		t.Errorf("handle = %q, want 8 hex chars", got.Handle)
+	}
+}
+
+func TestResolveTargetInvalidTorrentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.torrent")
+	if err := os.WriteFile(path, []byte("not bencode"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An existing-but-unparseable file must report a parse error, not the
+	// generic "unrecognized target" (which would hide the real problem).
+	_, err := resolveTarget(path, nil)
+	if err == nil || !strings.Contains(err.Error(), "bad.torrent") {
+		t.Fatalf("want a parse error naming the file, got %v", err)
+	}
+}
 
 func TestResolveTarget(t *testing.T) {
 	lookup := func(id string) (string, bool) {
