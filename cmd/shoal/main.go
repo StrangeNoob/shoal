@@ -101,6 +101,8 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, runStatus(args[2:], out)
 	case "daemon":
 		return true, runDaemonCmd(args[2:], out)
+	case "history":
+		return true, runHistory(args[2:], out)
 	default:
 		return false, 0
 	}

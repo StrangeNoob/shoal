@@ -1,0 +1,70 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/StrangeNoob/shoal/internal/history"
+)
+
+// isolateHistory points HOME/XDG at a temp dir so history.Load() uses a scratch file.
+func isolateHistory(t *testing.T) history.Store {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	return history.Load()
+}
+
+func TestHistoryListAndRm(t *testing.T) {
+	s := isolateHistory(t)
+	s.Append(history.Entry{InfoHash: "aaaa1111", Name: "Movie A", Size: 100})
+	s.Append(history.Entry{InfoHash: "bbbb2222", Name: "Movie B", Size: 200})
+
+	var buf bytes.Buffer
+	if code := runHistory(nil, &buf); code != 0 {
+		t.Fatalf("history list exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "Movie A") || !strings.Contains(buf.String(), "Movie B") {
+		t.Fatalf("history list missing entries:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	if code := runHistory([]string{"rm", "aaaa"}, &buf); code != 0 {
+		t.Fatalf("history rm exit = %d", code)
+	}
+	if got := history.Load().Entries; len(got) != 1 || got[0].InfoHash != "bbbb2222" {
+		t.Fatalf("after rm, entries = %+v, want [bbbb2222]", got)
+	}
+}
+
+func TestHistoryClear(t *testing.T) {
+	s := isolateHistory(t)
+	s.Append(history.Entry{InfoHash: "aaaa1111", Name: "A"})
+	var buf bytes.Buffer
+	if code := runHistory([]string{"clear"}, &buf); code != 0 {
+		t.Fatalf("history clear exit = %d", code)
+	}
+	if got := history.Load().Entries; len(got) != 0 {
+		t.Fatalf("after clear, entries = %+v, want none", got)
+	}
+}
+
+func TestHistoryRmDeleteFilesRefusesEscape(t *testing.T) {
+	s := isolateHistory(t)
+	// An entry whose Name escapes the data dir must not delete anything outside it.
+	s.Append(history.Entry{InfoHash: "cccc3333", Name: "../evil"})
+	// create a file OUTSIDE the data dir that must survive
+	outside := filepath.Join(t.TempDir(), "evil")
+	if err := os.WriteFile(outside, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	runHistory([]string{"rm", "cccc", "--delete-files"}, &buf) // no daemon running → direct delete path
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("--delete-files must never delete a path escaping the data dir")
+	}
+}
