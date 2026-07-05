@@ -224,11 +224,16 @@ make help       # all targets
 
 ## Roadmap
 
-Shipped: CI on every push/PR, tag-triggered GoReleaser releases, and self-update
-(`shoal update` + opt-in Auto-update). Still planned — contributions welcome:
+Shipped: CI on every push/PR, tag-triggered GoReleaser releases, self-update
+(`shoal update` + opt-in Auto-update), pause/resume with a persisted download
+queue, per-source toggles in Settings, and a **shared-engine daemon** — the TUI
+and CLI drive one background download engine, so downloads, seeding, and status
+stay in sync live between them (`shoal daemon` + `daemon stop`/`status`, idle
+auto-shutdown, self-healing reconnect; Linux, macOS, and Windows 10 1803+).
 
-- **Pause / resume downloads** and **persist the active download queue** across restarts.
-- **More sources** behind the existing `source.Source` interface, each toggleable in Settings.
+Still planned — contributions welcome:
+
+- **More sources** behind the existing `source.Source` interface.
 - **Homebrew tap** as an additional install channel.
 
 ## A note on use
