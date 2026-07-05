@@ -169,12 +169,12 @@ func printSearch(out io.Writer, rows []searchRow, asJSON bool) {
 	for _, r := range rows {
 		table = append(table, []string{
 			r.ID,
+			truncate(r.Title, 60),
 			humanBytes(r.SizeBytes),
 			fmt.Sprintf("%d", r.Seeders),
 			fmt.Sprintf("%d", r.Leechers),
 			r.Source,
-			truncate(r.Title, 60),
 		})
 	}
-	printTable(out, []string{"ID", "SIZE", "SEED", "LEECH", "SOURCE", "TITLE"}, table)
+	printTable(out, []string{"ID", "TITLE", "SIZE", "SEED", "LEECH", "SOURCE"}, table)
 }

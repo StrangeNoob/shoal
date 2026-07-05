@@ -86,8 +86,8 @@ func runSources(args []string, out io.Writer) int {
 		if cfg.SourceEnabled(n) {
 			state = "on"
 		}
-		table = append(table, []string{state, n})
+		table = append(table, []string{n, state})
 	}
-	printTable(out, []string{"STATE", "SOURCE"}, table)
+	printTable(out, []string{"SOURCE", "STATE"}, table)
 	return 0
 }

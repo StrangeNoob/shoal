@@ -60,9 +60,9 @@ func runHistoryList(args []string, out io.Writer) int {
 	table := make([][]string, 0, len(entries))
 	for _, e := range entries {
 		r := toHistoryRow(e)
-		table = append(table, []string{r.ID, humanBytes(r.Size), r.CompletedAt, truncate(r.Name, 50)})
+		table = append(table, []string{r.ID, truncate(r.Name, 50), humanBytes(r.Size), r.CompletedAt})
 	}
-	printTable(out, []string{"ID", "SIZE", "COMPLETED", "NAME"}, table)
+	printTable(out, []string{"ID", "NAME", "SIZE", "COMPLETED"}, table)
 	return 0
 }
 

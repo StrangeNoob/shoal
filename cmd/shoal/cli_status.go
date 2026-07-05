@@ -70,14 +70,14 @@ func printStatus(out io.Writer, rows []statusRow, asJSON bool) {
 	for _, r := range rows {
 		table = append(table, []string{
 			r.ID,
+			truncate(r.Name, 50),
 			fmt.Sprintf("%.1f%%", r.Percent*100),
 			humanBytes(r.Completed) + "/" + humanBytes(r.Total),
 			fmt.Sprintf("%d", r.Peers),
 			r.State,
-			truncate(r.Name, 50),
 		})
 	}
-	printTable(out, []string{"ID", "PROGRESS", "SIZE", "PEERS", "STATE", "NAME"}, table)
+	printTable(out, []string{"ID", "NAME", "PROGRESS", "SIZE", "PEERS", "STATE"}, table)
 }
 
 func runStatus(args []string, out io.Writer) int {

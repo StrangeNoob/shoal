@@ -42,8 +42,8 @@ func TestRunSourcesPlain(t *testing.T) {
 	if code := runSources(nil, &buf); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
-	if !strings.Contains(buf.String(), "Internet Archive\n") {
-		t.Fatalf("plain output should list one provider per line:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "Internet Archive") || !strings.Contains(buf.String(), "SOURCE") {
+		t.Fatalf("plain output should list providers in a table:\n%s", buf.String())
 	}
 }
 
