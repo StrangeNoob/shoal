@@ -103,6 +103,14 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, runDaemonCmd(args[2:], out)
 	case "history":
 		return true, runHistory(args[2:], out)
+	case "pause":
+		return true, runPause(args[2:], out)
+	case "resume":
+		return true, runResume(args[2:], out)
+	case "remove":
+		return true, runRemove(args[2:], out)
+	case "open":
+		return true, runOpen(args[2:], out)
 	default:
 		return false, 0
 	}

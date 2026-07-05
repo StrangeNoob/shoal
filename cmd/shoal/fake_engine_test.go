@@ -11,11 +11,14 @@ import (
 )
 
 type fakeEngine struct {
-	mu       sync.Mutex
-	magnets  []string
-	urls     [][2]string
-	removed  []string
-	statuses []engine.Status
+	mu            sync.Mutex
+	magnets       []string
+	urls          [][2]string
+	removed       []string
+	removedDelete []bool
+	paused        []string
+	resumed       []string
+	statuses      []engine.Status
 }
 
 func (f *fakeEngine) AddMagnet(m string) error {
@@ -35,15 +38,26 @@ func (f *fakeEngine) Statuses() []engine.Status {
 	defer f.mu.Unlock()
 	return append([]engine.Status(nil), f.statuses...)
 }
-func (f *fakeEngine) Remove(h string, _ bool) error {
+func (f *fakeEngine) Remove(h string, deleteData bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, h)
+	f.removedDelete = append(f.removedDelete, deleteData)
 	return nil
 }
-func (f *fakeEngine) Pause(string) error  { return nil }
-func (f *fakeEngine) Resume(string) error { return nil }
-func (f *fakeEngine) Close() error        { return nil }
+func (f *fakeEngine) Pause(h string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paused = append(f.paused, h)
+	return nil
+}
+func (f *fakeEngine) Resume(h string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, h)
+	return nil
+}
+func (f *fakeEngine) Close() error { return nil }
 
 func (f *fakeEngine) gotMagnets() []string {
 	f.mu.Lock()
@@ -59,6 +73,21 @@ func (f *fakeEngine) gotRemoved() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.removed...)
+}
+func (f *fakeEngine) gotRemovedDeleteFlags() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.removedDelete...)
+}
+func (f *fakeEngine) gotPaused() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.paused...)
+}
+func (f *fakeEngine) gotResumed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.resumed...)
 }
 
 // serveFakeDaemon starts a daemon backed by fake on a temp socket and points
