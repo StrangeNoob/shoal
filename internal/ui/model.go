@@ -223,6 +223,18 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(700*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// notifyDoneCmd rings the terminal bell and posts an OSC 9 desktop notification
+// (honoured by iTerm2, kitty, WezTerm, …) when a download finishes. Written to
+// stderr so it doesn't disturb Bubble Tea's stdout render; both share the tty,
+// so the terminal still interprets the sequence. Returns no follow-up message.
+func notifyDoneCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		// stripControl again here so the raw write is safe regardless of caller.
+		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", stripControl(name))
+		return nil
+	}
+}
+
 // statusPoller is implemented by engines that can report status off the UI
 // thread (the production daemon client and the test fake); pollCmd runs it
 // inside a tea.Cmd goroutine instead of blocking Update.
@@ -439,6 +451,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case searchDoneMsg:
 		m.searching = false
 		if msg.err != nil {
@@ -554,6 +569,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		dt := now.Sub(m.lastTick)
 		m.dlSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Downloaded })
 		m.ulSpeed = computeRates(m.statuses, next, dt, func(s engine.Status) int64 { return s.Uploaded })
+		// Detect downloads that just finished (before m.statuses is overwritten) and
+		// notify, if the user hasn't turned it off.
+		var notifyCmds []tea.Cmd
+		if m.cfg.NotifyOnComplete {
+			if done := newlyCompleted(m.statuses, next); len(done) > 0 {
+				name := stripControl(done[0]) // torrent names are untrusted metadata
+				m.setNotice("✓ Finished: " + truncate(name, 40))
+				notifyCmds = append(notifyCmds, notifyDoneCmd(name))
+			}
+		}
 		// Reload history while a finished torrent isn't in it yet — the daemon
 		// records completions on its own ticker, so the flip-to-Done edge can
 		// precede its write. Bounded per torrent so a completion the daemon never
@@ -614,7 +639,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stopConfirm = false
 			}
 		}
-		return m, nil
+		return m, tea.Batch(notifyCmds...)
 
 	case updateCheckMsg:
 		if msg.newer {
@@ -997,6 +1022,23 @@ func (m Model) handleSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// handleMouse maps the scroll wheel to selection movement in the current pane.
+// Text-entry modes and prompts (which the keyboard also skips) are left alone.
+// ponytail: wheel-scroll only; click-to-select needs per-row Y hit-testing
+// against the box layout — deferred until the layout math is factored out.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.editing || m.editingSetting {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.moveUp()
+	case tea.MouseButtonWheelDown:
+		m.moveDown()
+	}
+	return m, nil
+}
+
 // --- selection movement ----------------------------------------------------
 
 func (m *Model) moveUp() {
@@ -1161,6 +1203,28 @@ func settingItems() []setItem {
 					m.cfg.ListenPort = n
 				}
 			}},
+		{group: "DOWNLOADS", label: "Down limit KB/s (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.DownloadRateKB) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.DownloadRateKB = n
+				}
+			}},
+		{group: "DOWNLOADS", label: "Up limit KB/s (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.UploadRateKB) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.UploadRateKB = n
+				}
+			}},
+		{group: "DOWNLOADS", label: "Notify on done", kind: kindEnum, options: []string{"on", "off"},
+			get: func(m *Model) string {
+				if m.cfg.NotifyOnComplete {
+					return "on"
+				}
+				return "off"
+			},
+			set: func(m *Model, v string) { m.cfg.NotifyOnComplete = v == "on" }},
 		{group: "UPDATES", label: "Auto-update", kind: kindEnum, options: []string{"off", "on"},
 			get: func(m *Model) string {
 				if m.cfg.AutoUpdate {

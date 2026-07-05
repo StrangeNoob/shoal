@@ -80,18 +80,24 @@ hash, magnet) where `d` downloads, `y` copies the magnet, and `esc` goes back. Y
 also paste a magnet link into the search box and press `enter` to add it directly.
 
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,
-and **download speed**. Select a download with `↑ ↓` and press `x` to **cancel** it (a
-prompt lets you `k` keep the partial files or `d` delete them; `esc` aborts).
+**download speed**, and an **ETA** (time remaining). Select a download with `↑ ↓` and
+press `x` to **cancel** it (a prompt lets you `k` keep the partial files or `d` delete
+them; `esc` aborts). When a download finishes, shoal shows a notice and rings the
+terminal bell / posts a desktop notification (toggle in Settings).
 
 **Seeding** — completed torrents you're still sharing (name, ratio, uploaded, peers, and
 **upload speed**), followed by a **History** of everything you've downloaded (name, size,
 and when it finished — persisted across runs).
 
 **Settings** — theme (Twilight / Tide), color mode, save location, seed ratio, max peers,
-listen port, and auto-update. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
+listen port, **download / upload speed limits** (KiB/s; `0` = unlimited), **notify on done**,
+and auto-update. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
 A **SOURCES** group lists every provider with an on/off toggle (`← →` to change);
 turning one off removes it from searches immediately, and the change is shared with
-the `shoal sources` CLI.
+the `shoal sources` CLI. Engine settings (speed limits, max peers, listen port, save-to,
+seed) take effect when the daemon next restarts.
+
+The whole TUI is mouse-aware: the scroll wheel moves the selection in any pane.
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
 indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
@@ -291,6 +297,12 @@ Shipped:
   client-side).
 - **Shell completions** — `shoal completion bash|zsh|fish`, with infohash-prefix
   completion sourced from live `status`/`history`.
+- **Speed limits** — global download/upload rate caps (Settings / `config.json`, KiB/s).
+- **ETA column** in the Downloads pane, and a **completion notification** (in-app notice
+  + terminal bell / OSC 9 desktop notification, toggleable).
+- **Mouse support** — the scroll wheel moves the selection in every pane.
+- **Daemon socket hardening** — the socket dir is verified 0700 & user-owned (rejecting a
+  symlink or a foreign owner) before binding; falls back to `XDG_RUNTIME_DIR`.
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
@@ -298,21 +310,15 @@ Still planned — contributions welcome:
 - **Per-file selection** — pick which files of a multi-file torrent to download:
   a file tree with checkboxes in the TUI details screen, and
   `shoal download --files <glob>` / `shoal files <id>` in the CLI.
-- **Speed limits** — global upload/download rate caps in Settings and `config.json`.
 - **Streaming** — `shoal stream <id|magnet>`: sequential piece priority so you can
   play a file while it downloads (e.g. pipe the path to `mpv`).
-- **ETA column** in the Downloads pane (time remaining next to speed).
 - **Details screen for active downloads** — per-file progress, peers, and trackers
   on `enter` in the Downloads pane, mirroring the search-result details screen.
 - **Search quality-of-life** — a hide-0-seed toggle and an in-results fuzzy filter
   that narrows loaded results without re-querying sources.
 - **Queue controls** — max concurrent downloads with the rest queued, plus manual
   reordering.
-- **Completion notifications** — terminal bell / desktop notification when a
-  download finishes in another pane or in the background.
-- **Mouse support** in the TUI — click to select, wheel to scroll.
-- **Daemon socket hardening** — prefer `XDG_RUNTIME_DIR` (and the user cache dir on
-  macOS) over a per-uid temp dir, verifying ownership and mode before use.
+- **Click-to-select** in the TUI (the scroll wheel already moves the selection).
 - **More sources** behind the existing `source.Source` interface.
 - **Homebrew tap** as an additional install channel.
 

@@ -8,8 +8,76 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
+
+func TestStripControl(t *testing.T) {
+	// ESC and BEL (used to break out of an OSC sequence) and other control bytes
+	// are removed; printable text (including Unicode) survives.
+	in := "Movie\x1b]0;pwn\x07 \x00Name 日本"
+	got := stripControl(in)
+	if strings.ContainsAny(got, "\x1b\x07\x00") {
+		t.Fatalf("control bytes survived: %q", got)
+	}
+	if got != "Movie]0;pwn Name 日本" {
+		t.Fatalf("stripControl = %q", got)
+	}
+}
+
+func TestNewlyCompleted(t *testing.T) {
+	prev := []engine.Status{
+		{InfoHash: "a", Name: "Alpha", Done: false},
+		{InfoHash: "b", Name: "Beta", Done: true}, // already done before
+	}
+	next := []engine.Status{
+		{InfoHash: "a", Name: "Alpha", Done: true}, // just finished → notify
+		{InfoHash: "b", Name: "Beta", Done: true},  // still done, no re-notify
+		{InfoHash: "c", Name: "Gamma", Done: true}, // new & already done → no notify
+	}
+	got := newlyCompleted(prev, next)
+	if len(got) != 1 || got[0] != "Alpha" {
+		t.Fatalf("newlyCompleted = %v, want [Alpha]", got)
+	}
+	// First poll (empty prev) must not notify for pre-existing finished torrents.
+	if n := newlyCompleted(nil, next); len(n) != 0 {
+		t.Fatalf("first poll should not notify, got %v", n)
+	}
+}
+
+func TestEtaSeconds(t *testing.T) {
+	// 100 MiB left at 10 MiB/s → 10s.
+	got := etaSeconds(engine.Status{TotalBytes: 200 << 20, CompletedBytes: 100 << 20}, 10<<20)
+	if got != 10 {
+		t.Errorf("eta = %d, want 10", got)
+	}
+	// Unestimatable cases → 0.
+	if etaSeconds(engine.Status{TotalBytes: 100, CompletedBytes: 100}, 10) != 0 {
+		t.Error("complete torrent should have eta 0")
+	}
+	if etaSeconds(engine.Status{TotalBytes: 0, CompletedBytes: 0}, 10) != 0 {
+		t.Error("unknown total should have eta 0")
+	}
+	if etaSeconds(engine.Status{TotalBytes: 100, CompletedBytes: 10}, 0) != 0 {
+		t.Error("zero speed should have eta 0")
+	}
+}
+
+func TestFormatETA(t *testing.T) {
+	cases := map[int64]string{
+		0:            "",
+		-5:           "",
+		9:            "9s",
+		75:           "1m15s",
+		3600 + 125:   "1h02m",
+		100*3600 + 1: "99h+",
+	}
+	for sec, want := range cases {
+		if got := formatETA(sec); got != want {
+			t.Errorf("formatETA(%d) = %q, want %q", sec, got, want)
+		}
+	}
+}
 
 func TestTruncate(t *testing.T) {
 	cases := []struct {

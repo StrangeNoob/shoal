@@ -66,13 +66,16 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	c.SeedRatio = 3.5
 	c.MaxPeers = 99
 	c.ListenPort = 7000
+	c.DownloadRateKB = 500
+	c.UploadRateKB = 100
 	if err := c.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
 	got := Load()
 	if got.Theme != "Tide" || got.ColorMode != "256" || got.DataDir != "/tmp/shoal-test" ||
-		got.Seed != false || got.SeedRatio != 3.5 || got.MaxPeers != 99 || got.ListenPort != 7000 {
+		got.Seed != false || got.SeedRatio != 3.5 || got.MaxPeers != 99 || got.ListenPort != 7000 ||
+		got.DownloadRateKB != 500 || got.UploadRateKB != 100 {
 		t.Errorf("round trip mismatch: %+v", got)
 	}
 }

@@ -66,6 +66,10 @@ type Config struct {
 	Seed       bool    // keep seeding finished torrents
 	SeedRatio  float64 // stop seeding a torrent once uploaded/size reaches this (0 = seed forever)
 	QueuePath  string  // where to persist the set of added torrents ("" = disabled)
+
+	// Rate limits in bytes/sec; 0 = unlimited (leaves anacrolix's defaults).
+	DownloadRate int
+	UploadRate   int
 }
 
 // Engine adds torrents and reports their live status.

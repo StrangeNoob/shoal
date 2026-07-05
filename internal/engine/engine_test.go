@@ -1,6 +1,26 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/time/rate"
+)
+
+func TestRateLimiter(t *testing.T) {
+	// A configured rate becomes the limiter's Limit; the burst is floored at
+	// 256 KiB so large piece requests aren't stalled below the target.
+	l := rateLimiter(50 * 1024)
+	if l.Limit() != rate.Limit(50*1024) {
+		t.Errorf("limit = %v, want %d", l.Limit(), 50*1024)
+	}
+	if l.Burst() < 1<<18 {
+		t.Errorf("burst = %d, want >= %d", l.Burst(), 1<<18)
+	}
+	// A rate above the floor keeps its own value as the burst.
+	if b := rateLimiter(1 << 20).Burst(); b != 1<<20 {
+		t.Errorf("burst = %d, want %d", b, 1<<20)
+	}
+}
 
 func TestStatusPercent(t *testing.T) {
 	cases := []struct {

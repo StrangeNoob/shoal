@@ -17,18 +17,18 @@ func SocketPath() string {
 	if p := os.Getenv("SHOAL_DAEMON_SOCK"); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		// Fallback when the config dir is unavailable (e.g. $HOME unset). Namespace
-		// by uid in a subdir rather than dropping a predictable name in a possibly
-		// world-writable temp root (/tmp is 1777 on Linux) — the daemon creates that
-		// subdir 0700 (runDaemon), so another user can't squat the socket path.
-		// ponytail: a pre-existing attacker-owned /tmp/shoal-<uid> would defeat this;
-		// full hardening (ownership check) belongs in Phase 4 if the fallback ever matters.
-		dir = filepath.Join(os.TempDir(), "shoal-"+strconv.Itoa(os.Getuid()))
-		return filepath.Join(dir, "daemon.sock")
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "shoal", "daemon.sock")
 	}
-	return filepath.Join(dir, "shoal", "daemon.sock")
+	// Fallback when the config dir is unavailable (e.g. $HOME unset). Prefer the
+	// user-private runtime dir (systemd guarantees $XDG_RUNTIME_DIR is 0700 and
+	// user-owned) over a per-uid subdir of a world-writable temp root. The daemon
+	// verifies/creates whichever dir 0700 & user-owned before binding
+	// (SecureSocketDir), so another user can't pre-squat the socket path.
+	if rd := os.Getenv("XDG_RUNTIME_DIR"); rd != "" {
+		return filepath.Join(rd, "shoal", "daemon.sock")
+	}
+	return filepath.Join(os.TempDir(), "shoal-"+strconv.Itoa(os.Getuid()), "daemon.sock")
 }
 
 type AddMagnetArgs struct{ Magnet string }

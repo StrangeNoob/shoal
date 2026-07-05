@@ -65,6 +65,64 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// stripControl removes ASCII control bytes (including ESC 0x1b and BEL 0x07) so
+// an untrusted torrent name can't inject or break out of a terminal escape
+// sequence — notably the raw OSC 9 write in notifyDoneCmd.
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// newlyCompleted returns the display names of torrents that flipped from
+// not-done to done between prev and next. A torrent absent from prev (e.g. the
+// first poll, or one added already-complete) does not count, so opening the app
+// on finished downloads doesn't spuriously notify.
+func newlyCompleted(prev, next []engine.Status) []string {
+	wasDownloading := make(map[string]bool, len(prev))
+	for _, s := range prev {
+		if !s.Done {
+			wasDownloading[s.InfoHash] = true
+		}
+	}
+	var names []string
+	for _, s := range next {
+		if s.Done && wasDownloading[s.InfoHash] {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// etaSeconds is the time to finish s at the current byte/sec rate, or 0 when it
+// can't be estimated (done, unknown total, or stalled).
+func etaSeconds(s engine.Status, bytesPerSec int64) int64 {
+	if bytesPerSec <= 0 || s.TotalBytes <= 0 || s.CompletedBytes >= s.TotalBytes {
+		return 0
+	}
+	return (s.TotalBytes - s.CompletedBytes) / bytesPerSec
+}
+
+// formatETA renders a seconds count compactly ("12s", "3m20s", "1h02m"). It
+// returns "" for non-positive input and caps absurd values at "99h+".
+func formatETA(sec int64) string {
+	switch {
+	case sec <= 0:
+		return ""
+	case sec >= 100*3600:
+		return "99h+"
+	case sec >= 3600:
+		return fmt.Sprintf("%dh%02dm", sec/3600, (sec%3600)/60)
+	case sec >= 60:
+		return fmt.Sprintf("%dm%02ds", sec/60, sec%60)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+}
+
 // asMagnet returns s if it looks like a magnet link, else "".
 func asMagnet(s string) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s)), "magnet:?") {
