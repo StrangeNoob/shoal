@@ -80,12 +80,14 @@ func runSources(args []string, out io.Writer) int {
 		fmt.Fprintln(out, string(b))
 		return 0
 	}
+	table := make([][]string, 0, len(names))
 	for _, n := range names {
 		state := "off"
 		if cfg.SourceEnabled(n) {
 			state = "on"
 		}
-		fmt.Fprintf(out, "%-3s %s\n", state, n)
+		table = append(table, []string{state, n})
 	}
+	printTable(out, []string{"STATE", "SOURCE"}, table)
 	return 0
 }

@@ -165,8 +165,16 @@ func printSearch(out io.Writer, rows []searchRow, asJSON bool) {
 		fmt.Fprintln(out, "no results")
 		return
 	}
+	table := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		fmt.Fprintf(out, "%-8s  %-50.50s  %10s  s:%-5d  %s\n",
-			r.ID, r.Title, humanBytes(r.SizeBytes), r.Seeders, r.Source)
+		table = append(table, []string{
+			r.ID,
+			humanBytes(r.SizeBytes),
+			fmt.Sprintf("%d", r.Seeders),
+			fmt.Sprintf("%d", r.Leechers),
+			r.Source,
+			truncate(r.Title, 60),
+		})
 	}
+	printTable(out, []string{"ID", "SIZE", "SEED", "LEECH", "SOURCE", "TITLE"}, table)
 }

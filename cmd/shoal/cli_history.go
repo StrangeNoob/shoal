@@ -57,10 +57,12 @@ func runHistoryList(args []string, out io.Writer) int {
 		fmt.Fprintln(out, "no history")
 		return 0
 	}
+	table := make([][]string, 0, len(entries))
 	for _, e := range entries {
 		r := toHistoryRow(e)
-		fmt.Fprintf(out, "%-8s  %-40.40s  %10s  %s\n", r.ID, r.Name, humanBytes(r.Size), r.CompletedAt)
+		table = append(table, []string{r.ID, humanBytes(r.Size), r.CompletedAt, truncate(r.Name, 50)})
 	}
+	printTable(out, []string{"ID", "SIZE", "COMPLETED", "NAME"}, table)
 	return 0
 }
 

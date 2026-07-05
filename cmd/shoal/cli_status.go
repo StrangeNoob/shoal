@@ -66,10 +66,18 @@ func printStatus(out io.Writer, rows []statusRow, asJSON bool) {
 		fmt.Fprintln(out, "no downloads")
 		return
 	}
+	table := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		fmt.Fprintf(out, "%-8s  %-40.40s  %5.1f%%  %10s/%-10s  %d peers  %s\n",
-			r.ID, r.Name, r.Percent*100, humanBytes(r.Completed), humanBytes(r.Total), r.Peers, r.State)
+		table = append(table, []string{
+			r.ID,
+			fmt.Sprintf("%.1f%%", r.Percent*100),
+			humanBytes(r.Completed) + "/" + humanBytes(r.Total),
+			fmt.Sprintf("%d", r.Peers),
+			r.State,
+			truncate(r.Name, 50),
+		})
 	}
+	printTable(out, []string{"ID", "PROGRESS", "SIZE", "PEERS", "STATE", "NAME"}, table)
 }
 
 func runStatus(args []string, out io.Writer) int {
