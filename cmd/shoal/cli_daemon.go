@@ -176,7 +176,7 @@ func runDaemonStatus(out io.Writer) int {
 func runDaemon(args []string, out io.Writer) int {
 	cfg := config.Load()
 	sock := daemon.SocketPath()
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+	if err := daemon.SecureSocketDir(filepath.Dir(sock)); err != nil {
 		fmt.Fprintln(os.Stderr, "shoal daemon:", err)
 		return 1
 	}
