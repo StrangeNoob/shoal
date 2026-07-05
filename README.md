@@ -128,12 +128,13 @@ shoal daemon stop                    # stop the shared daemon
   so multiple downloads and `shoal status` all share one engine and one download folder.
   The TUI runs on the same shared `shoal daemon` as the CLI, so downloads and seeding stay in sync
   between them. Engine settings (listen port, max peers, save-to, seed) configure the daemon and
-  take effect when it restarts. (The daemon-backed TUI is unix/macOS only for now; Windows support
-  is planned.)
+  take effect when it restarts.
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files.
 - **`daemon status`** — show whether the shared daemon is running, its uptime, and torrent counts.
 - **`daemon stop`** — stop the shared daemon (it also stops on its own when idle).
+
+The shared daemon (and the TUI/CLI that use it) run on Linux, macOS, and **Windows 10 1803+** (which is where Windows gained AF_UNIX support). Windows support is best-effort.
 
 The daemon auto-starts on the first `download` or when the TUI launches. If the
 daemon stops or crashes while the TUI is open, the TUI shows a reconnecting
