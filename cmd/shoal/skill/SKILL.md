@@ -65,6 +65,29 @@ SolidTorrents cover it.)
 - Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
 - Clear finished entries from status: `shoal status --clear` (removes finished/done torrents, keeping files).
 
+## History & Management
+
+**History** — completed downloads are persisted and accessible via the CLI:
+
+- `shoal history [--json]` — list all completed downloads (JSON format for scripts).
+- `shoal history rm <id> [--delete-files]` — remove a history entry. By default keeps files;
+  add `--delete-files` to also delete them from disk.
+- `shoal history clear [--delete-files]` — wipe the history log. By default keeps all files;
+  add `--delete-files` to also delete all downloaded files.
+
+**Live Download Control** (requires a running daemon; doesn't auto-start it):
+
+- `shoal pause <id>` — pause a download or active seeder.
+- `shoal resume <id>` — resume a paused download.
+- `shoal remove <id> [--delete-files]` — cancel/remove a download or seeder. By default
+  keeps files; add `--delete-files` to also delete them.
+- `shoal open <id>` — reveal the download's folder in your file manager (or print the path).
+
+In all cases, `<id>` is an **infohash prefix** from `shoal status` or `shoal history`
+(you can use a unique short prefix; the daemon resolves it). History deletion is also
+available in the TUI (Seeding pane, press `x` on a history row, then `k` to keep files or
+`d` to delete them).
+
 ## Notes
 
 All downloads run in a shared background `shoal daemon` (auto-started on the first `download` command). This means multiple downloads and all `shoal status` queries share a single engine and download folder. All downloads land in shoal's configured folder (Settings → Save to, or in `config.json`).

@@ -65,6 +65,13 @@ Usage:
   shoal search "<query>"        search torrent sources (add --json for scripts)
   shoal download <id|magnet>    download in the background (add --out <dir>)
   shoal status [id]             show download progress (add --json, --clear)
+  shoal history [--json]        list completed downloads
+  shoal history rm <id>         remove a history entry (add --delete-files)
+  shoal history clear           clear the history log (add --delete-files)
+  shoal pause <id>              pause a download
+  shoal resume <id>             resume a paused download
+  shoal remove <id>             cancel/remove a download (add --delete-files)
+  shoal open <id>               reveal download folder
   shoal daemon                  run the shared background engine (experimental)
   shoal daemon stop             stop the shared daemon
   shoal daemon status           show the daemon's status
