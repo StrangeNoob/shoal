@@ -74,17 +74,18 @@ the current pane, and `?` opens the full list. `tab` cycles the four panes:
 | `S` | sort results (then `← →` pick a column — Size / Seeders / Leechers / Ratio — and `↑ ↓` set direction) |
 | `tab` | next pane · `q` / `ctrl+c` quit |
 
-Results stream in live from all sources (`searching… N/M sources`) as a sortable table.
-Press `enter` for a **details** screen (size, health, files, hash, magnet) where `d`
-downloads, `y` copies the magnet, and `esc` goes back. You can also paste a magnet link
-into the search box and press `enter` to add it directly.
+Results stream in live from all sources (`searching… N/M sources`) as a sortable table
+(**Name · Size · Seed:Lch**). Press `enter` for a **details** screen (size, health, files,
+hash, magnet) where `d` downloads, `y` copies the magnet, and `esc` goes back. You can
+also paste a magnet link into the search box and press `enter` to add it directly.
 
-**Downloads** — live progress bar, transfer size, peers, and **download speed**. Select
-a download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the
-partial files or `d` delete them; `esc` aborts).
+**Downloads** — each row shows the name, live progress bar, transferred / total, peers,
+and **download speed**. Select a download with `↑ ↓` and press `x` to **cancel** it (a
+prompt lets you `k` keep the partial files or `d` delete them; `esc` aborts).
 
-**Seeding** — completed torrents you're still sharing (ratio, uploaded, **upload speed**),
-followed by a **History** of everything you've downloaded (persisted across runs).
+**Seeding** — completed torrents you're still sharing (name, ratio, uploaded, peers, and
+**upload speed**), followed by a **History** of everything you've downloaded (name, size,
+and when it finished — persisted across runs).
 
 **Settings** — theme (Twilight / Tide), color mode, save location, seed ratio, max peers,
 listen port, and auto-update. `↑ ↓` move, `← →` change an option, `enter` edits a text field.
