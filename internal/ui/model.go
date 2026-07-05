@@ -229,7 +229,8 @@ func tickCmd() tea.Cmd {
 // so the terminal still interprets the sequence. Returns no follow-up message.
 func notifyDoneCmd(name string) tea.Cmd {
 	return func() tea.Msg {
-		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", name)
+		// stripControl again here so the raw write is safe regardless of caller.
+		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", stripControl(name))
 		return nil
 	}
 }
@@ -573,8 +574,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var notifyCmds []tea.Cmd
 		if m.cfg.NotifyOnComplete {
 			if done := newlyCompleted(m.statuses, next); len(done) > 0 {
-				m.setNotice("✓ Finished: " + truncate(done[0], 40))
-				notifyCmds = append(notifyCmds, notifyDoneCmd(done[0]))
+				name := stripControl(done[0]) // torrent names are untrusted metadata
+				m.setNotice("✓ Finished: " + truncate(name, 40))
+				notifyCmds = append(notifyCmds, notifyDoneCmd(name))
 			}
 		}
 		// Reload history while a finished torrent isn't in it yet — the daemon

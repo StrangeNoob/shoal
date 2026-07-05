@@ -12,6 +12,19 @@ import (
 	"github.com/StrangeNoob/shoal/internal/source"
 )
 
+func TestStripControl(t *testing.T) {
+	// ESC and BEL (used to break out of an OSC sequence) and other control bytes
+	// are removed; printable text (including Unicode) survives.
+	in := "Movie\x1b]0;pwn\x07 \x00Name 日本"
+	got := stripControl(in)
+	if strings.ContainsAny(got, "\x1b\x07\x00") {
+		t.Fatalf("control bytes survived: %q", got)
+	}
+	if got != "Movie]0;pwn Name 日本" {
+		t.Fatalf("stripControl = %q", got)
+	}
+}
+
 func TestNewlyCompleted(t *testing.T) {
 	prev := []engine.Status{
 		{InfoHash: "a", Name: "Alpha", Done: false},

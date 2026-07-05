@@ -65,6 +65,18 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// stripControl removes ASCII control bytes (including ESC 0x1b and BEL 0x07) so
+// an untrusted torrent name can't inject or break out of a terminal escape
+// sequence — notably the raw OSC 9 write in notifyDoneCmd.
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // newlyCompleted returns the display names of torrents that flipped from
 // not-done to done between prev and next. A torrent absent from prev (e.g. the
 // first poll, or one added already-complete) does not count, so opening the app
