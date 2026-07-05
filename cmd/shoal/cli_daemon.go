@@ -205,6 +205,8 @@ func runDaemon(args []string, out io.Writer) int {
 	srv := daemon.NewServer(eng, time.Now(), time.Duration(cfg.DaemonIdleMinutes)*time.Minute)
 	fmt.Fprintln(out, "shoal daemon listening on", sock)
 
+	// On Windows these signals never reach a DETACHED_PROCESS daemon; graceful
+	// stop there goes through `shoal daemon stop` (Control.Shutdown) or idle-timeout.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() { <-sig; srv.Shutdown() }()
