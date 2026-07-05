@@ -85,9 +85,9 @@ func runHistoryRm(args []string, out io.Writer) int {
 		return 2
 	}
 	s := history.Load()
-	e, ok := findHistoryEntry(s.Entries, positionals[0])
-	if !ok {
-		fmt.Fprintln(os.Stderr, "no history entry:", positionals[0])
+	e, err := findHistoryEntry(s.Entries, positionals[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	if *del {
@@ -120,19 +120,26 @@ func runHistoryClear(args []string, out io.Writer) int {
 	return 0
 }
 
-// findHistoryEntry returns the unique entry whose infohash starts with prefix.
-func findHistoryEntry(entries []history.Entry, prefix string) (history.Entry, bool) {
+// findHistoryEntry returns the unique entry whose infohash starts with prefix,
+// or an error distinguishing "no match" from "ambiguous".
+func findHistoryEntry(entries []history.Entry, prefix string) (history.Entry, error) {
 	prefix = strings.ToLower(prefix)
-	found, ok := history.Entry{}, false
+	var found history.Entry
+	n := 0
 	for _, e := range entries {
 		if strings.HasPrefix(strings.ToLower(e.InfoHash), prefix) {
-			if ok {
-				return history.Entry{}, false // ambiguous
-			}
-			found, ok = e, true
+			found = e
+			n++
 		}
 	}
-	return found, ok
+	switch n {
+	case 0:
+		return history.Entry{}, fmt.Errorf("no history entry: %s", prefix)
+	case 1:
+		return found, nil
+	default:
+		return history.Entry{}, fmt.Errorf("ambiguous id %q matches %d history entries", prefix, n)
+	}
 }
 
 // deleteEntryFiles removes e's files: via the daemon if the torrent is live

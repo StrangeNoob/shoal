@@ -1273,3 +1273,32 @@ func TestHistDeletedMsgReportsError(t *testing.T) {
 		t.Fatal("a failed file delete should surface an error, not a success notice")
 	}
 }
+
+func TestHistDeletedMsgKeepsRowOnFailure(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "M"})
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
+	out, _ := update(m, histDeletedMsg{infoHash: "hh", name: "M", err: errors.New("boom")})
+	if !out.noticeErr {
+		t.Fatal("a failed delete should surface an error")
+	}
+	if len(history.Load().Entries) != 1 {
+		t.Fatal("a failed delete must keep the history row")
+	}
+}
+
+func TestHistDeletedMsgRemovesRowOnSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	seed := history.Load()
+	seed.Append(history.Entry{InfoHash: "hh", Name: "M"})
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
+	update(m, histDeletedMsg{infoHash: "hh", name: "M"}) // no error
+	if len(history.Load().Entries) != 0 {
+		t.Fatal("a successful delete should remove the history row")
+	}
+}

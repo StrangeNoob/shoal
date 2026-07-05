@@ -2,6 +2,7 @@
 package opener
 
 import (
+	"context"
 	"os/exec"
 	"runtime"
 )
@@ -23,7 +24,7 @@ func Command(goos, path string) (name string, args []string) {
 // (e.g. headless with no opener installed).
 func Open(path string) error {
 	name, args := Command(runtime.GOOS, path)
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

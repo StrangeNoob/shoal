@@ -54,6 +54,19 @@ func TestHistoryClear(t *testing.T) {
 	}
 }
 
+func TestHistoryRmAmbiguous(t *testing.T) {
+	s := isolateHistory(t)
+	s.Append(history.Entry{InfoHash: "aa11", Name: "A"})
+	s.Append(history.Entry{InfoHash: "aa22", Name: "B"})
+	var buf bytes.Buffer
+	if code := runHistory([]string{"rm", "aa"}, &buf); code == 0 {
+		t.Fatal("an ambiguous prefix should exit non-zero")
+	}
+	if len(history.Load().Entries) != 2 {
+		t.Fatal("an ambiguous rm must not remove anything")
+	}
+}
+
 func TestHistoryRmDeleteFilesRefusesEscape(t *testing.T) {
 	s := isolateHistory(t) // isolates HOME/XDG so config.Load().DataDir is under a temp dir too
 	s.Append(history.Entry{InfoHash: "cccc3333", Name: "../evil"})

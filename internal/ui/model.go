@@ -512,9 +512,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case histDeletedMsg:
 		if msg.err != nil {
 			m.setError("Couldn't delete files: " + msg.err.Error())
-		} else {
-			m.setNotice("Deleted: " + truncate(msg.name, 40))
+			return m, nil
 		}
+		m.history.Remove(msg.infoHash) // drop the row only after the delete succeeds
+		m.history = history.Load()
+		m.setNotice("Deleted: " + truncate(msg.name, 40))
 		return m, nil
 
 	case folderOpenedMsg:
@@ -899,12 +901,13 @@ func (m Model) handleHistKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if live {
 			cmd = removeCmd(m.eng, e.InfoHash, e.Name, true) // daemon stops + deletes; removedMsg reports
-		} else {
-			cmd = deleteHistoryFilesCmd(e.Name, m.cfg.DataDir) // histDeletedMsg reports
+			m.history.Remove(e.InfoHash)
+			m.history = history.Load()
+			return m, cmd
 		}
-		m.history.Remove(e.InfoHash)
-		m.history = history.Load()
-		return m, cmd
+		// Non-live: keep the row until the delete actually succeeds (histDeletedMsg
+		// handler removes it), so a failed delete doesn't orphan the files.
+		return m, deleteHistoryFilesCmd(e.InfoHash, e.Name, m.cfg.DataDir)
 	case "esc", "n":
 		m.histConfirm = false
 		return m, nil
@@ -916,18 +919,19 @@ func (m Model) handleHistKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // histDeletedMsg reports the outcome of deleteHistoryFilesCmd.
 type histDeletedMsg struct {
-	name string
-	err  error
+	infoHash string
+	name     string
+	err      error
 }
 
 // deleteHistoryFilesCmd removes a finished download's files off the UI thread.
-func deleteHistoryFilesCmd(name, dataDir string) tea.Cmd {
+func deleteHistoryFilesCmd(infoHash, name, dataDir string) tea.Cmd {
 	return func() tea.Msg {
 		var err error
 		if name != "" {
 			err = engine.RemoveUnderDir(dataDir, name)
 		}
-		return histDeletedMsg{name: name, err: err}
+		return histDeletedMsg{infoHash: infoHash, name: name, err: err}
 	}
 }
 
