@@ -1249,8 +1249,7 @@ func TestHistoryRowDeleteConfirm(t *testing.T) {
 	seed.Append(history.Entry{InfoHash: "hh", Name: "Old Movie"})
 
 	// no active torrents → the seeding pane shows only the history row
-	m := ready(New(&fakeSource{}, &fakeEngine{}))
-	m = tick(m, time.Unix(1000, 0)) // loads statuses (none) + m.history from disk
+	m := ready(New(&fakeSource{}, &fakeEngine{}).WithHistory(history.Load()))
 	m.section = sectionSeeding
 	m.seedCursor = 0 // the single history row
 

@@ -558,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Also reload on the very first poll if history was never loaded (e.g. a
 		// model built via New() without WithHistory, as tests do) so the Seeding
 		// pane's HISTORY rows are populated without waiting for a completion.
-		reload := m.history.Path == ""
+		reload := false
 		for _, s := range next {
 			if s.Done && !recorded[s.InfoHash] && m.historyMisses[s.InfoHash] < maxHistoryReloads {
 				m.historyMisses[s.InfoHash]++
