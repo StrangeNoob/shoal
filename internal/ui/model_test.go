@@ -367,6 +367,60 @@ func wheel(b tea.MouseButton) tea.MouseMsg {
 	return tea.MouseMsg{Button: b, Action: tea.MouseActionPress}
 }
 
+func clickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: y}
+}
+
+// lineOf returns the 0-based screen row of the first rendered line containing s.
+func lineOf(view, s string) int {
+	for i, ln := range strings.Split(view, "\n") {
+		if strings.Contains(ln, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestClickSelectsSearchRow(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}, {Title: "Charlie"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // populate results (cursor starts at 0)
+
+	y := lineOf(m.View(), "Bravo") // find where the 2nd result actually rendered
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.cursor != 1 {
+		t.Fatalf("clicking the Bravo row selected cursor=%d, want 1", m.cursor)
+	}
+	// A click in the sidebar column must not move the selection.
+	m, _ = update(m, clickAt(2, y))
+	if m.cursor != 1 {
+		t.Fatalf("sidebar click moved cursor to %d", m.cursor)
+	}
+}
+
+func TestClickSelectsDownloadRow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+		{Name: "DownloadTwo", InfoHash: "b", TotalBytes: 100, CompletedBytes: 20},
+	}
+	y := lineOf(m.View(), "DownloadTwo")
+	if y < 0 {
+		t.Fatal("second download not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.dlCursor != 1 {
+		t.Fatalf("clicking DownloadTwo selected dlCursor=%d, want 1", m.dlCursor)
+	}
+}
+
 func TestMouseWheelMovesSelection(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "A"}, {Title: "B"}, {Title: "C"}}}
 	m := ready(New(src, &fakeEngine{}))

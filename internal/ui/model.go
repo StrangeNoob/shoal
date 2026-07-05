@@ -1030,13 +1030,56 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.editing || m.editingSetting {
 		return m, nil
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
 		m.moveUp()
-	case tea.MouseButtonWheelDown:
+	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		m.clickSelect(msg.X, msg.Y)
 	}
 	return m, nil
+}
+
+// clickSelect moves the selection to a clicked row. Implemented for the two
+// list panes with clean, single-height-row geometry (Search results and
+// Downloads); Seeding's two-section mixed-height layout and Settings' group
+// headers are left to the keyboard/wheel.
+// ponytail: mirrors the render layout in View/renderResults/renderDownloads —
+// the render-anchored tests catch any drift if that layout changes.
+func (m *Model) clickSelect(x, y int) {
+	if x <= sidebarWidth { // sidebar or the 1-col gutter, not a main-pane row
+		return
+	}
+	switch m.section {
+	case sectionSearch:
+		if !m.hasSearched && !m.searching && len(m.results) == 0 {
+			return // home screen has no rows
+		}
+		start, end, pre := m.resultsWindow(max(1, m.bodyHeight()-4))
+		// body line 0 is at headerHeight()+1; results box sits 3 lines in
+		// (search box, filter row, blank) + 1 box border + preRows header lines.
+		base := m.headerHeight() + 1 + 3 + 1 + pre
+		if i := start + (y - base); y >= base && i >= start && i < end {
+			m.cursor = i
+		}
+	case sectionDownloads:
+		if len(m.downloading()) == 0 {
+			return
+		}
+		cancelLines := 0
+		if m.cancelConfirm {
+			cancelLines = 2
+		}
+		base := m.headerHeight() + 1 + cancelLines // renderDownloads is body line 0 (no box)
+		visible := max(1, m.bodyHeight()/4)         // 4 screen lines per download row
+		shown := min(len(m.downloading()), visible)
+		if line := y - base; line >= 0 && line%4 <= 2 { // name/bar/detail, not the blank
+			if i := line / 4; i < shown {
+				m.dlCursor = i
+			}
+		}
+	}
 }
 
 // --- selection movement ----------------------------------------------------
@@ -1372,6 +1415,33 @@ func pathExists(p string) bool {
 // mainWidth is the width of the content pane (everything right of the sidebar).
 func (m Model) mainWidth() int {
 	return max(20, m.width-sidebarWidth-1)
+}
+
+// bodyHeight is the number of screen rows the body occupies (between the two
+// rules), mirroring View's bodyH. Body line 0 sits at screen row headerHeight()+1.
+func (m Model) bodyHeight() int {
+	return max(3, m.height-m.headerHeight()-3)
+}
+
+// resultsWindow returns the [start,end) slice of filtered results visible in a
+// results box of content height h, plus preRows — the number of lines above the
+// first data row (column header, and the optional "searching…" / sort-bar
+// lines). Shared by renderResults and click hit-testing so they can't drift.
+func (m Model) resultsWindow(h int) (start, end, preRows int) {
+	fr := m.filteredResults()
+	visible := max(1, h-3)
+	if m.cursor >= visible {
+		start = m.cursor - visible + 1
+	}
+	end = min(len(fr), start+visible)
+	preRows = 1 // column header
+	if m.searching {
+		preRows++
+	}
+	if m.sortMode {
+		preRows++
+	}
+	return start, end, preRows
 }
 
 func (m *Model) setNotice(s string) {

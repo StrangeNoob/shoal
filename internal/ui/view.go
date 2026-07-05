@@ -24,7 +24,7 @@ func (m Model) View() string {
 
 	header := m.renderHeader()
 	rule := st.Rule.Render(strings.Repeat("─", max(1, m.width)))
-	bodyH := max(3, m.height-m.headerHeight()-3) // header (up to 6 rows) + 2 rules + footer
+	bodyH := m.bodyHeight() // header (up to 6 rows) + 2 rules + footer
 	body := m.renderBody(bodyH)
 	footer := m.renderFooter()
 
@@ -210,13 +210,7 @@ func (m Model) renderResults(w, h int) string {
 		st.Faint.Render(leftPad("Src", srcW))
 	body.WriteString(head + "\n")
 
-	const perItem = 1
-	visible := max(1, (h-3)/perItem)
-	start := 0
-	if m.cursor >= visible {
-		start = m.cursor - visible + 1
-	}
-	end := min(len(fr), start+visible)
+	start, end, _ := m.resultsWindow(h)
 
 	for i := start; i < end; i++ {
 		r := fr[i]
