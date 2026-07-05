@@ -111,8 +111,8 @@ shoal sources                        # list providers with on/off state (add --j
 shoal sources enable  <name>         # turn a provider on
 shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (--sort, --min-seeders, --json)
-shoal download <magnet|url|infohash|id>   # download in the background (--wait to block)
-shoal status [id]                    # progress of background downloads (--json, --clear)
+shoal download <magnet|url|infohash|id|file.torrent>   # background download (--wait to block)
+shoal status [id]                    # progress of background downloads (--json, --clear, --follow)
 shoal history [--json]               # list completed downloads
 shoal history rm <id> [--delete-files]    # remove a history entry
 shoal history clear [--delete-files]      # clear the history log
@@ -122,6 +122,7 @@ shoal remove <id> [--delete-files]   # cancel/remove a download (requires daemon
 shoal open <id>                      # reveal download folder (works without a daemon)
 shoal daemon status                  # show daemon status, uptime, and torrent counts
 shoal daemon stop                    # stop the shared daemon
+shoal completion bash|zsh|fish       # print a shell completion script
 ```
 
 - **`sources`** lists all available providers with their on/off state (enable `--json` for
@@ -140,8 +141,10 @@ shoal daemon stop                    # stop the shared daemon
   88594aaa  Big Buck Bunny (2008) 1080p BluRay x264  723.0 MiB  412   18     YTS
   deadbeef  big_buck_bunny_480p.mp4                  158.0 MiB  3     0      Internet Archive
   ```
-- **`download`** accepts a magnet, a `.torrent` URL, a 40-char infohash, or a short id
-  from your last `search`. It starts the download **in the background** and returns
+- **`download`** accepts a magnet, a `.torrent` URL, a 40-char infohash, a short id
+  from your last `search`, or a path to a local `.torrent` file (converted to a magnet
+  client-side, so it works without a new daemon call). It starts the download **in the
+  background** and returns
   immediately with a handle; files land in shoal's configured folder (Settings → Save to, or `config.json`).
   CLI downloads run in a shared background `shoal daemon` (started automatically on the first `download`),
   so multiple downloads and `shoal status` all share one engine and one download folder.
@@ -151,7 +154,8 @@ shoal daemon stop                    # stop the shared daemon
   live progress line and exits `0` on completion (non-zero if the daemon becomes unreachable), so a
   script doesn't have to poll `status`.
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
-  `--clear` prunes finished (done) torrents, keeping files.
+  `--clear` prunes finished (done) torrents, keeping files. `--follow` redraws the table
+  live until you press Ctrl+C.
 - **`history`** lists all completed downloads (`--json` for scripts). `history rm <id>` removes
   a history entry and optionally deletes its files (`--delete-files`). `history clear` wipes the
   entire history log and optionally deletes all files (`--delete-files`). By default, deletes are
@@ -164,6 +168,15 @@ shoal daemon stop                    # stop the shared daemon
   no daemon is running, falling back to the live daemon's path if one is up.
 - **`daemon status`** — show whether the shared daemon is running, its uptime, and torrent counts.
 - **`daemon stop`** — stop the shared daemon (it also stops on its own when idle).
+- **`completion <shell>`** — print a completion script for `bash`, `zsh`, or `fish`. It
+  completes subcommands and the id-taking commands complete infohash prefixes from your
+  live `status` and `history`. Install it, e.g.:
+
+  ```sh
+  shoal completion zsh  > "${fpath[1]}/_shoal"                   # zsh
+  shoal completion bash > /etc/bash_completion.d/shoal          # bash (or source it from ~/.bashrc)
+  shoal completion fish > ~/.config/fish/completions/shoal.fish  # fish
+  ```
 
 The shared daemon (and the TUI/CLI that use it) run on Linux, macOS, and **Windows 10 1803+** (which is where Windows gained AF_UNIX support). Windows support is best-effort.
 
@@ -273,6 +286,11 @@ Shipped:
   line and a meaningful exit code, so scripts don't have to poll `status`.
 - **Search `--sort` / `--min-seeders`** — order results by seeders/size/leechers/name and
   drop thin ones, the sorting the TUI already has, for scripts.
+- **`shoal status --follow`** — live-redrawing status table without the full TUI.
+- **Local `.torrent` files** — `shoal download ./file.torrent` (converted to a magnet
+  client-side).
+- **Shell completions** — `shoal completion bash|zsh|fish`, with infohash-prefix
+  completion sourced from live `status`/`history`.
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
@@ -293,10 +311,6 @@ Still planned — contributions welcome:
 - **Completion notifications** — terminal bell / desktop notification when a
   download finishes in another pane or in the background.
 - **Mouse support** in the TUI — click to select, wheel to scroll.
-- **`shoal status --follow`** — live-updating status without the full TUI.
-- **Shell completions** — `shoal completion bash|zsh|fish`, including id prefixes
-  from `status`/`history`.
-- **Local `.torrent` files** — accept a path on disk in `shoal download`.
 - **Daemon socket hardening** — prefer `XDG_RUNTIME_DIR` (and the user cache dir on
   macOS) over a per-uid temp dir, verifying ownership and mode before use.
 - **More sources** behind the existing `source.Source` interface.
