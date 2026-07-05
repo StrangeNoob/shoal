@@ -356,6 +356,9 @@ func (m Model) renderDownloads(w, h int) string {
 			detail += "  ·  ⏸ paused"
 		case m.dlSpeed[s.Name] > 0:
 			detail += fmt.Sprintf("  ·  %s/s", formatBytes(m.dlSpeed[s.Name]))
+			if eta := formatETA(etaSeconds(s, m.dlSpeed[s.Name])); eta != "" {
+				detail += "  ·  ETA " + eta
+			}
 		}
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")

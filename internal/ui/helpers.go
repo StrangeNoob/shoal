@@ -65,6 +65,32 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// etaSeconds is the time to finish s at the current byte/sec rate, or 0 when it
+// can't be estimated (done, unknown total, or stalled).
+func etaSeconds(s engine.Status, bytesPerSec int64) int64 {
+	if bytesPerSec <= 0 || s.TotalBytes <= 0 || s.CompletedBytes >= s.TotalBytes {
+		return 0
+	}
+	return (s.TotalBytes - s.CompletedBytes) / bytesPerSec
+}
+
+// formatETA renders a seconds count compactly ("12s", "3m20s", "1h02m"). It
+// returns "" for non-positive input and caps absurd values at "99h+".
+func formatETA(sec int64) string {
+	switch {
+	case sec <= 0:
+		return ""
+	case sec >= 100*3600:
+		return "99h+"
+	case sec >= 3600:
+		return fmt.Sprintf("%dh%02dm", sec/3600, (sec%3600)/60)
+	case sec >= 60:
+		return fmt.Sprintf("%dm%02ds", sec/60, sec%60)
+	default:
+		return fmt.Sprintf("%ds", sec)
+	}
+}
+
 // asMagnet returns s if it looks like a magnet link, else "".
 func asMagnet(s string) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s)), "magnet:?") {

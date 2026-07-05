@@ -8,8 +8,43 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
+
+func TestEtaSeconds(t *testing.T) {
+	// 100 MiB left at 10 MiB/s → 10s.
+	got := etaSeconds(engine.Status{TotalBytes: 200 << 20, CompletedBytes: 100 << 20}, 10<<20)
+	if got != 10 {
+		t.Errorf("eta = %d, want 10", got)
+	}
+	// Unestimatable cases → 0.
+	if etaSeconds(engine.Status{TotalBytes: 100, CompletedBytes: 100}, 10) != 0 {
+		t.Error("complete torrent should have eta 0")
+	}
+	if etaSeconds(engine.Status{TotalBytes: 0, CompletedBytes: 0}, 10) != 0 {
+		t.Error("unknown total should have eta 0")
+	}
+	if etaSeconds(engine.Status{TotalBytes: 100, CompletedBytes: 10}, 0) != 0 {
+		t.Error("zero speed should have eta 0")
+	}
+}
+
+func TestFormatETA(t *testing.T) {
+	cases := map[int64]string{
+		0:            "",
+		-5:           "",
+		9:            "9s",
+		75:           "1m15s",
+		3600 + 125:   "1h02m",
+		100*3600 + 1: "99h+",
+	}
+	for sec, want := range cases {
+		if got := formatETA(sec); got != want {
+			t.Errorf("formatETA(%d) = %q, want %q", sec, got, want)
+		}
+	}
+}
 
 func TestTruncate(t *testing.T) {
 	cases := []struct {
