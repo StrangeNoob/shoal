@@ -10,9 +10,15 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/source"
 )
+
+// waitPollInterval is how often `download --wait` re-checks the daemon. A var so
+// tests can shorten it.
+var waitPollInterval = time.Second
 
 var (
 	hex40RE = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
@@ -60,6 +66,7 @@ func resolveTarget(arg string, lookup func(id string) (string, bool)) (dlTarget,
 func runDownload(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("download", flag.ContinueOnError)
 	outDir := fs.String("out", "", "(deprecated) downloads use the configured folder")
+	wait := fs.Bool("wait", false, "block until the download completes")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
@@ -69,7 +76,7 @@ func runDownload(args []string, out io.Writer) int {
 		arg = positionals[0]
 	}
 	if arg == "" {
-		fmt.Fprintln(os.Stderr, "usage: shoal download <magnet|url|infohash|id>")
+		fmt.Fprintln(os.Stderr, "usage: shoal download [--wait] <magnet|url|infohash|id>")
 		return 2
 	}
 	if *outDir != "" {
@@ -92,6 +99,13 @@ func runDownload(args []string, out io.Writer) int {
 	}
 	defer eng.Close()
 
+	// Snapshot existing infohashes so --wait can identify a URL download (whose
+	// handle is a URL hash, not the infohash) as the torrent that newly appears.
+	pre := map[string]bool{}
+	for _, s := range eng.Statuses() {
+		pre[strings.ToLower(s.InfoHash)] = true
+	}
+
 	if tgt.Magnet != "" {
 		err = eng.AddMagnet(tgt.Magnet)
 	} else {
@@ -106,7 +120,45 @@ func runDownload(args []string, out io.Writer) int {
 	} else {
 		fmt.Fprintf(out, "started: %s\n", displayName(tgt))
 	}
+	if *wait {
+		return awaitDone(eng, tgt, pre, out)
+	}
 	return 0
+}
+
+// awaitDone blocks until the target torrent reports Done, printing a progress
+// line to stderr as it goes. Returns 0 on completion, 1 if the daemon becomes
+// unreachable. A magnet/hash/id target is matched by its infohash prefix; a URL
+// target (no known infohash up front) is matched as the torrent absent from pre.
+func awaitDone(eng interface {
+	StatusesErr() ([]engine.Status, error)
+}, tgt dlTarget, pre map[string]bool, out io.Writer) int {
+	match := func(infohash string) bool {
+		if tgt.Magnet != "" && tgt.Handle != "" {
+			return strings.HasPrefix(strings.ToLower(infohash), tgt.Handle)
+		}
+		return !pre[strings.ToLower(infohash)]
+	}
+	for {
+		statuses, err := eng.StatusesErr()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "\nshoal download: daemon unreachable:", err)
+			return 1
+		}
+		for _, s := range statuses {
+			if !match(s.InfoHash) {
+				continue
+			}
+			if s.Done {
+				fmt.Fprint(os.Stderr, "\r\033[K") // clear the progress line
+				fmt.Fprintf(out, "done: %s\n", s.Name)
+				return 0
+			}
+			fmt.Fprintf(os.Stderr, "\r\033[K%5.1f%%  %s/%s  %d peers",
+				s.Percent()*100, humanBytes(s.CompletedBytes), humanBytes(s.TotalBytes), s.Peers)
+		}
+		time.Sleep(waitPollInterval)
+	}
 }
 
 // displayName is a friendly label for the "started:" line.

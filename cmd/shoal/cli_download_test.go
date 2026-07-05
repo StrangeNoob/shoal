@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/StrangeNoob/shoal/internal/engine"
 )
 
 func TestResolveTarget(t *testing.T) {
@@ -87,6 +89,21 @@ func TestDownloadForwardsURLToDaemon(t *testing.T) {
 	}
 	if u := fake.gotURLs(); len(u) != 1 || u[0][0] != "https://example.com/x.torrent" {
 		t.Fatalf("daemon did not receive the URL: %v", u)
+	}
+}
+
+func TestDownloadWaitBlocksUntilDone(t *testing.T) {
+	const ih = "0123456789abcdef0123456789abcdef01234567"
+	fake := &fakeEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: ih, TotalBytes: 100, CompletedBytes: 100, Done: true},
+	}}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"--wait", "magnet:?xt=urn:btih:" + ih}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(buf.String(), "done:") {
+		t.Fatalf("--wait should print a 'done:' line, got %q", buf.String())
 	}
 }
 
