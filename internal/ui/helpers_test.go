@@ -219,18 +219,3 @@ func TestPadVisual(t *testing.T) {
 		t.Fatalf("padVisual over-width should pass through, got %q", got)
 	}
 }
-
-func TestOpenCommand(t *testing.T) {
-	cases := []struct{ goos, wantName string }{
-		{"darwin", "open"},
-		{"windows", "explorer"},
-		{"linux", "xdg-open"},
-		{"freebsd", "xdg-open"},
-	}
-	for _, c := range cases {
-		name, args := openCommand(c.goos, "/some/dir")
-		if name != c.wantName || len(args) != 1 || args[0] != "/some/dir" {
-			t.Errorf("openCommand(%q) = %q %v, want %q [/some/dir]", c.goos, name, args, c.wantName)
-		}
-	}
-}

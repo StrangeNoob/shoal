@@ -21,6 +21,7 @@ import (
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
+	"github.com/StrangeNoob/shoal/internal/opener"
 	"github.com/StrangeNoob/shoal/internal/source"
 	upd "github.com/StrangeNoob/shoal/internal/update"
 )
@@ -379,7 +380,7 @@ type folderOpenedMsg struct{ err error }
 
 // openFolderCmd opens dir in the OS file manager, off the UI goroutine.
 func openFolderCmd(dir string) tea.Cmd {
-	return func() tea.Msg { return folderOpenedMsg{err: openInFileManager(dir)} }
+	return func() tea.Msg { return folderOpenedMsg{err: opener.Open(dir)} }
 }
 
 // openSelected opens the selected torrent's folder, or sets a notice when it

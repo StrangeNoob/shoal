@@ -561,3 +561,20 @@ func waitMeta(t *testing.T, eng *Anacrolix) {
 	}
 	t.Fatal("metadata never resolved")
 }
+
+func TestExportedRemoveUnderDirRefusesEscape(t *testing.T) {
+	base := t.TempDir()
+	if err := RemoveUnderDir(base, "../escape"); err == nil {
+		t.Fatal("RemoveUnderDir must refuse a name escaping the dir")
+	}
+	sub := filepath.Join(base, "keep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveUnderDir(base, "keep"); err != nil {
+		t.Fatalf("RemoveUnderDir on an in-dir name: %v", err)
+	}
+	if _, err := os.Stat(sub); !os.IsNotExist(err) {
+		t.Fatal("RemoveUnderDir should have deleted the in-dir path")
+	}
+}
