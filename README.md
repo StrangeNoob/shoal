@@ -18,7 +18,7 @@ is `linux`/`darwin`/`windows` and `<arch>` is `amd64`/`arm64` — unpack it and 
 `shoal` binary on your `PATH`:
 
 ```sh
-tar -xzf shoal_0.2.0_darwin_arm64.tar.gz     # pick the asset for your OS/arch
+tar -xzf shoal_0.10.0_darwin_arm64.tar.gz    # pick the asset for your OS/arch
 sudo mv shoal /usr/local/bin/                # or anywhere on your $PATH
 shoal
 ```
