@@ -2,13 +2,47 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 )
+
+func TestFollowStatusRendersThenStops(t *testing.T) {
+	old := statusPollInterval
+	statusPollInterval = time.Millisecond
+	t.Cleanup(func() { statusPollInterval = old })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled → render once, then return
+
+	var buf bytes.Buffer
+	rows := []statusRow{{ID: "abcd1234", Name: "Movie", State: "downloading"}}
+	code := followStatus(ctx, func() []statusRow { return rows }, &buf)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(buf.String(), "Movie") {
+		t.Fatalf("follow did not render the row:\n%q", buf.String())
+	}
+}
+
+func TestFilterStatuses(t *testing.T) {
+	in := []engine.Status{
+		{InfoHash: "abcdef0123"}, {InfoHash: "abc999"}, {InfoHash: " zzz"},
+	}
+	got := filterStatuses(in, "abc")
+	if len(got) != 2 {
+		t.Fatalf("prefix abc matched %d, want 2", len(got))
+	}
+	if all := filterStatuses(in, ""); len(all) != 3 {
+		t.Fatalf("empty prefix should keep all, got %d", len(all))
+	}
+}
 
 func TestStatusState(t *testing.T) {
 	cases := []struct {
