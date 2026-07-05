@@ -110,8 +110,8 @@ machine-readable output:
 shoal sources                        # list providers with on/off state (add --json)
 shoal sources enable  <name>         # turn a provider on
 shoal sources disable <name>         # turn a provider off
-shoal search "big buck bunny"        # search every source (add --json for scripts)
-shoal download <magnet|url|infohash|id>   # download in the background
+shoal search "big buck bunny"        # search every source (--sort, --min-seeders, --json)
+shoal download <magnet|url|infohash|id>   # download in the background (--wait to block)
 shoal status [id]                    # progress of background downloads (--json, --clear)
 shoal history [--json]               # list completed downloads
 shoal history rm <id> [--delete-files]    # remove a history entry
@@ -131,8 +131,9 @@ shoal daemon stop                    # stop the shared daemon
 - **`search`** queries all sources concurrently and prints an aligned table
   (`ID · TITLE · SIZE · SEED · LEECH · SOURCE`, best-first), or a JSON array with the
   full magnet for each result via `--json`. Narrow to one provider with `--source <name>`,
-  cap results with `--limit <N>`. The short `ID` from any row is what you pass to
-  `download`:
+  cap results with `--limit <N>`, drop thin results with `--min-seeders <N>`, and order
+  with `--sort seeders|size|leechers|name` (default `seeders`). The short `ID` from any
+  row is what you pass to `download`:
 
   ```
   ID        TITLE                                    SIZE       SEED  LEECH  SOURCE
@@ -146,7 +147,9 @@ shoal daemon stop                    # stop the shared daemon
   so multiple downloads and `shoal status` all share one engine and one download folder.
   The TUI runs on the same shared `shoal daemon` as the CLI, so downloads and seeding stay in sync
   between them. Engine settings (listen port, max peers, save-to, seed) configure the daemon and
-  take effect when it restarts.
+  take effect when it restarts. Pass `--wait` to block until the download completes — it prints a
+  live progress line and exits `0` on completion (non-zero if the daemon becomes unreachable), so a
+  script doesn't have to poll `status`.
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files.
 - **`history`** lists all completed downloads (`--json` for scripts). `history rm <id>` removes
@@ -266,6 +269,10 @@ Shipped:
 - **Self-update** — `shoal update` plus opt-in Auto-update.
 - **Tabular CLI output** — `sources`, `search`, `status`, and `history` print aligned,
   headered tables (`--json` still available for scripts).
+- **`shoal download --wait`** — block until the download completes with a live progress
+  line and a meaningful exit code, so scripts don't have to poll `status`.
+- **Search `--sort` / `--min-seeders`** — order results by seeders/size/leechers/name and
+  drop thin ones, the sorting the TUI already has, for scripts.
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
@@ -279,21 +286,17 @@ Still planned — contributions welcome:
 - **ETA column** in the Downloads pane (time remaining next to speed).
 - **Details screen for active downloads** — per-file progress, peers, and trackers
   on `enter` in the Downloads pane, mirroring the search-result details screen.
-- **Search quality-of-life** — a min-seeders filter, a hide-0-seed toggle, and an
-  in-results fuzzy filter that narrows loaded results without re-querying sources.
+- **Search quality-of-life** — a hide-0-seed toggle and an in-results fuzzy filter
+  that narrows loaded results without re-querying sources.
 - **Queue controls** — max concurrent downloads with the rest queued, plus manual
   reordering.
 - **Completion notifications** — terminal bell / desktop notification when a
   download finishes in another pane or in the background.
 - **Mouse support** in the TUI — click to select, wheel to scroll.
-- **`shoal download --wait`** — block until the download completes with a progress
-  line and a meaningful exit code, so scripts don't have to poll `status`.
 - **`shoal status --follow`** — live-updating status without the full TUI.
 - **Shell completions** — `shoal completion bash|zsh|fish`, including id prefixes
   from `status`/`history`.
 - **Local `.torrent` files** — accept a path on disk in `shoal download`.
-- **`--sort` / `--min-seeders` on `shoal search`** — the sorting the TUI already has,
-  for scripts.
 - **Daemon socket hardening** — prefer `XDG_RUNTIME_DIR` (and the user cache dir on
   macOS) over a per-uid temp dir, verifying ownership and mode before use.
 - **More sources** behind the existing `source.Source` interface.

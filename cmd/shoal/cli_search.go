@@ -27,17 +27,33 @@ type searchRow struct {
 	TorrentURL string `json:"torrent_url"`
 }
 
-// toRows sorts best-first (seeders, then popularity), caps at limit, and derives
-// each row's short id from its magnet infohash ("—" when there is none). Rows
-// with no derivable id rank last regardless of seeders — `download` can't act
-// on them, so they're not "best" no matter how popular.
-func toRows(results []source.Result, limit int) []searchRow {
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Seeders != results[j].Seeders {
-			return results[i].Seeders > results[j].Seeders
-		}
-		return results[i].Popularity > results[j].Popularity
-	})
+// sortResults orders results in place by key: "size", "leechers", "name", or
+// "seeders" (the default for "" or any unknown key — most seeders, then
+// popularity, the same best-first order the TUI uses).
+func sortResults(results []source.Result, key string) {
+	switch key {
+	case "size":
+		sort.SliceStable(results, func(i, j int) bool { return results[i].SizeBytes > results[j].SizeBytes })
+	case "leechers":
+		sort.SliceStable(results, func(i, j int) bool { return results[i].Leechers > results[j].Leechers })
+	case "name":
+		sort.SliceStable(results, func(i, j int) bool {
+			return strings.ToLower(results[i].Title) < strings.ToLower(results[j].Title)
+		})
+	default: // "seeders" and anything unrecognized
+		sort.SliceStable(results, func(i, j int) bool {
+			if results[i].Seeders != results[j].Seeders {
+				return results[i].Seeders > results[j].Seeders
+			}
+			return results[i].Popularity > results[j].Popularity
+		})
+	}
+}
+
+// toRows sorts by sortKey (see sortResults), caps at limit, and derives each
+// row's short id from its magnet infohash ("—" when there is none).
+func toRows(results []source.Result, limit int, sortKey string) []searchRow {
+	sortResults(results, sortKey)
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
@@ -68,13 +84,23 @@ func rowsToCache(rows []searchRow) map[string]cacheEntry {
 	return m
 }
 
-// searchCore runs a search, shapes rows, and writes the short-id cache.
-func searchCore(ctx context.Context, src source.Source, query string, limit int, base string) ([]searchRow, error) {
+// searchCore runs a search, drops results below minSeeders, sorts by sortKey,
+// shapes rows, and writes the short-id cache.
+func searchCore(ctx context.Context, src source.Source, query string, limit int, base, sortKey string, minSeeders int64) ([]searchRow, error) {
 	results, err := src.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	rows := toRows(results, limit)
+	if minSeeders > 0 {
+		kept := results[:0]
+		for _, r := range results {
+			if r.Seeders >= minSeeders {
+				kept = append(kept, r)
+			}
+		}
+		results = kept
+	}
+	rows := toRows(results, limit, sortKey)
 	_ = writeCache(base, rowsToCache(rows))
 	return rows, nil
 }
@@ -120,13 +146,15 @@ func runSearch(args []string, out io.Writer) int {
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	srcName := fs.String("source", "", "limit to sources matching name")
 	limit := fs.Int("limit", 30, "max results (0 = no limit)")
+	sortKey := fs.String("sort", "seeders", "sort by: seeders, size, leechers, name")
+	minSeeders := fs.Int64("min-seeders", 0, "drop results with fewer seeders")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
 	}
 	query := strings.Join(positionals, " ")
 	if query == "" {
-		fmt.Fprintln(os.Stderr, `usage: shoal search "<query>" [--json] [--source name] [--limit N]`)
+		fmt.Fprintln(os.Stderr, `usage: shoal search "<query>" [--json] [--source name] [--limit N] [--sort seeders|size|leechers|name] [--min-seeders N]`)
 		return 2
 	}
 
@@ -146,7 +174,7 @@ func runSearch(args []string, out io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	rows, err := searchCore(ctx, source.NewMulti(srcs...), query, *limit, configDir())
+	rows, err := searchCore(ctx, source.NewMulti(srcs...), query, *limit, configDir(), *sortKey, *minSeeders)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "search failed:", err)
 		return 1
