@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -34,9 +33,6 @@ func daemonRunning(sock string) bool {
 // ensureDaemon returns a client connected to the shared daemon, auto-starting a
 // detached `shoal daemon` if none is running.
 func ensureDaemon() (*daemon.Client, error) {
-	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("the shoal daemon is not yet supported on Windows")
-	}
 	sock := daemon.SocketPath()
 	if c, err := daemon.Dial(sock); err == nil {
 		return c, nil
@@ -178,10 +174,6 @@ func runDaemonStatus(out io.Writer) int {
 
 // runDaemon runs the shared engine and serves it on the unix socket (foreground).
 func runDaemon(args []string, out io.Writer) int {
-	if runtime.GOOS == "windows" {
-		fmt.Fprintln(os.Stderr, "the shoal daemon is not yet supported on Windows")
-		return 1
-	}
 	cfg := config.Load()
 	sock := daemon.SocketPath()
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
