@@ -75,6 +75,7 @@ type Model struct {
 	dlDetailName string        // display name of the torrent the detail is for
 	dlDetailHash string        // its infohash — the canonical id used to match responses
 	dlDetailGen  int           // bumped on each toggle/open so a stale refetch is ignored
+	dlDetailBusy bool          // a file-selection write is in flight; serialize toggles until its refetch returns
 	dlDetailErr  string        // fetch error, if any
 	dlFileCursor int           // selected row within dlDetail.Files
 
@@ -306,7 +307,13 @@ type fileSelector interface {
 
 // setFilesErrMsg reports a failed SetFiles call so the UI can surface it
 // instead of silently keeping the optimistic (possibly wrong) selection.
-type setFilesErrMsg struct{ err error }
+// setFilesErrMsg reports a failed toggle, carrying the file and attempted state
+// so the optimistic checkbox can be reverted.
+type setFilesErrMsg struct {
+	err      error
+	path     string
+	selected bool
+}
 
 // setFilesCmd toggles a single file's selection off the UI thread. Returns
 // nil if the engine doesn't support it (e.g. the test fake, unless it opts
@@ -318,7 +325,7 @@ func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cm
 	}
 	return func() tea.Msg {
 		if err := fs.SetFiles(infoHash, []string{path}, selected); err != nil {
-			return setFilesErrMsg{err}
+			return setFilesErrMsg{err: err, path: path, selected: selected}
 		}
 		return nil
 	}
@@ -554,6 +561,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Match by infohash (unique) and generation — a slow, superseded
 		// refetch must not clobber a newer optimistic toggle or a later open.
 		if m.showDlDetail && msg.infoHash == m.dlDetailHash && msg.gen == m.dlDetailGen {
+			m.dlDetailBusy = false // the in-flight toggle's write reconciled
 			if msg.err != nil {
 				m.dlDetailErr = msg.err.Error()
 			} else {
@@ -563,6 +571,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case setFilesErrMsg:
+		m.dlDetailBusy = false
+		// Revert the optimistic checkbox for the file whose write failed, so the
+		// UI stays consistent with the daemon.
+		for i := range m.dlDetail.Files {
+			if m.dlDetail.Files[i].Path == msg.path {
+				m.dlDetail.Files[i].Selected = !msg.selected
+				break
+			}
+		}
 		m.setError("Couldn't change file selection: " + msg.err.Error())
 		return m, nil
 
@@ -854,6 +871,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.dlFileCursor++
 			}
 		case " ", "enter":
+			if m.dlDetailBusy {
+				return m, nil // a write is in flight — serialize toggles so they can't reorder
+			}
 			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
 				f := &m.dlDetail.Files[i]
 				f.Selected = !f.Selected // optimistic
@@ -861,6 +881,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				gen := m.dlDetailGen
 				sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
 				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName}, gen)
+				// Mark busy only when a refetch will arrive to clear it (on success
+				// via dlDetailMsg, on failure via setFilesErrMsg); without a detailer
+				// there's no clearing message, so leave toggles unserialized.
+				m.dlDetailBusy = fc != nil
 				// Run sequentially (not tea.Batch): SetFiles must land at the
 				// engine before the refetch, or the refetched Detail can race
 				// ahead of the selection change. A SetFiles error is surfaced
@@ -1454,6 +1478,7 @@ func (m *Model) activate() tea.Cmd {
 			m.dlDetail = engine.Detail{}
 			m.dlDetailErr = ""
 			m.dlFileCursor = 0
+			m.dlDetailBusy = false
 			return cmd
 		}
 		return nil
