@@ -56,6 +56,13 @@ func (c *Client) StatusesErr() ([]engine.Status, error) {
 func (c *Client) Remove(hash string, deleteData bool) error {
 	return c.rpc.Call("Engine.Remove", RemoveArgs{InfoHash: hash, DeleteData: deleteData}, &Empty{})
 }
+
+// Detail fetches per-file progress and trackers for one torrent.
+func (c *Client) Detail(infoHash string) (engine.Detail, error) {
+	var r DetailReply
+	err := c.rpc.Call("Engine.Detail", HashArgs{InfoHash: infoHash}, &r)
+	return r.Detail, err
+}
 func (c *Client) Pause(hash string) error {
 	return c.rpc.Call("Engine.Pause", HashArgs{InfoHash: hash}, &Empty{})
 }

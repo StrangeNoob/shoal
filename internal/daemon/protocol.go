@@ -40,6 +40,7 @@ type RemoveArgs struct {
 type HashArgs struct{ InfoHash string }
 type Empty struct{}
 type StatusesReply struct{ Statuses []engine.Status }
+type DetailReply struct{ Detail engine.Detail }
 
 type StatusReply struct {
 	Uptime      time.Duration

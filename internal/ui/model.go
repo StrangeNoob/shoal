@@ -70,6 +70,11 @@ type Model struct {
 	showDetail     bool
 	detail         source.Result
 
+	showDlDetail bool          // Downloads pane: the active-download details screen
+	dlDetail     engine.Detail // fetched per-file progress + trackers
+	dlDetailName string        // the torrent the detail is for
+	dlDetailErr  string        // fetch error, if any
+
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
 	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
@@ -241,6 +246,32 @@ func notifyDoneCmd(name string) tea.Cmd {
 		// stripControl again here so the raw write is safe regardless of caller.
 		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", stripControl(name))
 		return nil
+	}
+}
+
+// detailer is implemented by engines that can report per-torrent detail (the
+// production daemon poller). The TUI type-asserts it so the fake engine used in
+// tests needn't implement it.
+type detailer interface {
+	Detail(infoHash string) (engine.Detail, error)
+}
+
+type dlDetailMsg struct {
+	name   string
+	detail engine.Detail
+	err    error
+}
+
+// fetchDetailCmd loads a download's per-file progress and trackers off the UI
+// thread.
+func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+	d, ok := eng.(detailer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		det, err := d.Detail(s.InfoHash)
+		return dlDetailMsg{name: s.Name, detail: det, err: err}
 	}
 }
 
@@ -469,6 +500,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case dlDetailMsg:
+		// Ignore if the user already closed the screen or moved on.
+		if m.showDlDetail && msg.name == m.dlDetailName {
+			if msg.err != nil {
+				m.dlDetailErr = msg.err.Error()
+			} else {
+				m.dlDetail = msg.detail
+			}
+		}
+		return m, nil
 
 	case searchDoneMsg:
 		m.searching = false
@@ -735,6 +777,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.editingFilter {
 		return m.handleFilterEdit(msg)
+	}
+
+	if m.showDlDetail {
+		switch msg.String() {
+		case "esc", "enter", "q":
+			m.showDlDetail = false
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	if m.showDetail {
@@ -1279,6 +1331,17 @@ func (m *Model) activate() tea.Cmd {
 		if len(fr) > 0 && m.cursor < len(fr) {
 			m.showDetail = true
 			m.detail = fr[m.cursor]
+		}
+		return nil
+	case sectionDownloads:
+		ds := m.downloading()
+		if len(ds) > 0 && m.dlCursor < len(ds) {
+			s := ds[m.dlCursor]
+			m.showDlDetail = true
+			m.dlDetailName = s.Name
+			m.dlDetail = engine.Detail{}
+			m.dlDetailErr = ""
+			return fetchDetailCmd(m.eng, s)
 		}
 		return nil
 	case sectionSettings:

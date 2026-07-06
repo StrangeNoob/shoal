@@ -454,6 +454,28 @@ func verifiedBytes(completePieces int, pieceLen, total int64) int64 {
 }
 
 // torrentByHash returns the tracked torrent for a hex infohash. Caller holds mu.
+// Detail returns per-file progress and the tracker list for one torrent. Files
+// are empty until metadata arrives (magnets).
+func (a *Anacrolix) Detail(infoHash string) (Detail, error) {
+	a.mu.Lock()
+	t, _, ok := a.torrentByHash(infoHash)
+	a.mu.Unlock()
+	if !ok {
+		return Detail{}, fmt.Errorf("no such torrent: %s", infoHash)
+	}
+	var d Detail
+	for _, f := range t.Files() {
+		d.Files = append(d.Files, FileDetail{
+			Path:      f.DisplayPath(),
+			Length:    f.Length(),
+			Completed: f.BytesCompleted(),
+		})
+	}
+	mi := t.Metainfo()
+	d.Trackers = mi.UpvertedAnnounceList().DistinctValues()
+	return d, nil
+}
+
 func (a *Anacrolix) torrentByHash(hex string) (*torrent.Torrent, metainfo.Hash, bool) {
 	for _, t := range a.client.Torrents() {
 		if h := t.InfoHash(); h.HexString() == hex {

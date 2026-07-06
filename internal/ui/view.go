@@ -21,6 +21,9 @@ func (m Model) View() string {
 	if m.showHelp {
 		return m.helpView()
 	}
+	if m.showDlDetail {
+		return m.dlDetailView()
+	}
 
 	header := m.renderHeader()
 	rule := st.Rule.Render(strings.Repeat("─", max(1, m.width)))
@@ -262,6 +265,55 @@ func (m Model) renderSortBar() string {
 		}
 	}
 	return st.SectionHead.Render("Sort ▸") + " " + strings.Join(parts, "   ")
+}
+
+// dlDetailView is the full-screen active-download details overlay: per-file
+// progress and the tracker list. File paths and tracker URLs come from torrent
+// metadata (untrusted), so they're stripped of control bytes before display.
+func (m Model) dlDetailView() string {
+	var b strings.Builder
+	b.WriteString("\n  " + st.Logo.Render("shoal — download details") + "\n\n")
+	b.WriteString("  " + st.Row.Render(truncate(stripControl(m.dlDetailName), max(10, m.width-4))) + "\n\n")
+
+	switch {
+	case m.dlDetailErr != "":
+		b.WriteString("  " + st.Bad.Render("couldn't load details: "+stripControl(m.dlDetailErr)) + "\n")
+	case len(m.dlDetail.Files) == 0 && len(m.dlDetail.Trackers) == 0:
+		b.WriteString("  " + st.Meta.Render("loading… (metadata may still be arriving)") + "\n")
+	default:
+		b.WriteString("  " + st.SectionHead.Render(fmt.Sprintf("FILES (%d)", len(m.dlDetail.Files))) + "\n")
+		nameW := max(10, m.width-32)
+		maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6)) // leave room for trackers + chrome
+		for i, f := range m.dlDetail.Files {
+			if i >= maxFiles {
+				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more files", len(m.dlDetail.Files)-maxFiles)) + "\n")
+				break
+			}
+			pct := 0.0
+			if f.Length > 0 {
+				pct = float64(f.Completed) / float64(f.Length) * 100
+			}
+			b.WriteString("  " + st.Row.Render(padRight(truncate(stripControl(f.Path), nameW), nameW)) +
+				st.Meta.Render(fmt.Sprintf("  %5.1f%%  %s / %s", pct, formatBytes(f.Completed), formatBytes(f.Length))) + "\n")
+		}
+		if len(m.dlDetail.Trackers) > 0 {
+			b.WriteString("\n  " + st.SectionHead.Render(fmt.Sprintf("TRACKERS (%d)", len(m.dlDetail.Trackers))) + "\n")
+			for i, tr := range m.dlDetail.Trackers {
+				if i >= 6 {
+					b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more", len(m.dlDetail.Trackers)-6)) + "\n")
+					break
+				}
+				b.WriteString("  " + st.Meta.Render(truncate(stripControl(tr), max(10, m.width-4))) + "\n")
+			}
+		}
+	}
+
+	b.WriteString("\n  " + st.Meta.Render("press esc / enter / q to close"))
+	content := b.String()
+	if pad := m.height - strings.Count(content, "\n") - 1; pad > 0 {
+		content += strings.Repeat("\n", pad)
+	}
+	return content
 }
 
 func (m Model) renderDetail(w, h int) string {
@@ -606,8 +658,10 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("enter", "stop"), hint("esc", "back")}
 	case m.histConfirm:
 		parts = []string{hint("k", "remove"), hint("d", "+delete files"), hint("esc", "back")}
+	case m.showDlDetail:
+		parts = []string{hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("enter", "details"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "type"),

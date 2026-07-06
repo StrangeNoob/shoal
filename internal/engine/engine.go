@@ -61,6 +61,21 @@ func (s Status) Ratio() float64 {
 	return float64(s.Uploaded) / float64(s.TotalBytes)
 }
 
+// FileDetail is one file within a torrent, with its download progress.
+type FileDetail struct {
+	Path      string
+	Length    int64
+	Completed int64
+}
+
+// Detail is the on-demand extra information for one torrent (the Downloads
+// details screen): its files' progress and its tracker list. Fetched separately
+// from Status so the per-tick Statuses() snapshot stays cheap.
+type Detail struct {
+	Files    []FileDetail
+	Trackers []string
+}
+
 // Config tunes the engine at construction. main.go fills this from the user's
 // persisted config (internal/config); the UI never touches it directly.
 type Config struct {

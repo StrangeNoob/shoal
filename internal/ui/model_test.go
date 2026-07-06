@@ -54,7 +54,11 @@ type fakeEngine struct {
 
 	paused  map[string]bool
 	pollErr error
+
+	detail engine.Detail // returned by Detail (details screen)
 }
+
+func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
 	e.addedURL, e.addedName = url, name
@@ -492,6 +496,44 @@ func TestClickSelectsSeedingRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.seedCursor != 1 {
 		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
+func TestDownloadDetailScreen(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "BigPack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 50}},
+		detail: engine.Detail{
+			Files: []engine.FileDetail{
+				{Path: "BigPack/movie.mkv", Length: 150, Completed: 40},
+				{Path: "BigPack/readme.txt", Length: 50, Completed: 10},
+			},
+			Trackers: []string{"udp://tracker.example:1337"},
+		},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	// enter opens the details screen and fires the fetch command.
+	m, cmd := update(m, key("enter"))
+	if !m.showDlDetail {
+		t.Fatal("enter should open the download details screen")
+	}
+	if cmd == nil {
+		t.Fatal("enter should return a detail-fetch command")
+	}
+	m, _ = update(m, cmd()) // deliver dlDetailMsg
+
+	view := m.View()
+	for _, want := range []string{"download details", "movie.mkv", "readme.txt", "TRACKERS", "tracker.example"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details view missing %q:\n%s", want, view)
+		}
+	}
+	// esc closes it.
+	m, _ = update(m, key("esc"))
+	if m.showDlDetail {
+		t.Fatal("esc should close the details screen")
 	}
 }
 
