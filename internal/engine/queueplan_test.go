@@ -58,6 +58,18 @@ func TestPlanQueue(t *testing.T) {
 		t.Fatalf("paused frees a slot: release=%v, want release h3", release)
 	}
 
+	// A user-paused torrent that is still scheduler-queued is put in release so
+	// reconcileQueue clears the hold bookkeeping — but reconcile must NOT resume
+	// it (guarded by a.paused there); it stays paused.
+	items = []queueItem{
+		{Hash: h(1), AddedAt: at(0)},
+		{Hash: h(2), AddedAt: at(1), UserPaused: true, Queued: true},
+	}
+	release, hold = planQueue(items, 2)
+	if len(hold) != 0 || !hashesOf(release)[2] {
+		t.Fatalf("paused+queued: release=%v hold=%v, want release h2 (clear hold)", release, hold)
+	}
+
 	// maxActive 0 (unlimited) releases everything held.
 	items = []queueItem{{Hash: h(3), AddedAt: at(2), Queued: true}}
 	release, hold = planQueue(items, 0)

@@ -199,9 +199,13 @@ func (a *Anacrolix) reconcileQueue() {
 		}
 	}
 	for _, h := range release {
-		if t, ok := a.client.Torrent(h); ok {
-			t.AllowDataDownload()
-			t.SetMaxEstablishedConns(a.maxConns)
+		// Releasing clears the scheduler hold. Never resume a user-paused torrent
+		// — that would undo an explicit Pause; just drop the queued bookkeeping.
+		if !a.paused[h] {
+			if t, ok := a.client.Torrent(h); ok {
+				t.AllowDataDownload()
+				t.SetMaxEstablishedConns(a.maxConns)
+			}
 		}
 		delete(a.queued, h)
 	}
