@@ -1312,6 +1312,13 @@ func settingItems() []setItem {
 					m.cfg.UploadRateKB = n
 				}
 			}},
+		{group: "DOWNLOADS", label: "Max active (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.MaxActiveDownloads) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.MaxActiveDownloads = n
+				}
+			}},
 		{group: "DOWNLOADS", label: "Notify on done", kind: kindEnum, options: []string{"on", "off"},
 			get: func(m *Model) string {
 				if m.cfg.NotifyOnComplete {

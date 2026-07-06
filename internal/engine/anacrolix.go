@@ -38,11 +38,13 @@ type Anacrolix struct {
 	closeOnce sync.Once
 	wg        sync.WaitGroup // tracks the background URL-restore goroutine
 
-	mu       sync.Mutex
-	addedAt  map[metainfo.Hash]time.Time
-	names    map[metainfo.Hash]string
-	paused   map[metainfo.Hash]bool
-	maxConns int
+	mu        sync.Mutex
+	addedAt   map[metainfo.Hash]time.Time
+	names     map[metainfo.Hash]string
+	paused    map[metainfo.Hash]bool
+	queued    map[metainfo.Hash]bool // held by the scheduler (max-concurrent)
+	maxConns  int
+	maxActive int
 	store    *queue.Store
 }
 
@@ -120,7 +122,9 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		addedAt:   map[metainfo.Hash]time.Time{},
 		names:     map[metainfo.Hash]string{},
 		paused:    map[metainfo.Hash]bool{},
+		queued:    map[metainfo.Hash]bool{},
 		maxConns:  maxConnsFor(c.MaxPeers),
+		maxActive: c.MaxActive,
 	}
 	if c.QueuePath != "" {
 		a.store = queue.LoadFrom(c.QueuePath)
@@ -128,6 +132,9 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	}
 	if c.Seed && c.SeedRatio > 0 {
 		go a.seedRatioLoop(10 * time.Second)
+	}
+	if c.MaxActive > 0 {
+		go a.queueLoop(3 * time.Second)
 	}
 	return a, nil
 }
@@ -145,6 +152,58 @@ func (a *Anacrolix) seedRatioLoop(interval time.Duration) {
 		case <-ticker.C:
 			a.enforceSeedRatio()
 		}
+	}
+}
+
+// queueLoop periodically enforces the max-concurrent-downloads limit until Close
+// signals done.
+func (a *Anacrolix) queueLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.done:
+			return
+		case <-ticker.C:
+			a.reconcileQueue()
+		}
+	}
+}
+
+// reconcileQueue holds/releases torrents so at most maxActive download at once
+// (oldest first). The decision is made by the pure planQueue; this only gathers
+// state and applies the result under the lock.
+func (a *Anacrolix) reconcileQueue() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.maxActive <= 0 {
+		return
+	}
+	var items []queueItem
+	for _, t := range a.client.Torrents() {
+		h := t.InfoHash()
+		items = append(items, queueItem{
+			Hash:       h,
+			AddedAt:    a.addedAt[h],
+			Done:       t.Complete().Bool(),
+			UserPaused: a.paused[h],
+			Queued:     a.queued[h],
+		})
+	}
+	release, hold := planQueue(items, a.maxActive)
+	for _, h := range hold {
+		if t, ok := a.client.Torrent(h); ok {
+			t.DisallowDataDownload()
+			t.SetMaxEstablishedConns(0)
+			a.queued[h] = true
+		}
+	}
+	for _, h := range release {
+		if t, ok := a.client.Torrent(h); ok {
+			t.AllowDataDownload()
+			t.SetMaxEstablishedConns(a.maxConns)
+		}
+		delete(a.queued, h)
 	}
 }
 
@@ -173,7 +232,9 @@ func reachedRatio(uploaded, total int64, target float64) bool {
 }
 
 func (a *Anacrolix) AddTorrentURL(url, name string) error {
-	return a.addTorrentURL(url, name, true)
+	err := a.addTorrentURL(url, name, true)
+	a.reconcileQueue() // queue the new torrent immediately if over the limit
+	return err
 }
 
 func (a *Anacrolix) addTorrentURL(url, name string, persist bool) error {
@@ -205,7 +266,9 @@ func (a *Anacrolix) addTorrentURL(url, name string, persist bool) error {
 }
 
 func (a *Anacrolix) AddMagnet(magnet string) error {
-	return a.addMagnet(magnet, "", true)
+	err := a.addMagnet(magnet, "", true)
+	a.reconcileQueue() // queue the new torrent immediately if over the limit
+	return err
 }
 
 func (a *Anacrolix) addMagnet(magnet, name string, persist bool) error {
@@ -365,6 +428,7 @@ func (a *Anacrolix) Statuses() []Status {
 			TotalPeers: stats.TotalPeers,
 			Done:       total > 0 && verified >= total,
 			Paused:     a.paused[h],
+			Queued:     a.queued[h],
 			Seeding:    !a.paused[h] && t.Seeding(),
 			Path:       diskPath,
 			AddedAt:    a.addedAt[h],

@@ -355,6 +355,8 @@ func (m Model) renderDownloads(w, h int) string {
 		switch {
 		case s.Paused:
 			detail += "  ·  ⏸ paused"
+		case s.Queued:
+			detail += "  ·  ⏳ queued"
 		case m.dlSpeed[s.Name] > 0:
 			detail += fmt.Sprintf("  ·  %s/s", formatBytes(m.dlSpeed[s.Name]))
 			if eta := formatETA(etaSeconds(s, m.dlSpeed[s.Name])); eta != "" {

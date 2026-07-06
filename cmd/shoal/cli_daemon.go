@@ -195,6 +195,7 @@ func runDaemon(args []string, out io.Writer) int {
 		QueuePath:    queue.DefaultPath(),
 		DownloadRate: cfg.DownloadRateKB * 1024,
 		UploadRate:   cfg.UploadRateKB * 1024,
+		MaxActive:    cfg.MaxActiveDownloads,
 	})
 	if err != nil {
 		l.Close()
