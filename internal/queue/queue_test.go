@@ -109,6 +109,22 @@ func TestStoreGetReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestStoreSnapshot(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa"})
+	s.Upsert(Entry{InfoHash: "bbb"})
+
+	snap := s.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("Snapshot: got %d entries, want 2", len(snap))
+	}
+
+	snap = append(snap, Entry{InfoHash: "ccc"})
+	if len(s.Entries) != 2 {
+		t.Fatal("mutating the returned slice header affected the store")
+	}
+}
+
 func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	s := tmpStore(t)
 	s.Upsert(Entry{InfoHash: "aaa"})

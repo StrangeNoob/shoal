@@ -346,7 +346,7 @@ func (a *Anacrolix) persist(h metainfo.Hash, e queue.Entry) {
 // paused state. A failed .torrent-URL re-fetch is skipped, leaving the entry.
 func (a *Anacrolix) restore() {
 	var urls []queue.Entry
-	for _, e := range a.store.Entries {
+	for _, e := range a.store.Snapshot() {
 		switch {
 		case e.Magnet != "":
 			// Magnets re-add instantly (no network), so do them synchronously.

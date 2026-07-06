@@ -282,7 +282,7 @@ func (m Model) dlDetailView() string {
 		b.WriteString("  " + st.Meta.Render("loading… (metadata may still be arriving)") + "\n")
 	default:
 		b.WriteString("  " + st.SectionHead.Render(fmt.Sprintf("FILES (%d)", len(m.dlDetail.Files))) + "\n")
-		nameW := max(10, m.width-32)
+		nameW := max(10, m.width-38)
 		maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6)) // leave room for trackers + chrome
 		for i, f := range m.dlDetail.Files {
 			if i >= maxFiles {
@@ -666,8 +666,6 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("enter", "stop"), hint("esc", "back")}
 	case m.histConfirm:
 		parts = []string{hint("k", "remove"), hint("d", "+delete files"), hint("esc", "back")}
-	case m.showDlDetail:
-		parts = []string{hint("↑↓", "move"), hint("space", "select"), hint("esc", "back")}
 	case m.section == sectionDownloads:
 		parts = []string{hint("↑↓", "move"), hint("enter", "details"), hint("[ ]", "queue order"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:

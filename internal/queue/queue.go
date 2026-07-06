@@ -118,7 +118,7 @@ func (s *Store) SetFileGlobs(infoHash string, globs []string) {
 	found := false
 	for i := range s.Entries {
 		if s.Entries[i].InfoHash == infoHash {
-			s.Entries[i].FileGlobs = globs
+			s.Entries[i].FileGlobs = append([]string(nil), globs...)
 			found = true
 			break
 		}
@@ -135,7 +135,7 @@ func (s *Store) SetDeselected(infoHash string, paths []string) {
 	found := false
 	for i := range s.Entries {
 		if s.Entries[i].InfoHash == infoHash {
-			s.Entries[i].Deselected = paths
+			s.Entries[i].Deselected = append([]string(nil), paths...)
 			found = true
 			break
 		}
@@ -144,6 +144,16 @@ func (s *Store) SetDeselected(infoHash string, paths []string) {
 	if found {
 		_ = s.Save()
 	}
+}
+
+// Snapshot returns a shallow copy of Entries (a new slice header) for callers
+// that need to range over the queue without racing Save's marshal or other
+// mutators. Entry values are copied by value; their inner slices are not
+// deep-cloned since callers only read them.
+func (s *Store) Snapshot() []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Entry(nil), s.Entries...)
 }
 
 // Get returns a copy of the entry for infoHash (false if not found). The
