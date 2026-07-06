@@ -72,6 +72,42 @@ func TestSetPaused(t *testing.T) {
 	}
 }
 
+func TestSelectionPersists(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "abc", Magnet: "magnet:?xt=urn:btih:abc"})
+
+	s.SetFileGlobs("abc", []string{"*.mkv"})
+	s.SetDeselected("abc", []string{"extras/sample.mkv"})
+
+	got := LoadFrom(s.Path)
+	e := got.Entries[0]
+	if len(e.FileGlobs) != 1 || e.FileGlobs[0] != "*.mkv" {
+		t.Fatalf("FileGlobs = %v", e.FileGlobs)
+	}
+	if len(e.Deselected) != 1 || e.Deselected[0] != "extras/sample.mkv" {
+		t.Fatalf("Deselected = %v", e.Deselected)
+	}
+}
+
+func TestStoreGetReturnsCopy(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa", FileGlobs: []string{"*.mkv"}, Deselected: []string{"a"}})
+
+	e, ok := s.Get("aaa")
+	if !ok {
+		t.Fatal("Get: not found")
+	}
+	e.FileGlobs[0] = "mutated"
+	e.Deselected[0] = "mutated"
+	if s.Entries[0].FileGlobs[0] == "mutated" || s.Entries[0].Deselected[0] == "mutated" {
+		t.Fatal("Get returned aliased slices, not a copy")
+	}
+
+	if _, ok := s.Get("nope"); ok {
+		t.Fatal("Get: found unknown hash")
+	}
+}
+
 func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	s := tmpStore(t)
 	s.Upsert(Entry{InfoHash: "aaa"})

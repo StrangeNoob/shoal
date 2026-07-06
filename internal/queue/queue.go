@@ -11,11 +11,13 @@ import (
 
 // Entry is one persisted torrent. Exactly one of Magnet / TorrentURL is set.
 type Entry struct {
-	InfoHash   string `json:"info_hash"`
-	Magnet     string `json:"magnet,omitempty"`
-	TorrentURL string `json:"torrent_url,omitempty"`
-	Name       string `json:"name"`
-	Paused     bool   `json:"paused"`
+	InfoHash   string   `json:"info_hash"`
+	Magnet     string   `json:"magnet,omitempty"`
+	TorrentURL string   `json:"torrent_url,omitempty"`
+	Name       string   `json:"name"`
+	Paused     bool     `json:"paused"`
+	FileGlobs  []string `json:"file_globs,omitempty"` // add-time --files patterns, until resolved
+	Deselected []string `json:"deselected,omitempty"` // file paths not being downloaded
 }
 
 // Store is the persisted queue. An empty Path disables Save (used by tests
@@ -89,6 +91,42 @@ func (s *Store) SetPaused(infoHash string, paused bool) {
 			return
 		}
 	}
+}
+
+// SetFileGlobs records add-time --files patterns for infoHash (if present) and persists.
+func (s *Store) SetFileGlobs(infoHash string, globs []string) {
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			s.Entries[i].FileGlobs = globs
+			_ = s.Save()
+			return
+		}
+	}
+}
+
+// SetDeselected records the deselected file paths for infoHash (if present) and persists.
+func (s *Store) SetDeselected(infoHash string, paths []string) {
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			s.Entries[i].Deselected = paths
+			_ = s.Save()
+			return
+		}
+	}
+}
+
+// Get returns a copy of the entry for infoHash (false if not found). The
+// returned Entry's slice fields are cloned so callers can't mutate the store.
+func (s *Store) Get(infoHash string) (Entry, bool) {
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			e := s.Entries[i]
+			e.FileGlobs = append([]string(nil), e.FileGlobs...)
+			e.Deselected = append([]string(nil), e.Deselected...)
+			return e, true
+		}
+	}
+	return Entry{}, false
 }
 
 // SetName updates the display name for infoHash (if present and changed) and
