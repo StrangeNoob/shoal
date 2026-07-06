@@ -80,16 +80,17 @@ Results stream in live from all sources (`searching… N/M sources`) as a sortab
 (**Name · Size · Seed:Lch**). Press `enter` for a **details** screen (size, health, files,
 hash, magnet) where `d` downloads, `y` copies the magnet, and `esc` goes back. You can
 also paste a magnet link into the search box and press `enter` to add it directly.
-**Mouse:** click a row to select it (Search and Downloads), and the wheel scrolls the
-selection in any pane.
+**Mouse:** click a row to select it (Search, Downloads, and Seeding), and the wheel
+scrolls the selection in any pane.
 
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,
-**download speed**, and an **ETA** (time remaining). With a **Max active** limit set
-(Settings), downloads past the limit show **⏳ queued** and start automatically as slots
-free (oldest first). Select a download with `↑ ↓` and press `x` to **cancel** it (a prompt
-lets you `k` keep the partial files or `d` delete them; `esc` aborts). When a download
-finishes, shoal shows a notice and rings the terminal bell / posts a desktop notification
-(toggle in Settings).
+**download speed**, and an **ETA** (time remaining). Press `enter` for a **details**
+screen (per-file progress + trackers). With a **Max active** limit set (Settings),
+downloads past the limit show **⏳ queued** and start automatically as slots free (oldest
+first); `[` / `]` move the selected download **earlier / later** in that queue. Select a
+download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the partial
+files or `d` delete them; `esc` aborts). When a download finishes, shoal shows a notice
+and rings the terminal bell / posts a desktop notification (toggle in Settings).
 
 **Seeding** — completed torrents you're still sharing (name, ratio, uploaded, peers, and
 **upload speed**), followed by a **History** of everything you've downloaded (name, size,
@@ -307,12 +308,14 @@ Shipped:
 - **Speed limits** — global download/upload rate caps (Settings / `config.json`, KiB/s).
 - **ETA column** in the Downloads pane, and a **completion notification** (in-app notice
   + terminal bell / OSC 9 desktop notification, toggleable).
-- **Mouse support** — click a row to select it (Search / Downloads); the wheel scrolls
-  the selection in every pane.
+- **Mouse support** — click a row to select it (Search / Downloads / Seeding); the wheel
+  scrolls the selection in every pane.
 - **Search quality-of-life** — a hide-0-seed toggle (`z`) and an in-results filter
   (`f`) that narrows loaded results without re-querying sources.
-- **Queue controls** — a max-concurrent-downloads limit; extras queue and start
-  automatically (oldest first) as slots free.
+- **Queue controls** — a max-concurrent-downloads limit (extras queue and promote as
+  slots free), with `[` / `]` to reorder the queue manually.
+- **Active-download details** — `enter` on a Downloads row shows per-file progress and
+  the tracker list.
 - **Daemon socket hardening** — the socket dir is verified 0700 & user-owned (rejecting a
   symlink or a foreign owner) before binding; falls back to `XDG_RUNTIME_DIR`.
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
@@ -324,10 +327,6 @@ Still planned — contributions welcome:
   `shoal download --files <glob>` / `shoal files <id>` in the CLI.
 - **Streaming** — `shoal stream <id|magnet>`: sequential piece priority so you can
   play a file while it downloads (e.g. pipe the path to `mpv`).
-- **Details screen for active downloads** — per-file progress, peers, and trackers
-  on `enter` in the Downloads pane, mirroring the search-result details screen.
-- **Manual queue reordering** — reorder queued downloads (the max-concurrent limit
-  already promotes them oldest-first).
 - **More sources** behind the existing `source.Source` interface.
 - **Homebrew tap** as an additional install channel.
 
