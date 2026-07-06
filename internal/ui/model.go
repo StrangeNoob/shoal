@@ -64,12 +64,15 @@ type Model struct {
 	section        section
 	editing        bool // search box focused?
 	editingSetting bool // a Settings text field focused?
+	editingFilter  bool // in-results filter box focused?
+	hideZeroSeed   bool // hide search results with 0 seeders
 	showHelp       bool
 	showDetail     bool
 	detail         source.Result
 
-	input    textinput.Model // search box
-	setInput textinput.Model // settings inline editor
+	input       textinput.Model // search box
+	setInput    textinput.Model // settings inline editor
+	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
 	spin     spinner.Model
 	prog     progress.Model
 
@@ -145,6 +148,11 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	si.Prompt = ""
 	si.CharLimit = 200
 
+	fi := textinput.New()
+	fi.Prompt = ""
+	fi.Placeholder = "filter results…"
+	fi.CharLimit = 80
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = st.SearchLabel
@@ -154,9 +162,10 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 
 	m := Model{
 		section:  sectionSearch,
-		editing:  false,
-		input:    ti,
-		setInput: si,
+		editing:     false,
+		input:       ti,
+		setInput:    si,
+		filterInput: fi,
 		spin:     sp,
 		prog:     pr,
 		src:      src,
@@ -446,6 +455,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.input.Width = max(10, m.mainWidth()-2)
 		m.setInput.Width = max(10, m.mainWidth()-22)
+		m.filterInput.Width = max(10, m.mainWidth()-12)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -712,6 +722,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editingSetting {
 		return m.handleSettingEdit(msg)
 	}
+	if m.editingFilter {
+		return m.handleFilterEdit(msg)
+	}
 
 	if m.showDetail {
 		switch msg.String() {
@@ -760,6 +773,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editing = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case "f":
+		if m.section == sectionSearch {
+			m.editingFilter = true
+			m.filterInput.Focus()
+			m.cursor = 0
+			return m, textinput.Blink
+		}
+		return m, nil
+	case "z":
+		if m.section == sectionSearch {
+			m.hideZeroSeed = !m.hideZeroSeed
+			m.cursor = 0
+		}
+		return m, nil
 	case "tab":
 		m.section = m.section.next()
 		return m, nil
@@ -998,6 +1025,31 @@ func (m Model) handleSearchEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// handleFilterEdit drives the in-results filter box. Typing narrows the loaded
+// results live (via filteredResults); enter keeps the filter and returns to the
+// list; esc clears it. No source is re-queried.
+func (m Model) handleFilterEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.editingFilter = false
+		m.filterInput.Blur()
+		m.cursor = 0
+		return m, nil
+	case "esc":
+		m.editingFilter = false
+		m.filterInput.Blur()
+		m.filterInput.SetValue("")
+		m.cursor = 0
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	if m.cursor >= len(m.filteredResults()) { // keep the selection in range as it narrows
+		m.cursor = max(0, len(m.filteredResults())-1)
+	}
 	return m, cmd
 }
 
@@ -1329,17 +1381,33 @@ func (m *Model) persist() { _ = m.cfg.Save() }
 
 // --- derived views over state ----------------------------------------------
 
-// filteredResults applies the active media filter to the search results.
+// filterActive reports whether the in-results text filter is engaged (focused
+// or holding a query).
+func (m Model) filterActive() bool {
+	return m.editingFilter || m.filterInput.Value() != ""
+}
+
+// filteredResults applies the active media filter, the hide-0-seed toggle, and
+// the in-results text filter to the search results — all client-side, without
+// re-querying sources.
 func (m Model) filteredResults() []source.Result {
 	cat := filterCats[m.filter].Mediatype
-	if cat == "" {
+	q := strings.ToLower(strings.TrimSpace(m.filterInput.Value()))
+	if cat == "" && !m.hideZeroSeed && q == "" {
 		return m.results
 	}
 	out := make([]source.Result, 0, len(m.results))
 	for _, r := range m.results {
-		if strings.EqualFold(r.Category, cat) {
-			out = append(out, r)
+		if cat != "" && !strings.EqualFold(r.Category, cat) {
+			continue
 		}
+		if m.hideZeroSeed && r.Seeders <= 0 {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(r.Title), q) {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }
@@ -1439,6 +1507,9 @@ func (m Model) resultsWindow(h int) (start, end, preRows int) {
 		preRows++
 	}
 	if m.sortMode {
+		preRows++
+	}
+	if m.filterActive() {
 		preRows++
 	}
 	return start, end, preRows

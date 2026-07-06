@@ -404,6 +404,44 @@ func TestClickSelectsSearchRow(t *testing.T) {
 	}
 }
 
+func TestSearchHideZeroSeedAndFilter(t *testing.T) {
+	src := &fakeSource{results: []source.Result{
+		{Title: "Ubuntu ISO", Seeders: 50},
+		{Title: "Ubuntu Dead", Seeders: 0},
+		{Title: "Debian ISO", Seeders: 10},
+	}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+	if len(m.filteredResults()) != 3 {
+		t.Fatalf("baseline results = %d, want 3", len(m.filteredResults()))
+	}
+
+	// z hides the 0-seed result.
+	m, _ = update(m, key("z"))
+	if got := len(m.filteredResults()); got != 2 {
+		t.Fatalf("hide-0-seed results = %d, want 2", got)
+	}
+
+	// f then typing narrows to a title substring (case-insensitive).
+	m, _ = update(m, key("f"))
+	for _, r := range "debian" {
+		m, _ = update(m, key(string(r)))
+	}
+	got := m.filteredResults()
+	if len(got) != 1 || got[0].Title != "Debian ISO" {
+		t.Fatalf("filter narrowed to %v, want [Debian ISO]", got)
+	}
+
+	// esc clears the text filter (0-seed hide persists).
+	m, _ = update(m, key("esc"))
+	if got := len(m.filteredResults()); got != 2 {
+		t.Fatalf("after clearing filter = %d, want 2", got)
+	}
+}
+
 func TestClickSelectsDownloadRow(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionDownloads

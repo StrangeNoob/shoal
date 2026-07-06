@@ -201,6 +201,10 @@ func (m Model) renderResults(w, h int) string {
 	if m.sortMode {
 		body.WriteString(m.renderSortBar() + "\n")
 	}
+	if m.filterActive() {
+		label := st.SearchLabel.Render("filter ")
+		body.WriteString(label + m.filterInput.View() + "\n")
+	}
 
 	// Header row (prefix "  " matches the row's marker+space so Name aligns).
 	head := "  " + st.Faint.Render(leftPad("#", numW)) + " " +
@@ -237,6 +241,9 @@ func (m Model) renderResults(w, h int) string {
 	}
 
 	title := fmt.Sprintf("Results (%d)", len(fr))
+	if m.hideZeroSeed {
+		title += " · 0-seed hidden"
+	}
 	return titledBox(title, "", body.String(), boxW, m.section == sectionSearch)
 }
 
@@ -585,6 +592,8 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("enter", "search"), hint("esc", "cancel")}
 	case m.editingSetting:
 		parts = []string{hint("enter", "save"), hint("esc", "cancel")}
+	case m.editingFilter:
+		parts = []string{hint("type", "filter results"), hint("enter", "keep"), hint("esc", "clear")}
 	case m.showDetail:
 		parts = []string{hint("d", "download"), hint("y", "copy magnet"), hint("esc", "back")}
 	case m.sortMode:
@@ -599,8 +608,9 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("↑↓", "move"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
-			hint("/", "search"), hint("↑↓", "move"), hint("←→", "filter"),
+			hint("/", "search"), hint("↑↓", "move"), hint("←→", "type"),
 			hint("enter", "details"), hint("d", "download"), hint("S", "sort"),
+			hint("f", "filter"), hint("z", "hide 0-seed"),
 			hint("tab", "panes"), hint("?", "help"), hint("q", "quit"),
 		}
 	case m.section == sectionSettings:
