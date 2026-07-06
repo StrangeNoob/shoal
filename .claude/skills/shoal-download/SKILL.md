@@ -65,6 +65,8 @@ SolidTorrents cover it.)
 - Restrict to one provider: `shoal search --json "<query>" --source <name>`.
 - Cap results: `shoal search --json "<query>" --limit <N>` (default 30; `0` = no limit).
 - Clear finished entries from status: `shoal status --clear` (removes finished/done torrents, keeping files).
+- Download only some files of a multi-file torrent: add `--files '<glob>'` to the download
+  command (see **Selecting files** below).
 
 ## History & Management
 
@@ -88,6 +90,24 @@ In all cases, `<id>` is an **infohash prefix** from `shoal status` or `shoal his
 (you can use a unique short prefix; the daemon resolves it). History deletion is also
 available in the TUI (Seeding pane, press `x` on a history row, then `k` to keep files or
 `d` to delete them).
+
+## Selecting files
+
+For a multi-file torrent (e.g. a season pack, or a release with sample/extras files) you
+can download only some of the files. Globs are comma-separated, case-insensitive, and
+matched against both the full path and the basename (so `*.mkv` catches nested files;
+`Season 1/*` matches by path). There is no `**`.
+
+- **At download time:** `shoal download '<magnet>' --files '<glob>'`
+  — e.g. `--files '*.mkv'` for just the videos, `--files '*.mkv,*.srt'` for videos + subs.
+  Applied once metadata arrives (works for magnets). Not supported for `.torrent`-URL
+  downloads yet.
+- **List a download's files:** `shoal files <id> [--json]` — a table of `# / ✓·✗ (selected) /
+  SIZE / PATH`, one row per file (needs the torrent's metadata to have arrived).
+- **Change the selection later:** `shoal files <id> --only '<glob>'` — download only the
+  files matching the glob and stop the rest. Files stop/resume live and the selection
+  persists across restarts. An empty pattern or one that matches nothing is rejected (it
+  won't silently deselect everything).
 
 ## Notes
 
