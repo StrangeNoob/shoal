@@ -423,6 +423,9 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 	if !ok {
 		return nil
 	}
+	if t.Info() == nil { // no metadata yet → no files to select
+		return nil
+	}
 	want := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		want[p] = true

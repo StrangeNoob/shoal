@@ -3,6 +3,7 @@ package queue
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -125,4 +126,23 @@ func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	if di.Mode().Perm() != 0o700 {
 		t.Errorf("dir mode = %o, want 700", di.Mode().Perm())
 	}
+}
+
+// TestConcurrentAccess mimics engine.SetFiles's background goroutine (SetDeselected,
+// no engine lock held) racing RPC-driven calls (SetPaused, SetName, Get, Save) on the
+// same Store, as happens with a.store touched both under and without a.mu. Run with
+// -race: it must not report a data race on Entries.
+func TestConcurrentAccess(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa"})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(4)
+		go func() { defer wg.Done(); s.SetDeselected("aaa", []string{"a", "b"}) }()
+		go func() { defer wg.Done(); s.SetPaused("aaa", true) }()
+		go func() { defer wg.Done(); s.SetName("aaa", "concurrent") }()
+		go func() { defer wg.Done(); s.Get("aaa") }()
+	}
+	wg.Wait()
 }
