@@ -58,15 +58,16 @@ func (e *EZTV) Search(ctx context.Context, query string) ([]Result, error) {
 		}
 		size, _ := tor.SizeBytes.Int64()
 		out = append(out, Result{
-			Title:      name,
-			Source:     "EZTV",
-			SizeBytes:  size,
-			Popularity: tor.Seeds,
-			Seeders:    tor.Seeds,
-			Leechers:   tor.Peers,
-			Added:      tor.ReleasedAt,
-			Category:   "tv",
-			Magnet:     magnet,
+			Title:        name,
+			Source:       "EZTV",
+			SizeBytes:    size,
+			Popularity:   tor.Seeds,
+			Seeders:      tor.Seeds,
+			SeedersKnown: true,
+			Leechers:     tor.Peers,
+			Added:        tor.ReleasedAt,
+			Category:     "tv",
+			Magnet:       magnet,
 		})
 	}
 	return out, nil

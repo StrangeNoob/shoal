@@ -406,23 +406,30 @@ func TestClickSelectsSearchRow(t *testing.T) {
 
 func TestSearchHideZeroSeedAndFilter(t *testing.T) {
 	src := &fakeSource{results: []source.Result{
-		{Title: "Ubuntu ISO", Seeders: 50},
-		{Title: "Ubuntu Dead", Seeders: 0},
-		{Title: "Debian ISO", Seeders: 10},
+		{Title: "Ubuntu ISO", Seeders: 50, SeedersKnown: true},
+		{Title: "Ubuntu Dead", Seeders: 0, SeedersKnown: true},   // real 0 → hide
+		{Title: "Archive Item", Seeders: 0, SeedersKnown: false}, // unknown → keep
+		{Title: "Debian ISO", Seeders: 10, SeedersKnown: true},
 	}}
 	m := ready(New(src, &fakeEngine{}))
 	m, _ = update(m, key("/"))
 	m.input.SetValue("q")
 	m, cmd := update(m, key("enter"))
 	m, _ = update(m, cmd())
-	if len(m.filteredResults()) != 3 {
-		t.Fatalf("baseline results = %d, want 3", len(m.filteredResults()))
+	if len(m.filteredResults()) != 4 {
+		t.Fatalf("baseline results = %d, want 4", len(m.filteredResults()))
 	}
 
-	// z hides the 0-seed result.
+	// z hides only the confirmed 0-seed result — the unknown-seeder one stays.
 	m, _ = update(m, key("z"))
-	if got := len(m.filteredResults()); got != 2 {
-		t.Fatalf("hide-0-seed results = %d, want 2", got)
+	got := m.filteredResults()
+	if len(got) != 3 {
+		t.Fatalf("hide-0-seed results = %d, want 3", len(got))
+	}
+	for _, r := range got {
+		if r.Title == "Ubuntu Dead" {
+			t.Fatal("hide-0-seed should have dropped the confirmed 0-seed result")
+		}
 	}
 
 	// f then typing narrows to a title substring (case-insensitive).
@@ -430,15 +437,27 @@ func TestSearchHideZeroSeedAndFilter(t *testing.T) {
 	for _, r := range "debian" {
 		m, _ = update(m, key(string(r)))
 	}
-	got := m.filteredResults()
+	got = m.filteredResults()
 	if len(got) != 1 || got[0].Title != "Debian ISO" {
 		t.Fatalf("filter narrowed to %v, want [Debian ISO]", got)
 	}
 
-	// esc clears the text filter (0-seed hide persists).
+	// esc clears the text filter (0-seed hide persists → 3 of the 4 remain).
 	m, _ = update(m, key("esc"))
-	if got := len(m.filteredResults()); got != 2 {
-		t.Fatalf("after clearing filter = %d, want 2", got)
+	if n := len(m.filteredResults()); n != 3 {
+		t.Fatalf("after clearing filter = %d, want 3", n)
+	}
+
+	// A brand-new search resets both filters, so the fresh set isn't narrowed.
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q2")
+	m, cmd = update(m, key("enter"))
+	m, _ = update(m, cmd())
+	if m.hideZeroSeed || m.filterInput.Value() != "" {
+		t.Fatal("a new search must clear hide-0-seed and the text filter")
+	}
+	if n := len(m.filteredResults()); n != 4 {
+		t.Fatalf("fresh search results = %d, want 4 (no leftover filter)", n)
 	}
 }
 

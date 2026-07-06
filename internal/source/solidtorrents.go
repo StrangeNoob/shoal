@@ -51,15 +51,16 @@ func (s *SolidTorrents) Search(ctx context.Context, query string) ([]Result, err
 		}
 		infoHash := strings.ToLower(item.InfoHash)
 		out = append(out, Result{
-			Title:      name,
-			Source:     "Solid",
-			SizeBytes:  item.Size,
-			Popularity: item.Seeders,
-			Seeders:    item.Seeders,
-			Leechers:   item.Leechers,
-			Added:      parseTimeUnix(item.UpdatedAt),
-			Category:   "tv",
-			Magnet:     buildMagnet(infoHash, name),
+			Title:        name,
+			Source:       "Solid",
+			SizeBytes:    item.Size,
+			Popularity:   item.Seeders,
+			Seeders:      item.Seeders,
+			SeedersKnown: true,
+			Leechers:     item.Leechers,
+			Added:        parseTimeUnix(item.UpdatedAt),
+			Category:     "tv",
+			Magnet:       buildMagnet(infoHash, name),
 		})
 	}
 	return out, nil

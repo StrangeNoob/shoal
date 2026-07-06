@@ -47,15 +47,16 @@ func parseNyaaRSS(xmlText string) []Result {
 		seeders, _ := strconv.ParseInt(tag(item, "nyaa:seeders"), 10, 64)
 		leechers, _ := strconv.ParseInt(tag(item, "nyaa:leechers"), 10, 64)
 		out = append(out, Result{
-			Title:      name,
-			Source:     "Nyaa",
-			SizeBytes:  parseSize(tag(item, "nyaa:size")),
-			Popularity: seeders,
-			Seeders:    seeders,
-			Leechers:   leechers,
-			Added:      parseTimeUnix(tag(item, "pubDate")),
-			Category:   "anime",
-			Magnet:     buildMagnet(infoHash, name),
+			Title:        name,
+			Source:       "Nyaa",
+			SizeBytes:    parseSize(tag(item, "nyaa:size")),
+			Popularity:   seeders,
+			Seeders:      seeders,
+			SeedersKnown: true,
+			Leechers:     leechers,
+			Added:        parseTimeUnix(tag(item, "pubDate")),
+			Category:     "anime",
+			Magnet:       buildMagnet(infoHash, name),
 		})
 	}
 	return out

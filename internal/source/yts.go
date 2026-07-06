@@ -70,15 +70,16 @@ func (y *YTS) Search(ctx context.Context, query string) ([]Result, error) {
 				name += " [" + tag + "]"
 			}
 			out = append(out, Result{
-				Title:      name,
-				Source:     "YTS",
-				SizeBytes:  tor.SizeBytes,
-				Popularity: tor.Seeds,
-				Seeders:    tor.Seeds,
-				Leechers:   tor.Peers,
-				Added:      movie.Uploaded,
-				Category:   "movies",
-				Magnet:     buildMagnet(infoHash, name),
+				Title:        name,
+				Source:       "YTS",
+				SizeBytes:    tor.SizeBytes,
+				Popularity:   tor.Seeds,
+				Seeders:      tor.Seeds,
+				SeedersKnown: true,
+				Leechers:     tor.Peers,
+				Added:        movie.Uploaded,
+				Category:     "movies",
+				Magnet:       buildMagnet(infoHash, name),
 			})
 		}
 	}

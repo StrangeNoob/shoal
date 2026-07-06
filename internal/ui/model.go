@@ -339,6 +339,12 @@ func (m *Model) startSearch(query string) tea.Cmd {
 	m.searchErrCount = 0
 	m.searching = true
 	m.hasSearched = true
+	// Clear the in-results filters so a fresh query isn't silently narrowed by a
+	// leftover text filter or hide-0-seed toggle from the previous search.
+	m.hideZeroSeed = false
+	m.editingFilter = false
+	m.filterInput.Blur()
+	m.filterInput.SetValue("")
 
 	// ponytail: keyed to the concrete *MultiSource that main.go injects. If the
 	// production wiring ever wraps or replaces that source, live toggles silently
@@ -1413,7 +1419,9 @@ func (m Model) filteredResults() []source.Result {
 		if cat != "" && !strings.EqualFold(r.Category, cat) {
 			continue
 		}
-		if m.hideZeroSeed && r.Seeders <= 0 {
+		// Hide only confirmed 0-seeder results; keep those from sources that don't
+		// report seeders at all (Seeders==0 but SeedersKnown==false).
+		if m.hideZeroSeed && r.SeedersKnown && r.Seeders <= 0 {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(r.Title), q) {
