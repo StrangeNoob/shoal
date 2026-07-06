@@ -478,6 +478,23 @@ func TestClickSelectsDownloadRow(t *testing.T) {
 	}
 }
 
+func TestClickSelectsSeedingRow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+		{Name: "SeedTwo", InfoHash: "b", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+	}
+	y := lineOf(m.View(), "SeedTwo")
+	if y < 0 {
+		t.Fatal("second seeding row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.seedCursor != 1 {
+		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
 func TestMouseWheelMovesSelection(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "A"}, {Title: "B"}, {Title: "C"}}}
 	m := ready(New(src, &fakeEngine{}))

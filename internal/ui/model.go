@@ -1142,7 +1142,64 @@ func (m *Model) clickSelect(x, y int) {
 				m.dlCursor = i
 			}
 		}
+	case sectionSeeding:
+		for _, r := range m.seedingClickRows() {
+			if y >= r.y && y < r.y+r.span {
+				m.seedCursor = r.idx
+				return
+			}
+		}
+		// Settings is intentionally excluded: its value column (e.g. a long "Save
+		// to" path) wraps, so rows have variable height and click hit-testing
+		// can't be reliable. Settings stays keyboard/wheel-navigable.
 	}
+}
+
+// clickRow maps a clickable pane row to its selection index and how many screen
+// lines it spans.
+type clickRow struct {
+	y, idx, span int
+}
+
+// seedingClickRows returns the screen-Y, cursor index, and line span of each
+// clickable row in the Seeding pane (seeding items span 2 lines; HISTORY entries
+// 1), mirroring renderSeeding's layout so clicks land on the right row.
+func (m Model) seedingClickRows() []clickRow {
+	ss := m.seeding()
+	hist := m.seedHistory()
+	shown := min(len(ss), max(1, m.bodyHeight()/3))
+
+	line := 0
+	if m.stopConfirm {
+		line += 2
+	}
+	if m.histConfirm {
+		line += 2
+	}
+	base := m.headerHeight() + 1
+	rows := make([]clickRow, 0, shown+len(hist))
+	for i := 0; i < shown; i++ {
+		rows = append(rows, clickRow{y: base + line, idx: i, span: 2}) // name + detail
+		line += 2
+		if i < shown-1 {
+			line++ // blank separator
+		}
+	}
+	if len(hist) > 0 {
+		if len(ss) > 0 {
+			line += 2 // the "\n\n" gap before HISTORY
+		}
+		line++ // HISTORY header
+		const histMax = 50
+		for j := range hist {
+			if j >= histMax {
+				break
+			}
+			rows = append(rows, clickRow{y: base + line, idx: len(ss) + j, span: 1})
+			line++
+		}
+	}
+	return rows
 }
 
 // --- selection movement ----------------------------------------------------
