@@ -182,6 +182,9 @@ func (p *daemonPoller) Pause(h string) error {
 func (p *daemonPoller) Resume(h string) error {
 	return p.callWithTimeout(func(c *daemon.Client) error { return c.Resume(h) })
 }
+func (p *daemonPoller) Reorder(h string, delta int) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.Reorder(h, delta) })
+}
 
 // Close unconditionally drops the current client, regardless of identity.
 func (p *daemonPoller) Close() error {

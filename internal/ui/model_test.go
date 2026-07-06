@@ -56,9 +56,17 @@ type fakeEngine struct {
 	pollErr error
 
 	detail engine.Detail // returned by Detail (details screen)
+
+	reorderHash  string
+	reorderDelta int
 }
 
 func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
+
+func (e *fakeEngine) Reorder(infoHash string, delta int) error {
+	e.reorderHash, e.reorderDelta = infoHash, delta
+	return nil
+}
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
 	e.addedURL, e.addedName = url, name
@@ -534,6 +542,33 @@ func TestDownloadDetailScreen(t *testing.T) {
 	m, _ = update(m, key("esc"))
 	if m.showDlDetail {
 		t.Fatal("esc should close the details screen")
+	}
+}
+
+func TestQueueReorderKeys(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "A", InfoHash: "aaaa", TotalBytes: 100, CompletedBytes: 10},
+		{Name: "B", InfoHash: "bbbb", TotalBytes: 100, CompletedBytes: 20},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m.dlCursor = 1 // "B" (statuses render newest-first, but dlCursor indexes downloading())
+
+	m, cmd := update(m, key("["))
+	if cmd == nil {
+		t.Fatal("[ should return a reorder command")
+	}
+	cmd()
+	target := m.downloading()[1].InfoHash
+	if eng.reorderHash != target || eng.reorderDelta != -1 {
+		t.Fatalf("[ reordered %q delta=%d, want %q -1", eng.reorderHash, eng.reorderDelta, target)
+	}
+
+	m, cmd = update(m, key("]"))
+	cmd()
+	if eng.reorderDelta != 1 {
+		t.Fatalf("] delta = %d, want 1", eng.reorderDelta)
 	}
 }
 

@@ -43,6 +43,7 @@ type Anacrolix struct {
 	names     map[metainfo.Hash]string
 	paused    map[metainfo.Hash]bool
 	queued    map[metainfo.Hash]bool // held by the scheduler (max-concurrent)
+	order     []metainfo.Hash        // user-defined promotion order (front = first)
 	maxConns  int
 	maxActive int
 	store     *queue.Store
@@ -179,12 +180,21 @@ func (a *Anacrolix) reconcileQueue() {
 	if a.maxActive <= 0 {
 		return
 	}
+	orderIdx := make(map[metainfo.Hash]int, len(a.order))
+	for i, h := range a.order {
+		orderIdx[h] = i
+	}
 	var items []queueItem
 	for _, t := range a.client.Torrents() {
 		h := t.InfoHash()
+		ord, ok := orderIdx[h]
+		if !ok {
+			ord = len(a.order) // untracked (shouldn't happen) → sort last
+		}
 		items = append(items, queueItem{
 			Hash:       h,
 			AddedAt:    a.addedAt[h],
+			Order:      ord,
 			Done:       t.Complete().Bool(),
 			UserPaused: a.paused[h],
 			Queued:     a.queued[h],
@@ -209,6 +219,22 @@ func (a *Anacrolix) reconcileQueue() {
 		}
 		delete(a.queued, h)
 	}
+}
+
+// Reorder moves a torrent within the promotion queue by delta positions
+// (negative = earlier/promote sooner), then re-runs the scheduler. A no-op when
+// no max-active limit is set (nothing is queued).
+func (a *Anacrolix) Reorder(infoHash string, delta int) error {
+	a.mu.Lock()
+	_, h, ok := a.torrentByHash(infoHash)
+	if ok {
+		a.order = moveInOrder(a.order, h, delta)
+	}
+	a.mu.Unlock()
+	if ok {
+		a.reconcileQueue()
+	}
+	return nil
 }
 
 func (a *Anacrolix) enforceSeedRatio() {
@@ -361,6 +387,7 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 	a.mu.Lock()
 	if _, seen := a.addedAt[h]; !seen {
 		a.addedAt[h] = time.Now()
+		a.order = append(a.order, h) // new torrents start at the back of the queue
 	}
 	if name != "" {
 		a.names[h] = name
@@ -493,6 +520,8 @@ func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
 		return nil // already gone
 	}
 	delete(a.paused, hash)
+	delete(a.queued, hash)
+	a.order = removeHash(a.order, hash)
 	diskName := found.Name() // the info name anacrolix wrote files under (attacker-influenced)
 	found.Drop()
 	delete(a.names, hash)

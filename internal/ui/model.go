@@ -262,6 +262,23 @@ type dlDetailMsg struct {
 	err    error
 }
 
+// reorderer is implemented by engines that support manual queue reordering.
+type reorderer interface {
+	Reorder(infoHash string, delta int) error
+}
+
+// reorderCmd moves a download within the promotion queue (delta<0 = sooner).
+func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
+	r, ok := eng.(reorderer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = r.Reorder(s.InfoHash, delta)
+		return nil
+	}
+}
+
 // fetchDetailCmd loads a download's per-file progress and trackers off the UI
 // thread.
 func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
@@ -836,6 +853,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editing = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case "[", "]":
+		// Reorder the selected download in the promotion queue (earlier / later).
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				delta := -1
+				if msg.String() == "]" {
+					delta = 1
+				}
+				return m, reorderCmd(m.eng, ds[m.dlCursor], delta)
+			}
+		}
+		return m, nil
 	case "f":
 		if m.section == sectionSearch {
 			m.editingFilter = true

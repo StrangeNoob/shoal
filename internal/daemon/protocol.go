@@ -38,6 +38,10 @@ type RemoveArgs struct {
 	DeleteData bool
 }
 type HashArgs struct{ InfoHash string }
+type ReorderArgs struct {
+	InfoHash string
+	Delta    int
+}
 type Empty struct{}
 type StatusesReply struct{ Statuses []engine.Status }
 type DetailReply struct{ Detail engine.Detail }
