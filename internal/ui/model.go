@@ -64,14 +64,17 @@ type Model struct {
 	section        section
 	editing        bool // search box focused?
 	editingSetting bool // a Settings text field focused?
+	editingFilter  bool // in-results filter box focused?
+	hideZeroSeed   bool // hide search results with 0 seeders
 	showHelp       bool
 	showDetail     bool
 	detail         source.Result
 
-	input    textinput.Model // search box
-	setInput textinput.Model // settings inline editor
-	spin     spinner.Model
-	prog     progress.Model
+	input       textinput.Model // search box
+	setInput    textinput.Model // settings inline editor
+	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
+	spin        spinner.Model
+	prog        progress.Model
 
 	src source.Source
 	eng engine.Engine
@@ -145,6 +148,11 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	si.Prompt = ""
 	si.CharLimit = 200
 
+	fi := textinput.New()
+	fi.Prompt = ""
+	fi.Placeholder = "filter results…"
+	fi.CharLimit = 80
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = st.SearchLabel
@@ -153,17 +161,18 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	pr.ShowPercentage = false
 
 	m := Model{
-		section:  sectionSearch,
-		editing:  false,
-		input:    ti,
-		setInput: si,
-		spin:     sp,
-		prog:     pr,
-		src:      src,
-		eng:      eng,
-		cfg:      cfg,
-		sortDesc: true,
-		booting:  true,
+		section:     sectionSearch,
+		editing:     false,
+		input:       ti,
+		setInput:    si,
+		filterInput: fi,
+		spin:        sp,
+		prog:        pr,
+		src:         src,
+		eng:         eng,
+		cfg:         cfg,
+		sortDesc:    true,
+		booting:     true,
 	}
 	if p, ok := eng.(statusPoller); ok {
 		m.poll = p // production daemonPoller and the test fakeEngine both implement it
@@ -330,6 +339,12 @@ func (m *Model) startSearch(query string) tea.Cmd {
 	m.searchErrCount = 0
 	m.searching = true
 	m.hasSearched = true
+	// Clear the in-results filters so a fresh query isn't silently narrowed by a
+	// leftover text filter or hide-0-seed toggle from the previous search.
+	m.hideZeroSeed = false
+	m.editingFilter = false
+	m.filterInput.Blur()
+	m.filterInput.SetValue("")
 
 	// ponytail: keyed to the concrete *MultiSource that main.go injects. If the
 	// production wiring ever wraps or replaces that source, live toggles silently
@@ -446,6 +461,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.input.Width = max(10, m.mainWidth()-2)
 		m.setInput.Width = max(10, m.mainWidth()-22)
+		m.filterInput.Width = max(10, m.mainWidth()-12)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -685,6 +701,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setInput, cmd = m.setInput.Update(msg)
 		return m, cmd
 	}
+	if m.editingFilter {
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -711,6 +732,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.editingSetting {
 		return m.handleSettingEdit(msg)
+	}
+	if m.editingFilter {
+		return m.handleFilterEdit(msg)
 	}
 
 	if m.showDetail {
@@ -760,6 +784,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editing = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case "f":
+		if m.section == sectionSearch {
+			m.editingFilter = true
+			m.filterInput.Focus()
+			m.cursor = 0
+			return m, textinput.Blink
+		}
+		return m, nil
+	case "z":
+		if m.section == sectionSearch {
+			m.hideZeroSeed = !m.hideZeroSeed
+			m.cursor = 0
+		}
+		return m, nil
 	case "tab":
 		m.section = m.section.next()
 		return m, nil
@@ -1001,6 +1039,31 @@ func (m Model) handleSearchEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// handleFilterEdit drives the in-results filter box. Typing narrows the loaded
+// results live (via filteredResults); enter keeps the filter and returns to the
+// list; esc clears it. No source is re-queried.
+func (m Model) handleFilterEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.editingFilter = false
+		m.filterInput.Blur()
+		m.cursor = 0
+		return m, nil
+	case "esc":
+		m.editingFilter = false
+		m.filterInput.Blur()
+		m.filterInput.SetValue("")
+		m.cursor = 0
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	if m.cursor >= len(m.filteredResults()) { // keep the selection in range as it narrows
+		m.cursor = max(0, len(m.filteredResults())-1)
+	}
+	return m, cmd
+}
+
 func (m Model) handleSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -1030,13 +1093,56 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.editing || m.editingSetting {
 		return m, nil
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
 		m.moveUp()
-	case tea.MouseButtonWheelDown:
+	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		m.clickSelect(msg.X, msg.Y)
 	}
 	return m, nil
+}
+
+// clickSelect moves the selection to a clicked row. Implemented for the two
+// list panes with clean, single-height-row geometry (Search results and
+// Downloads); Seeding's two-section mixed-height layout and Settings' group
+// headers are left to the keyboard/wheel.
+// ponytail: mirrors the render layout in View/renderResults/renderDownloads —
+// the render-anchored tests catch any drift if that layout changes.
+func (m *Model) clickSelect(x, y int) {
+	if x <= sidebarWidth { // sidebar or the 1-col gutter, not a main-pane row
+		return
+	}
+	switch m.section {
+	case sectionSearch:
+		if !m.hasSearched && !m.searching && len(m.results) == 0 {
+			return // home screen has no rows
+		}
+		start, end, pre := m.resultsWindow(max(1, m.bodyHeight()-4))
+		// body line 0 is at headerHeight()+1; results box sits 3 lines in
+		// (search box, filter row, blank) + 1 box border + preRows header lines.
+		base := m.headerHeight() + 1 + 3 + 1 + pre
+		if i := start + (y - base); y >= base && i >= start && i < end {
+			m.cursor = i
+		}
+	case sectionDownloads:
+		if len(m.downloading()) == 0 {
+			return
+		}
+		cancelLines := 0
+		if m.cancelConfirm {
+			cancelLines = 2
+		}
+		base := m.headerHeight() + 1 + cancelLines // renderDownloads is body line 0 (no box)
+		visible := max(1, m.bodyHeight()/4)        // 4 screen lines per download row
+		shown := min(len(m.downloading()), visible)
+		if line := y - base; line >= 0 && line%4 <= 2 { // name/bar/detail, not the blank
+			if i := line / 4; i < shown {
+				m.dlCursor = i
+			}
+		}
+	}
 }
 
 // --- selection movement ----------------------------------------------------
@@ -1217,6 +1323,13 @@ func settingItems() []setItem {
 					m.cfg.UploadRateKB = n
 				}
 			}},
+		{group: "DOWNLOADS", label: "Max active (0=∞)", kind: kindText,
+			get: func(m *Model) string { return strconv.Itoa(m.cfg.MaxActiveDownloads) },
+			set: func(m *Model, v string) {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					m.cfg.MaxActiveDownloads = n
+				}
+			}},
 		{group: "DOWNLOADS", label: "Notify on done", kind: kindEnum, options: []string{"on", "off"},
 			get: func(m *Model) string {
 				if m.cfg.NotifyOnComplete {
@@ -1286,17 +1399,35 @@ func (m *Model) persist() { _ = m.cfg.Save() }
 
 // --- derived views over state ----------------------------------------------
 
-// filteredResults applies the active media filter to the search results.
+// filterActive reports whether the in-results text filter is engaged (focused
+// or holding a query).
+func (m Model) filterActive() bool {
+	return m.editingFilter || m.filterInput.Value() != ""
+}
+
+// filteredResults applies the active media filter, the hide-0-seed toggle, and
+// the in-results text filter to the search results — all client-side, without
+// re-querying sources.
 func (m Model) filteredResults() []source.Result {
 	cat := filterCats[m.filter].Mediatype
-	if cat == "" {
+	q := strings.ToLower(strings.TrimSpace(m.filterInput.Value()))
+	if cat == "" && !m.hideZeroSeed && q == "" {
 		return m.results
 	}
 	out := make([]source.Result, 0, len(m.results))
 	for _, r := range m.results {
-		if strings.EqualFold(r.Category, cat) {
-			out = append(out, r)
+		if cat != "" && !strings.EqualFold(r.Category, cat) {
+			continue
 		}
+		// Hide only confirmed 0-seeder results; keep those from sources that don't
+		// report seeders at all (Seeders==0 but SeedersKnown==false).
+		if m.hideZeroSeed && r.SeedersKnown && r.Seeders <= 0 {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(r.Title), q) {
+			continue
+		}
+		out = append(out, r)
 	}
 	return out
 }
@@ -1372,6 +1503,36 @@ func pathExists(p string) bool {
 // mainWidth is the width of the content pane (everything right of the sidebar).
 func (m Model) mainWidth() int {
 	return max(20, m.width-sidebarWidth-1)
+}
+
+// bodyHeight is the number of screen rows the body occupies (between the two
+// rules), mirroring View's bodyH. Body line 0 sits at screen row headerHeight()+1.
+func (m Model) bodyHeight() int {
+	return max(3, m.height-m.headerHeight()-3)
+}
+
+// resultsWindow returns the [start,end) slice of filtered results visible in a
+// results box of content height h, plus preRows — the number of lines above the
+// first data row (column header, and the optional "searching…" / sort-bar
+// lines). Shared by renderResults and click hit-testing so they can't drift.
+func (m Model) resultsWindow(h int) (start, end, preRows int) {
+	fr := m.filteredResults()
+	visible := max(1, h-3)
+	if m.cursor >= visible {
+		start = m.cursor - visible + 1
+	}
+	end = min(len(fr), start+visible)
+	preRows = 1 // column header
+	if m.searching {
+		preRows++
+	}
+	if m.sortMode {
+		preRows++
+	}
+	if m.filterActive() {
+		preRows++
+	}
+	return start, end, preRows
 }
 
 func (m *Model) setNotice(s string) {

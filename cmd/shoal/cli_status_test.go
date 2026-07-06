@@ -92,6 +92,7 @@ func TestStatusState(t *testing.T) {
 		{engine.Status{Done: true, Seeding: true}, "seeding"},
 		{engine.Status{Done: true}, "done"},
 		{engine.Status{Paused: true}, "paused"},
+		{engine.Status{Queued: true}, "queued"},
 		{engine.Status{}, "downloading"},
 	}
 	for _, c := range cases {

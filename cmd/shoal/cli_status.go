@@ -70,6 +70,8 @@ func statusState(s engine.Status) string {
 		return "done"
 	case s.Paused:
 		return "paused"
+	case s.Queued:
+		return "queued"
 	default:
 		return "downloading"
 	}

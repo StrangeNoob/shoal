@@ -13,8 +13,13 @@ type Result struct {
 	Popularity int64 // a "health" proxy: downloads, seeders, etc.
 	Seeders    int64 // 0 when the source doesn't report it
 	Leechers   int64 // 0 when the source doesn't report it
-	Files      int   // 0 when unknown
-	Added      int64 // unix seconds, 0 when unknown
+	// SeedersKnown is true only for sources that actually report a seeder count,
+	// so consumers can tell a real 0 (dead torrent) from "not reported" (e.g. the
+	// Internet Archive). The hide-0-seed filter uses this to avoid dropping
+	// results that simply lack swarm data.
+	SeedersKnown bool
+	Files        int   // 0 when unknown
+	Added        int64 // unix seconds, 0 when unknown
 	// Category is the media type used by the UI's filter chips. For the Internet
 	// Archive this is the item's mediatype ("movies", "audio", "texts",
 	// "software", "image", …). Empty when the provider doesn't classify items;

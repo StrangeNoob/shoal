@@ -28,6 +28,10 @@ type Status struct {
 	TotalPeers int
 	Done       bool
 	Paused     bool
+	// Queued reports that the scheduler is holding this (incomplete, un-paused)
+	// torrent because the max-concurrent-downloads limit is reached. It resumes
+	// automatically when a slot frees.
+	Queued bool
 	// Seeding reports whether the client is actively seeding this torrent
 	// (Seed enabled, upload allowed, not paused) — independent of peer count.
 	Seeding bool
@@ -70,6 +74,10 @@ type Config struct {
 	// Rate limits in bytes/sec; 0 = unlimited (leaves anacrolix's defaults).
 	DownloadRate int
 	UploadRate   int
+
+	// MaxActive caps concurrently-downloading torrents; extras are queued and
+	// promoted (FIFO by add time) as slots free. 0 = unlimited.
+	MaxActive int
 }
 
 // Engine adds torrents and reports their live status.

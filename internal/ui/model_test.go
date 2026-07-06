@@ -367,6 +367,117 @@ func wheel(b tea.MouseButton) tea.MouseMsg {
 	return tea.MouseMsg{Button: b, Action: tea.MouseActionPress}
 }
 
+func clickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: y}
+}
+
+// lineOf returns the 0-based screen row of the first rendered line containing s.
+func lineOf(view, s string) int {
+	for i, ln := range strings.Split(view, "\n") {
+		if strings.Contains(ln, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestClickSelectsSearchRow(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}, {Title: "Charlie"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // populate results (cursor starts at 0)
+
+	y := lineOf(m.View(), "Bravo") // find where the 2nd result actually rendered
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.cursor != 1 {
+		t.Fatalf("clicking the Bravo row selected cursor=%d, want 1", m.cursor)
+	}
+	// A click in the sidebar column must not move the selection.
+	m, _ = update(m, clickAt(2, y))
+	if m.cursor != 1 {
+		t.Fatalf("sidebar click moved cursor to %d", m.cursor)
+	}
+}
+
+func TestSearchHideZeroSeedAndFilter(t *testing.T) {
+	src := &fakeSource{results: []source.Result{
+		{Title: "Ubuntu ISO", Seeders: 50, SeedersKnown: true},
+		{Title: "Ubuntu Dead", Seeders: 0, SeedersKnown: true},   // real 0 → hide
+		{Title: "Archive Item", Seeders: 0, SeedersKnown: false}, // unknown → keep
+		{Title: "Debian ISO", Seeders: 10, SeedersKnown: true},
+	}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+	if len(m.filteredResults()) != 4 {
+		t.Fatalf("baseline results = %d, want 4", len(m.filteredResults()))
+	}
+
+	// z hides only the confirmed 0-seed result — the unknown-seeder one stays.
+	m, _ = update(m, key("z"))
+	got := m.filteredResults()
+	if len(got) != 3 {
+		t.Fatalf("hide-0-seed results = %d, want 3", len(got))
+	}
+	for _, r := range got {
+		if r.Title == "Ubuntu Dead" {
+			t.Fatal("hide-0-seed should have dropped the confirmed 0-seed result")
+		}
+	}
+
+	// f then typing narrows to a title substring (case-insensitive).
+	m, _ = update(m, key("f"))
+	for _, r := range "debian" {
+		m, _ = update(m, key(string(r)))
+	}
+	got = m.filteredResults()
+	if len(got) != 1 || got[0].Title != "Debian ISO" {
+		t.Fatalf("filter narrowed to %v, want [Debian ISO]", got)
+	}
+
+	// esc clears the text filter (0-seed hide persists → 3 of the 4 remain).
+	m, _ = update(m, key("esc"))
+	if n := len(m.filteredResults()); n != 3 {
+		t.Fatalf("after clearing filter = %d, want 3", n)
+	}
+
+	// A brand-new search resets both filters, so the fresh set isn't narrowed.
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q2")
+	m, cmd = update(m, key("enter"))
+	m, _ = update(m, cmd())
+	if m.hideZeroSeed || m.filterInput.Value() != "" {
+		t.Fatal("a new search must clear hide-0-seed and the text filter")
+	}
+	if n := len(m.filteredResults()); n != 4 {
+		t.Fatalf("fresh search results = %d, want 4 (no leftover filter)", n)
+	}
+}
+
+func TestClickSelectsDownloadRow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+		{Name: "DownloadTwo", InfoHash: "b", TotalBytes: 100, CompletedBytes: 20},
+	}
+	y := lineOf(m.View(), "DownloadTwo")
+	if y < 0 {
+		t.Fatal("second download not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.dlCursor != 1 {
+		t.Fatalf("clicking DownloadTwo selected dlCursor=%d, want 1", m.dlCursor)
+	}
+}
+
 func TestMouseWheelMovesSelection(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "A"}, {Title: "B"}, {Title: "C"}}}
 	m := ready(New(src, &fakeEngine{}))

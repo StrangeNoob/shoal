@@ -32,6 +32,10 @@ type Config struct {
 	DownloadRateKB int `json:"download_rate_kb"`
 	UploadRateKB   int `json:"upload_rate_kb"`
 
+	// MaxActiveDownloads caps concurrently-downloading torrents; extras queue and
+	// promote (FIFO) as slots free. 0 = unlimited.
+	MaxActiveDownloads int `json:"max_active_downloads"`
+
 	// NotifyOnComplete rings the terminal bell / posts a desktop notification
 	// when a download finishes. Defaults on (Load unmarshals over Default(), so
 	// an absent key keeps the default).
