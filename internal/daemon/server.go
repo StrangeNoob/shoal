@@ -36,6 +36,37 @@ func (s *EngineService) Resume(a HashArgs, _ *Empty) error {
 	return s.eng.Resume(a.InfoHash)
 }
 
+// detailer is implemented by engines that can report per-torrent detail (the
+// Anacrolix backend). Kept off the Engine interface so minimal/test engines
+// don't have to implement it.
+type detailer interface {
+	Detail(infoHash string) (engine.Detail, error)
+}
+
+type reorderer interface {
+	Reorder(infoHash string, delta int) error
+}
+
+func (s *EngineService) Reorder(a ReorderArgs, _ *Empty) error {
+	if r, ok := s.eng.(reorderer); ok {
+		return r.Reorder(a.InfoHash, a.Delta)
+	}
+	return nil
+}
+
+func (s *EngineService) Detail(a HashArgs, r *DetailReply) error {
+	d, ok := s.eng.(detailer)
+	if !ok {
+		return nil // engine has no detail support → empty reply
+	}
+	det, err := d.Detail(a.InfoHash)
+	if err != nil {
+		return err
+	}
+	r.Detail = det
+	return nil
+}
+
 // Server owns a daemon's lifecycle: it serves Engine.* and Control.* RPC over a
 // listener, tracks open connections, and shuts itself down when idle.
 type Server struct {

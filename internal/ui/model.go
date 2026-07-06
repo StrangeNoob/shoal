@@ -70,6 +70,12 @@ type Model struct {
 	showDetail     bool
 	detail         source.Result
 
+	showDlDetail bool          // Downloads pane: the active-download details screen
+	dlDetail     engine.Detail // fetched per-file progress + trackers
+	dlDetailName string        // display name of the torrent the detail is for
+	dlDetailHash string        // its infohash — the canonical id used to match responses
+	dlDetailErr  string        // fetch error, if any
+
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
 	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
@@ -241,6 +247,50 @@ func notifyDoneCmd(name string) tea.Cmd {
 		// stripControl again here so the raw write is safe regardless of caller.
 		fmt.Fprintf(os.Stderr, "\a\x1b]9;shoal — finished: %s\x07", stripControl(name))
 		return nil
+	}
+}
+
+// detailer is implemented by engines that can report per-torrent detail (the
+// production daemon poller). The TUI type-asserts it so the fake engine used in
+// tests needn't implement it.
+type detailer interface {
+	Detail(infoHash string) (engine.Detail, error)
+}
+
+type dlDetailMsg struct {
+	infoHash string
+	detail   engine.Detail
+	err      error
+}
+
+// reorderer is implemented by engines that support manual queue reordering.
+type reorderer interface {
+	Reorder(infoHash string, delta int) error
+}
+
+type reorderDoneMsg struct{ err error }
+
+// reorderCmd moves a download within the promotion queue (delta<0 = sooner).
+func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
+	r, ok := eng.(reorderer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		return reorderDoneMsg{err: r.Reorder(s.InfoHash, delta)}
+	}
+}
+
+// fetchDetailCmd loads a download's per-file progress and trackers off the UI
+// thread.
+func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+	d, ok := eng.(detailer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		det, err := d.Detail(s.InfoHash)
+		return dlDetailMsg{infoHash: s.InfoHash, detail: det, err: err}
 	}
 }
 
@@ -469,6 +519,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case dlDetailMsg:
+		// Match by infohash (unique) — display names can collide.
+		if m.showDlDetail && msg.infoHash == m.dlDetailHash {
+			if msg.err != nil {
+				m.dlDetailErr = msg.err.Error()
+			} else {
+				m.dlDetail = msg.detail
+			}
+		}
+		return m, nil
+
+	case reorderDoneMsg:
+		if msg.err != nil {
+			m.setError("Reorder failed: " + msg.err.Error())
+		}
+		return m, nil
 
 	case searchDoneMsg:
 		m.searching = false
@@ -737,6 +804,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterEdit(msg)
 	}
 
+	if m.showDlDetail {
+		switch msg.String() {
+		case "esc", "enter", "q":
+			m.showDlDetail = false
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	if m.showDetail {
 		switch msg.String() {
 		case "esc":
@@ -784,6 +861,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editing = true
 		m.input.Focus()
 		return m, textinput.Blink
+	case "[", "]":
+		// Reorder the selected download in the promotion queue (earlier / later).
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				delta := -1
+				if msg.String() == "]" {
+					delta = 1
+				}
+				return m, reorderCmd(m.eng, ds[m.dlCursor], delta)
+			}
+		}
+		return m, nil
 	case "f":
 		if m.section == sectionSearch {
 			m.editingFilter = true
@@ -1142,7 +1232,64 @@ func (m *Model) clickSelect(x, y int) {
 				m.dlCursor = i
 			}
 		}
+	case sectionSeeding:
+		for _, r := range m.seedingClickRows() {
+			if y >= r.y && y < r.y+r.span {
+				m.seedCursor = r.idx
+				return
+			}
+		}
+		// Settings is intentionally excluded: its value column (e.g. a long "Save
+		// to" path) wraps, so rows have variable height and click hit-testing
+		// can't be reliable. Settings stays keyboard/wheel-navigable.
 	}
+}
+
+// clickRow maps a clickable pane row to its selection index and how many screen
+// lines it spans.
+type clickRow struct {
+	y, idx, span int
+}
+
+// seedingClickRows returns the screen-Y, cursor index, and line span of each
+// clickable row in the Seeding pane (seeding items span 2 lines; HISTORY entries
+// 1), mirroring renderSeeding's layout so clicks land on the right row.
+func (m Model) seedingClickRows() []clickRow {
+	ss := m.seeding()
+	hist := m.seedHistory()
+	shown := min(len(ss), max(1, m.bodyHeight()/3))
+
+	line := 0
+	if m.stopConfirm {
+		line += 2
+	}
+	if m.histConfirm {
+		line += 2
+	}
+	base := m.headerHeight() + 1
+	rows := make([]clickRow, 0, shown+len(hist))
+	for i := 0; i < shown; i++ {
+		rows = append(rows, clickRow{y: base + line, idx: i, span: 2}) // name + detail
+		line += 2
+		if i < shown-1 {
+			line++ // blank separator
+		}
+	}
+	if len(hist) > 0 {
+		if len(ss) > 0 {
+			line += 2 // the "\n\n" gap before HISTORY
+		}
+		line++ // HISTORY header
+		const histMax = 50
+		for j := range hist {
+			if j >= histMax {
+				break
+			}
+			rows = append(rows, clickRow{y: base + line, idx: len(ss) + j, span: 1})
+			line++
+		}
+	}
+	return rows
 }
 
 // --- selection movement ----------------------------------------------------
@@ -1222,6 +1369,23 @@ func (m *Model) activate() tea.Cmd {
 		if len(fr) > 0 && m.cursor < len(fr) {
 			m.showDetail = true
 			m.detail = fr[m.cursor]
+		}
+		return nil
+	case sectionDownloads:
+		ds := m.downloading()
+		if len(ds) > 0 && m.dlCursor < len(ds) {
+			s := ds[m.dlCursor]
+			cmd := fetchDetailCmd(m.eng, s)
+			if cmd == nil { // engine can't provide detail → don't open an empty overlay
+				m.setNotice("details aren't available for this download")
+				return nil
+			}
+			m.showDlDetail = true
+			m.dlDetailName = s.Name
+			m.dlDetailHash = s.InfoHash
+			m.dlDetail = engine.Detail{}
+			m.dlDetailErr = ""
+			return cmd
 		}
 		return nil
 	case sectionSettings:

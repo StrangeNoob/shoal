@@ -138,6 +138,35 @@ func (p *daemonPoller) Poll() ([]engine.Status, error) {
 
 func (p *daemonPoller) Statuses() []engine.Status { ss, _ := p.Poll(); return ss }
 
+// Detail fetches per-torrent detail through the daemon, bounded like Poll (the
+// result is carried on the channel so a timed-out straggler goroutine can't race
+// the return value).
+func (p *daemonPoller) Detail(infoHash string) (engine.Detail, error) {
+	c, err := p.client()
+	if err != nil {
+		return engine.Detail{}, err
+	}
+	type result struct {
+		d   engine.Detail
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		d, err := c.Detail(infoHash)
+		done <- result{d, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil && !isAppError(r.err) {
+			p.dropIf(c)
+		}
+		return r.d, r.err
+	case <-time.After(p.timeout):
+		p.dropIf(c)
+		return engine.Detail{}, fmt.Errorf("daemon request timed out")
+	}
+}
+
 func (p *daemonPoller) AddMagnet(m string) error {
 	return p.callWithTimeout(func(c *daemon.Client) error { return c.AddMagnet(m) })
 }
@@ -152,6 +181,9 @@ func (p *daemonPoller) Pause(h string) error {
 }
 func (p *daemonPoller) Resume(h string) error {
 	return p.callWithTimeout(func(c *daemon.Client) error { return c.Resume(h) })
+}
+func (p *daemonPoller) Reorder(h string, delta int) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.Reorder(h, delta) })
 }
 
 // Close unconditionally drops the current client, regardless of identity.

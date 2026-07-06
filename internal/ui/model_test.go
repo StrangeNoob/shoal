@@ -54,6 +54,18 @@ type fakeEngine struct {
 
 	paused  map[string]bool
 	pollErr error
+
+	detail engine.Detail // returned by Detail (details screen)
+
+	reorderHash  string
+	reorderDelta int
+}
+
+func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
+
+func (e *fakeEngine) Reorder(infoHash string, delta int) error {
+	e.reorderHash, e.reorderDelta = infoHash, delta
+	return nil
 }
 
 func (e *fakeEngine) AddTorrentURL(url, name string) error {
@@ -475,6 +487,88 @@ func TestClickSelectsDownloadRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.dlCursor != 1 {
 		t.Fatalf("clicking DownloadTwo selected dlCursor=%d, want 1", m.dlCursor)
+	}
+}
+
+func TestClickSelectsSeedingRow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+		{Name: "SeedTwo", InfoHash: "b", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+	}
+	y := lineOf(m.View(), "SeedTwo")
+	if y < 0 {
+		t.Fatal("second seeding row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.seedCursor != 1 {
+		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
+func TestDownloadDetailScreen(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "BigPack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 50}},
+		detail: engine.Detail{
+			Files: []engine.FileDetail{
+				{Path: "BigPack/movie.mkv", Length: 150, Completed: 40},
+				{Path: "BigPack/readme.txt", Length: 50, Completed: 10},
+			},
+			Trackers: []string{"udp://tracker.example:1337"},
+		},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	// enter opens the details screen and fires the fetch command.
+	m, cmd := update(m, key("enter"))
+	if !m.showDlDetail {
+		t.Fatal("enter should open the download details screen")
+	}
+	if cmd == nil {
+		t.Fatal("enter should return a detail-fetch command")
+	}
+	m, _ = update(m, cmd()) // deliver dlDetailMsg
+
+	view := m.View()
+	for _, want := range []string{"download details", "movie.mkv", "readme.txt", "TRACKERS", "tracker.example"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details view missing %q:\n%s", want, view)
+		}
+	}
+	// esc closes it.
+	m, _ = update(m, key("esc"))
+	if m.showDlDetail {
+		t.Fatal("esc should close the details screen")
+	}
+}
+
+func TestQueueReorderKeys(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "A", InfoHash: "aaaa", TotalBytes: 100, CompletedBytes: 10},
+		{Name: "B", InfoHash: "bbbb", TotalBytes: 100, CompletedBytes: 20},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m.dlCursor = 1 // "B" (statuses render newest-first, but dlCursor indexes downloading())
+
+	m, cmd := update(m, key("["))
+	if cmd == nil {
+		t.Fatal("[ should return a reorder command")
+	}
+	cmd()
+	target := m.downloading()[1].InfoHash
+	if eng.reorderHash != target || eng.reorderDelta != -1 {
+		t.Fatalf("[ reordered %q delta=%d, want %q -1", eng.reorderHash, eng.reorderDelta, target)
+	}
+
+	m, cmd = update(m, key("]"))
+	cmd()
+	if eng.reorderDelta != 1 {
+		t.Fatalf("] delta = %d, want 1", eng.reorderDelta)
 	}
 }
 
