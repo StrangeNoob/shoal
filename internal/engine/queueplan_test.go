@@ -29,6 +29,11 @@ func TestMoveInOrderAndRemove(t *testing.T) {
 	if got[1][0] != 3 || got[2][0] != 2 {
 		t.Fatalf("move earlier: %v", hashesSeq(got))
 	}
+	// Multi-step move shifts, preserving the order of the elements in between:
+	// [1,2,3] move h1 by +2 → [2,3,1].
+	if got = moveInOrder(order, h(1), +2); got[0][0] != 2 || got[1][0] != 3 || got[2][0] != 1 {
+		t.Fatalf("multi-step move: %v", hashesSeq(got))
+	}
 	// Clamp at the front.
 	got = moveInOrder(order, h(1), -1)
 	if got[0][0] != 1 {

@@ -53,7 +53,11 @@ func moveInOrder(order []metainfo.Hash, hash metainfo.Hash, delta int) []metainf
 	if j == i {
 		return out
 	}
-	out[i], out[j] = out[j], out[i]
+	// Remove from i and reinsert at j, preserving the order of the elements in
+	// between (a true positional shift, not a swap).
+	moved := out[i]
+	out = append(out[:i], out[i+1:]...)
+	out = append(out[:j], append([]metainfo.Hash{moved}, out[j:]...)...)
 	return out
 }
 

@@ -72,7 +72,8 @@ type Model struct {
 
 	showDlDetail bool          // Downloads pane: the active-download details screen
 	dlDetail     engine.Detail // fetched per-file progress + trackers
-	dlDetailName string        // the torrent the detail is for
+	dlDetailName string        // display name of the torrent the detail is for
+	dlDetailHash string        // its infohash — the canonical id used to match responses
 	dlDetailErr  string        // fetch error, if any
 
 	input       textinput.Model // search box
@@ -257,15 +258,17 @@ type detailer interface {
 }
 
 type dlDetailMsg struct {
-	name   string
-	detail engine.Detail
-	err    error
+	infoHash string
+	detail   engine.Detail
+	err      error
 }
 
 // reorderer is implemented by engines that support manual queue reordering.
 type reorderer interface {
 	Reorder(infoHash string, delta int) error
 }
+
+type reorderDoneMsg struct{ err error }
 
 // reorderCmd moves a download within the promotion queue (delta<0 = sooner).
 func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
@@ -274,8 +277,7 @@ func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		_ = r.Reorder(s.InfoHash, delta)
-		return nil
+		return reorderDoneMsg{err: r.Reorder(s.InfoHash, delta)}
 	}
 }
 
@@ -288,7 +290,7 @@ func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
 	}
 	return func() tea.Msg {
 		det, err := d.Detail(s.InfoHash)
-		return dlDetailMsg{name: s.Name, detail: det, err: err}
+		return dlDetailMsg{infoHash: s.InfoHash, detail: det, err: err}
 	}
 }
 
@@ -519,13 +521,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case dlDetailMsg:
-		// Ignore if the user already closed the screen or moved on.
-		if m.showDlDetail && msg.name == m.dlDetailName {
+		// Match by infohash (unique) — display names can collide.
+		if m.showDlDetail && msg.infoHash == m.dlDetailHash {
 			if msg.err != nil {
 				m.dlDetailErr = msg.err.Error()
 			} else {
 				m.dlDetail = msg.detail
 			}
+		}
+		return m, nil
+
+	case reorderDoneMsg:
+		if msg.err != nil {
+			m.setError("Reorder failed: " + msg.err.Error())
 		}
 		return m, nil
 
@@ -1367,11 +1375,17 @@ func (m *Model) activate() tea.Cmd {
 		ds := m.downloading()
 		if len(ds) > 0 && m.dlCursor < len(ds) {
 			s := ds[m.dlCursor]
+			cmd := fetchDetailCmd(m.eng, s)
+			if cmd == nil { // engine can't provide detail → don't open an empty overlay
+				m.setNotice("details aren't available for this download")
+				return nil
+			}
 			m.showDlDetail = true
 			m.dlDetailName = s.Name
+			m.dlDetailHash = s.InfoHash
 			m.dlDetail = engine.Detail{}
 			m.dlDetailErr = ""
-			return fetchDetailCmd(m.eng, s)
+			return cmd
 		}
 		return nil
 	case sectionSettings:
