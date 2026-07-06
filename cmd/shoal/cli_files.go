@@ -40,7 +40,11 @@ func runFiles(args []string, out io.Writer) int {
 			return err
 		}
 		if *jsonOut {
-			b, err := json.MarshalIndent(det.Files, "", "  ")
+			files := det.Files
+			if files == nil {
+				files = []engine.FileDetail{}
+			}
+			b, err := json.MarshalIndent(files, "", "  ")
 			if err != nil {
 				return err
 			}
@@ -67,10 +71,11 @@ func applyOnlyGlob(c *daemon.Client, infoHash, globsCSV string) error {
 			deselect = append(deselect, f.Path)
 		}
 	}
-	if len(sel) > 0 {
-		if err := c.SetFiles(infoHash, sel, true); err != nil {
-			return err
-		}
+	if len(sel) == 0 {
+		return fmt.Errorf("no files matched %q; selection unchanged", globsCSV)
+	}
+	if err := c.SetFiles(infoHash, sel, true); err != nil {
+		return err
 	}
 	if len(deselect) > 0 {
 		if err := c.SetFiles(infoHash, deselect, false); err != nil {

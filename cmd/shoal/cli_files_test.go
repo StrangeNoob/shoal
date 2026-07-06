@@ -36,6 +36,25 @@ func TestFilesListAndOnly(t *testing.T) {
 	}
 }
 
+func TestFilesOnlyNoMatch(t *testing.T) {
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: "abc" + strings.Repeat("0", 37), Name: "test torrent"}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "movie.mkv", Length: 100, Completed: 50, Selected: true},
+			{Path: "readme.txt", Length: 10, Selected: true},
+		}},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	if code := runFiles([]string{"abc", "--only", "*.nope"}, &buf); code == 0 {
+		t.Fatalf("--only with no matches should fail, got exit 0")
+	}
+	if len(fake.filesCalls) != 0 {
+		t.Fatalf("--only with no matches must not call SetFiles, got %v", fake.filesCalls)
+	}
+}
+
 func TestFilesNoID(t *testing.T) {
 	var buf bytes.Buffer
 	if code := runFiles(nil, &buf); code != 2 {

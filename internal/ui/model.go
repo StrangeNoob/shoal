@@ -74,6 +74,7 @@ type Model struct {
 	dlDetail     engine.Detail // fetched per-file progress + trackers
 	dlDetailName string        // display name of the torrent the detail is for
 	dlDetailHash string        // its infohash — the canonical id used to match responses
+	dlDetailGen  int           // bumped on each toggle/open so a stale refetch is ignored
 	dlDetailErr  string        // fetch error, if any
 	dlFileCursor int           // selected row within dlDetail.Files
 
@@ -260,6 +261,7 @@ type detailer interface {
 
 type dlDetailMsg struct {
 	infoHash string
+	gen      int // dlDetailGen at fetch time — stale responses are dropped
 	detail   engine.Detail
 	err      error
 }
@@ -283,15 +285,16 @@ func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
 }
 
 // fetchDetailCmd loads a download's per-file progress and trackers off the UI
-// thread.
-func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+// thread. gen is the model's dlDetailGen at call time, stamped into the
+// result so a slow, superseded fetch can be told apart from the latest one.
+func fetchDetailCmd(eng engine.Engine, s engine.Status, gen int) tea.Cmd {
 	d, ok := eng.(detailer)
 	if !ok {
 		return nil
 	}
 	return func() tea.Msg {
 		det, err := d.Detail(s.InfoHash)
-		return dlDetailMsg{infoHash: s.InfoHash, detail: det, err: err}
+		return dlDetailMsg{infoHash: s.InfoHash, gen: gen, detail: det, err: err}
 	}
 }
 
@@ -300,6 +303,10 @@ func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
 type fileSelector interface {
 	SetFiles(infoHash string, paths []string, selected bool) error
 }
+
+// setFilesErrMsg reports a failed SetFiles call so the UI can surface it
+// instead of silently keeping the optimistic (possibly wrong) selection.
+type setFilesErrMsg struct{ err error }
 
 // setFilesCmd toggles a single file's selection off the UI thread. Returns
 // nil if the engine doesn't support it (e.g. the test fake, unless it opts
@@ -310,7 +317,9 @@ func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cm
 		return nil
 	}
 	return func() tea.Msg {
-		_ = fs.SetFiles(infoHash, []string{path}, selected)
+		if err := fs.SetFiles(infoHash, []string{path}, selected); err != nil {
+			return setFilesErrMsg{err}
+		}
 		return nil
 	}
 }
@@ -542,14 +551,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case dlDetailMsg:
-		// Match by infohash (unique) — display names can collide.
-		if m.showDlDetail && msg.infoHash == m.dlDetailHash {
+		// Match by infohash (unique) and generation — a slow, superseded
+		// refetch must not clobber a newer optimistic toggle or a later open.
+		if m.showDlDetail && msg.infoHash == m.dlDetailHash && msg.gen == m.dlDetailGen {
 			if msg.err != nil {
 				m.dlDetailErr = msg.err.Error()
 			} else {
 				m.dlDetail = msg.detail
 			}
 		}
+		return m, nil
+
+	case setFilesErrMsg:
+		m.setError("Couldn't change file selection: " + msg.err.Error())
 		return m, nil
 
 	case reorderDoneMsg:
@@ -843,14 +857,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
 				f := &m.dlDetail.Files[i]
 				f.Selected = !f.Selected // optimistic
+				m.dlDetailGen++
+				gen := m.dlDetailGen
 				sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
-				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName})
+				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName}, gen)
 				// Run sequentially (not tea.Batch): SetFiles must land at the
 				// engine before the refetch, or the refetched Detail can race
-				// ahead of the selection change.
+				// ahead of the selection change. A SetFiles error is surfaced
+				// instead of the refetch, so it isn't silently dropped.
 				return m, func() tea.Msg {
 					if sc != nil {
-						sc()
+						if msg := sc(); msg != nil {
+							return msg
+						}
 					}
 					if fc != nil {
 						return fc()
@@ -1423,7 +1442,8 @@ func (m *Model) activate() tea.Cmd {
 		ds := m.downloading()
 		if len(ds) > 0 && m.dlCursor < len(ds) {
 			s := ds[m.dlCursor]
-			cmd := fetchDetailCmd(m.eng, s)
+			m.dlDetailGen++
+			cmd := fetchDetailCmd(m.eng, s, m.dlDetailGen)
 			if cmd == nil { // engine can't provide detail → don't open an empty overlay
 				m.setNotice("details aren't available for this download")
 				return nil

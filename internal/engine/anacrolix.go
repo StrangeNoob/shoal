@@ -421,7 +421,7 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 	t, _, ok := a.torrentByHash(infoHash)
 	a.mu.Unlock()
 	if !ok {
-		return nil
+		return fmt.Errorf("no such torrent: %s", infoHash)
 	}
 	if t.Info() == nil { // no metadata yet → no files to select
 		return nil
@@ -463,13 +463,13 @@ func (a *Anacrolix) persistDeselected(t *torrent.Torrent) {
 // GotInfo. Persisted so a restart before metadata still applies them.
 func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 	a.mu.Lock()
-	t, _, ok := a.torrentByHash(infoHash)
+	t, h, ok := a.torrentByHash(infoHash)
 	if ok && a.store != nil {
-		a.store.SetFileGlobs(infoHash, globs)
+		a.store.SetFileGlobs(h.HexString(), globs)
 	}
 	a.mu.Unlock()
 	if !ok {
-		return nil
+		return fmt.Errorf("no such torrent: %s", infoHash)
 	}
 	if t.Info() != nil { // metadata already here → apply now
 		a.applyFileSelection(t)
@@ -506,6 +506,8 @@ func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
 	for _, f := range t.Files() {
 		if off[f.DisplayPath()] {
 			f.SetPriority(torrent.PiecePriorityNone)
+		} else {
+			f.Download()
 		}
 	}
 	a.persistDeselected(t)
