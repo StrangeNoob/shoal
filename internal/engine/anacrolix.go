@@ -45,7 +45,7 @@ type Anacrolix struct {
 	queued    map[metainfo.Hash]bool // held by the scheduler (max-concurrent)
 	maxConns  int
 	maxActive int
-	store    *queue.Store
+	store     *queue.Store
 }
 
 // rateLimiter builds a token-bucket limiter for bytesPerSec (> 0). The burst is

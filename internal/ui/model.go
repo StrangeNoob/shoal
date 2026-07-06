@@ -73,8 +73,8 @@ type Model struct {
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
 	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
-	spin     spinner.Model
-	prog     progress.Model
+	spin        spinner.Model
+	prog        progress.Model
 
 	src source.Source
 	eng engine.Engine
@@ -161,18 +161,18 @@ func NewWithConfig(src source.Source, eng engine.Engine, cfg config.Config) Mode
 	pr.ShowPercentage = false
 
 	m := Model{
-		section:  sectionSearch,
+		section:     sectionSearch,
 		editing:     false,
 		input:       ti,
 		setInput:    si,
 		filterInput: fi,
-		spin:     sp,
-		prog:     pr,
-		src:      src,
-		eng:      eng,
-		cfg:      cfg,
-		sortDesc: true,
-		booting:  true,
+		spin:        sp,
+		prog:        pr,
+		src:         src,
+		eng:         eng,
+		cfg:         cfg,
+		sortDesc:    true,
+		booting:     true,
 	}
 	if p, ok := eng.(statusPoller); ok {
 		m.poll = p // production daemonPoller and the test fakeEngine both implement it
@@ -1129,7 +1129,7 @@ func (m *Model) clickSelect(x, y int) {
 			cancelLines = 2
 		}
 		base := m.headerHeight() + 1 + cancelLines // renderDownloads is body line 0 (no box)
-		visible := max(1, m.bodyHeight()/4)         // 4 screen lines per download row
+		visible := max(1, m.bodyHeight()/4)        // 4 screen lines per download row
 		shown := min(len(m.downloading()), visible)
 		if line := y - base; line >= 0 && line%4 <= 2 { // name/bar/detail, not the blank
 			if i := line / 4; i < shown {

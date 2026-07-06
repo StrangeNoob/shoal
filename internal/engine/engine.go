@@ -26,8 +26,8 @@ type Status struct {
 	// those not currently connected — nonzero proves announce is working even
 	// when Peers (active downloaders) is 0.
 	TotalPeers int
-	Done   bool
-	Paused bool
+	Done       bool
+	Paused     bool
 	// Queued reports that the scheduler is holding this (incomplete, un-paused)
 	// torrent because the max-concurrent-downloads limit is reached. It resumes
 	// automatically when a slot frees.
