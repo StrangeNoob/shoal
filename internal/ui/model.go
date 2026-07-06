@@ -75,6 +75,7 @@ type Model struct {
 	dlDetailName string        // display name of the torrent the detail is for
 	dlDetailHash string        // its infohash — the canonical id used to match responses
 	dlDetailErr  string        // fetch error, if any
+	dlFileCursor int           // selected row within dlDetail.Files
 
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
@@ -291,6 +292,26 @@ func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
 	return func() tea.Msg {
 		det, err := d.Detail(s.InfoHash)
 		return dlDetailMsg{infoHash: s.InfoHash, detail: det, err: err}
+	}
+}
+
+// fileSelector is implemented by engines that support per-file
+// select/deselect (skip download of specific files within a torrent).
+type fileSelector interface {
+	SetFiles(infoHash string, paths []string, selected bool) error
+}
+
+// setFilesCmd toggles a single file's selection off the UI thread. Returns
+// nil if the engine doesn't support it (e.g. the test fake, unless it opts
+// in).
+func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cmd {
+	fs, ok := eng.(fileSelector)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = fs.SetFiles(infoHash, []string{path}, selected)
+		return nil
 	}
 }
 
@@ -806,10 +827,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.showDlDetail {
 		switch msg.String() {
-		case "esc", "enter", "q":
+		case "esc", "q":
 			m.showDlDetail = false
 		case "ctrl+c":
 			return m, tea.Quit
+		case "up", "k":
+			if m.dlFileCursor > 0 {
+				m.dlFileCursor--
+			}
+		case "down", "j":
+			if m.dlFileCursor < len(m.dlDetail.Files)-1 {
+				m.dlFileCursor++
+			}
+		case " ", "enter":
+			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
+				f := &m.dlDetail.Files[i]
+				f.Selected = !f.Selected // optimistic
+				sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
+				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName})
+				// Run sequentially (not tea.Batch): SetFiles must land at the
+				// engine before the refetch, or the refetched Detail can race
+				// ahead of the selection change.
+				return m, func() tea.Msg {
+					if sc != nil {
+						sc()
+					}
+					if fc != nil {
+						return fc()
+					}
+					return nil
+				}
+			}
 		}
 		return m, nil
 	}
@@ -1385,6 +1433,7 @@ func (m *Model) activate() tea.Cmd {
 			m.dlDetailHash = s.InfoHash
 			m.dlDetail = engine.Detail{}
 			m.dlDetailErr = ""
+			m.dlFileCursor = 0
 			return cmd
 		}
 		return nil
