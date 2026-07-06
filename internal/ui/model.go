@@ -695,6 +695,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setInput, cmd = m.setInput.Update(msg)
 		return m, cmd
 	}
+	if m.editingFilter {
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 

@@ -309,7 +309,7 @@ Shipped:
   + terminal bell / OSC 9 desktop notification, toggleable).
 - **Mouse support** — click a row to select it (Search / Downloads); the wheel scrolls
   the selection in every pane.
-- **Search quality-of-life** — a hide-0-seed toggle (`z`) and an in-results fuzzy filter
+- **Search quality-of-life** — a hide-0-seed toggle (`z`) and an in-results filter
   (`f`) that narrows loaded results without re-querying sources.
 - **Queue controls** — a max-concurrent-downloads limit; extras queue and start
   automatically (oldest first) as slots free.
