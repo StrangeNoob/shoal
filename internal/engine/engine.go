@@ -66,6 +66,7 @@ type FileDetail struct {
 	Path      string
 	Length    int64
 	Completed int64
+	Selected  bool // false = deselected (priority none)
 }
 
 // Detail is the on-demand extra information for one torrent (the Downloads
