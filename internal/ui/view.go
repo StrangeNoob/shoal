@@ -282,7 +282,7 @@ func (m Model) dlDetailView() string {
 		b.WriteString("  " + st.Meta.Render("loading… (metadata may still be arriving)") + "\n")
 	default:
 		b.WriteString("  " + st.SectionHead.Render(fmt.Sprintf("FILES (%d)", len(m.dlDetail.Files))) + "\n")
-		nameW := max(10, m.width-32)
+		nameW := max(10, m.width-38)
 		maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6)) // leave room for trackers + chrome
 		for i, f := range m.dlDetail.Files {
 			if i >= maxFiles {
@@ -293,7 +293,15 @@ func (m Model) dlDetailView() string {
 			if f.Length > 0 {
 				pct = float64(f.Completed) / float64(f.Length) * 100
 			}
-			b.WriteString("  " + st.Row.Render(padRight(truncate(stripControl(f.Path), nameW), nameW)) +
+			marker := "  "
+			if i == m.dlFileCursor {
+				marker = st.Accent.Render(glyphCursor + " ")
+			}
+			box := "[✓] "
+			if !f.Selected {
+				box = "[ ] "
+			}
+			b.WriteString("  " + marker + box + st.Row.Render(padRight(truncate(stripControl(f.Path), nameW), nameW)) +
 				st.Meta.Render(fmt.Sprintf("  %5.1f%%  %s / %s", pct, formatBytes(f.Completed), formatBytes(f.Length))) + "\n")
 		}
 		if len(m.dlDetail.Trackers) > 0 {
@@ -308,7 +316,7 @@ func (m Model) dlDetailView() string {
 		}
 	}
 
-	b.WriteString("\n  " + st.Meta.Render("press esc / enter / q to close"))
+	b.WriteString("\n  " + st.Meta.Render("↑↓ move · space select · esc back"))
 	content := b.String()
 	if pad := m.height - strings.Count(content, "\n") - 1; pad > 0 {
 		content += strings.Repeat("\n", pad)
@@ -658,8 +666,6 @@ func (m Model) renderFooter() string {
 		parts = []string{hint("enter", "stop"), hint("esc", "back")}
 	case m.histConfirm:
 		parts = []string{hint("k", "remove"), hint("d", "+delete files"), hint("esc", "back")}
-	case m.showDlDetail:
-		parts = []string{hint("esc", "back")}
 	case m.section == sectionDownloads:
 		parts = []string{hint("↑↓", "move"), hint("enter", "details"), hint("[ ]", "queue order"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:

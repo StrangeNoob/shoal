@@ -59,9 +59,18 @@ type fakeEngine struct {
 
 	reorderHash  string
 	reorderDelta int
+
+	setFilesPath     string
+	setFilesSelected bool
+	setFilesErr      error // returned by SetFiles when set
 }
 
 func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
+
+func (e *fakeEngine) SetFiles(infoHash string, paths []string, selected bool) error {
+	e.setFilesPath, e.setFilesSelected = paths[0], selected
+	return e.setFilesErr
+}
 
 func (e *fakeEngine) Reorder(infoHash string, delta int) error {
 	e.reorderHash, e.reorderDelta = infoHash, delta
@@ -542,6 +551,66 @@ func TestDownloadDetailScreen(t *testing.T) {
 	m, _ = update(m, key("esc"))
 	if m.showDlDetail {
 		t.Fatal("esc should close the details screen")
+	}
+}
+
+func TestDetailToggleFile(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 10}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "a.mkv", Length: 100, Selected: true},
+			{Path: "b.mkv", Length: 100, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	m, _ = update(m, key("down")) // cursor to b.mkv
+	m, cmd = update(m, key(" "))  // space toggles b.mkv off
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "b.mkv" || eng.setFilesSelected {
+		t.Fatalf("space toggled %q selected=%v, want b.mkv false", eng.setFilesPath, eng.setFilesSelected)
+	}
+	if m.dlDetail.Files[1].Selected {
+		t.Fatal("optimistic flip should mark b.mkv deselected")
+	}
+}
+
+func TestDetailToggleRevertsOnError(t *testing.T) {
+	eng := &fakeEngine{
+		statuses:    []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 10}},
+		detail:      engine.Detail{Files: []engine.FileDetail{{Path: "a.mkv", Length: 100, Selected: true}}},
+		setFilesErr: errors.New("daemon down"),
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // deliver detail
+
+	m, cmd = update(m, key(" ")) // toggle a.mkv off (will fail)
+	if m.dlDetail.Files[0].Selected {
+		t.Fatal("optimistic flip should mark a.mkv deselected before the write returns")
+	}
+	if !m.dlDetailBusy {
+		t.Fatal("toggle should mark the detail busy while the write is in flight")
+	}
+	msg := cmd() // runs SetFiles → returns setFilesErrMsg
+	m, _ = update(m, msg)
+
+	if m.dlDetailBusy {
+		t.Fatal("a failed write must clear the busy flag")
+	}
+	if !m.dlDetail.Files[0].Selected {
+		t.Fatal("a failed SetFiles must revert the optimistic checkbox back to selected")
+	}
+	if m.notice == "" || !m.noticeErr {
+		t.Fatalf("a failed toggle should surface an error notice, got %q err=%v", m.notice, m.noticeErr)
 	}
 }
 

@@ -346,7 +346,7 @@ func (a *Anacrolix) persist(h metainfo.Hash, e queue.Entry) {
 // paused state. A failed .torrent-URL re-fetch is skipped, leaving the entry.
 func (a *Anacrolix) restore() {
 	var urls []queue.Entry
-	for _, e := range a.store.Entries {
+	for _, e := range a.store.Snapshot() {
 		switch {
 		case e.Magnet != "":
 			// Magnets re-add instantly (no network), so do them synchronously.
@@ -407,7 +407,110 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 		}
 		a.mu.Unlock()
 		t.DownloadAll()
+		// DownloadAll sets every piece to Normal priority, so any deselection
+		// must be applied after it or DownloadAll would clobber it.
+		a.applyFileSelection(t)
 	}()
+}
+
+// SetFiles selects or deselects the named files (by DisplayPath) live, and
+// persists the resulting deselected set. Unknown paths are ignored; a no-op
+// before metadata (no files yet).
+func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) error {
+	a.mu.Lock()
+	t, _, ok := a.torrentByHash(infoHash)
+	a.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("no such torrent: %s", infoHash)
+	}
+	if t.Info() == nil { // no metadata yet → no files to select
+		return nil
+	}
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+	for _, f := range t.Files() {
+		if !want[f.DisplayPath()] {
+			continue
+		}
+		if selected {
+			f.Download()
+		} else {
+			f.SetPriority(torrent.PiecePriorityNone)
+		}
+	}
+	a.persistDeselected(t)
+	return nil
+}
+
+// persistDeselected records which of t's files are currently deselected.
+func (a *Anacrolix) persistDeselected(t *torrent.Torrent) {
+	if a.store == nil {
+		return
+	}
+	var off []string
+	for _, f := range t.Files() {
+		if f.Priority() == torrent.PiecePriorityNone {
+			off = append(off, f.DisplayPath())
+		}
+	}
+	a.store.SetDeselected(t.InfoHash().HexString(), off)
+}
+
+// SetFileGlobs registers add-time --files patterns. If metadata is already in,
+// they're applied immediately; otherwise applyFileSelection applies them on
+// GotInfo. Persisted so a restart before metadata still applies them.
+func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
+	a.mu.Lock()
+	t, h, ok := a.torrentByHash(infoHash)
+	if ok && a.store != nil {
+		a.store.SetFileGlobs(h.HexString(), globs)
+	}
+	a.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("no such torrent: %s", infoHash)
+	}
+	if t.Info() != nil { // metadata already here → apply now
+		a.applyFileSelection(t)
+	}
+	return nil
+}
+
+// applyFileSelection deselects files per the torrent's persisted FileGlobs
+// (resolved once, then cleared) or its persisted Deselected set (restart path).
+func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
+	if a.store == nil {
+		return
+	}
+	hash := t.InfoHash().HexString()
+	entry, ok := a.store.Get(hash)
+	if !ok {
+		return
+	}
+	var deselect []string
+	if len(entry.FileGlobs) > 0 {
+		var paths []string
+		for _, f := range t.Files() {
+			paths = append(paths, f.DisplayPath())
+		}
+		deselect = resolveDeselected(paths, entry.FileGlobs)
+		a.store.SetFileGlobs(hash, nil) // resolved once
+	} else {
+		deselect = entry.Deselected
+	}
+	off := make(map[string]bool, len(deselect))
+	for _, p := range deselect {
+		off[p] = true
+	}
+	for _, f := range t.Files() {
+		if off[f.DisplayPath()] {
+			f.SetPriority(torrent.PiecePriorityNone)
+		} else {
+			f.Download()
+		}
+	}
+	a.persistDeselected(t)
 }
 
 func (a *Anacrolix) Statuses() []Status {
@@ -496,6 +599,7 @@ func (a *Anacrolix) Detail(infoHash string) (Detail, error) {
 			Path:      f.DisplayPath(),
 			Length:    f.Length(),
 			Completed: f.BytesCompleted(),
+			Selected:  f.Priority() != torrent.PiecePriorityNone,
 		})
 	}
 	mi := t.Metainfo()

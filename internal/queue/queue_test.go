@@ -3,6 +3,7 @@ package queue
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -72,6 +73,61 @@ func TestSetPaused(t *testing.T) {
 	}
 }
 
+func TestSelectionPersists(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "abc", Magnet: "magnet:?xt=urn:btih:abc"})
+
+	s.SetFileGlobs("abc", []string{"*.mkv"})
+	s.SetDeselected("abc", []string{"extras/sample.mkv"})
+
+	got := LoadFrom(s.Path)
+	e := got.Entries[0]
+	if len(e.FileGlobs) != 1 || e.FileGlobs[0] != "*.mkv" {
+		t.Fatalf("FileGlobs = %v", e.FileGlobs)
+	}
+	if len(e.Deselected) != 1 || e.Deselected[0] != "extras/sample.mkv" {
+		t.Fatalf("Deselected = %v", e.Deselected)
+	}
+}
+
+func TestStoreGetReturnsCopy(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa", FileGlobs: []string{"*.mkv"}, Deselected: []string{"a"}})
+
+	e, ok := s.Get("aaa")
+	if !ok {
+		t.Fatal("Get: not found")
+	}
+	e.FileGlobs[0] = "mutated"
+	e.Deselected[0] = "mutated"
+	if s.Entries[0].FileGlobs[0] == "mutated" || s.Entries[0].Deselected[0] == "mutated" {
+		t.Fatal("Get returned aliased slices, not a copy")
+	}
+
+	if _, ok := s.Get("nope"); ok {
+		t.Fatal("Get: found unknown hash")
+	}
+}
+
+func TestStoreSnapshot(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa"})
+	s.Upsert(Entry{InfoHash: "bbb"})
+
+	snap := s.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("Snapshot: got %d entries, want 2", len(snap))
+	}
+
+	snap = append(snap, Entry{InfoHash: "ccc"})
+	if len(snap) != 3 {
+		t.Fatalf("append to the snapshot should grow it to 3, got %d", len(snap))
+	}
+	if len(s.Entries) != 2 {
+		t.Fatal("mutating the returned slice header affected the store")
+	}
+}
+
 func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	s := tmpStore(t)
 	s.Upsert(Entry{InfoHash: "aaa"})
@@ -89,4 +145,23 @@ func TestSaveUsesOwnerOnlyPerms(t *testing.T) {
 	if di.Mode().Perm() != 0o700 {
 		t.Errorf("dir mode = %o, want 700", di.Mode().Perm())
 	}
+}
+
+// TestConcurrentAccess mimics engine.SetFiles's background goroutine (SetDeselected,
+// no engine lock held) racing RPC-driven calls (SetPaused, SetName, Get, Save) on the
+// same Store, as happens with a.store touched both under and without a.mu. Run with
+// -race: it must not report a data race on Entries.
+func TestConcurrentAccess(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa"})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(4)
+		go func() { defer wg.Done(); s.SetDeselected("aaa", []string{"a", "b"}) }()
+		go func() { defer wg.Done(); s.SetPaused("aaa", true) }()
+		go func() { defer wg.Done(); s.SetName("aaa", "concurrent") }()
+		go func() { defer wg.Done(); s.Get("aaa") }()
+	}
+	wg.Wait()
 }

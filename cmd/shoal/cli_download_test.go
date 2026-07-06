@@ -136,6 +136,31 @@ func TestDownloadForwardsMagnetToDaemon(t *testing.T) {
 	}
 }
 
+func TestDownloadFilesForwardsGlobs(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	const ih = "0123456789abcdef0123456789abcdef01234567"
+	var buf bytes.Buffer
+	if code := runDownload([]string{"--files", "*.mkv, *.srt", "magnet:?xt=urn:btih:" + ih}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if g := fake.gotFileGlobs(); len(g) != 2 || g[0] != "*.mkv" || g[1] != "*.srt" {
+		t.Fatalf("daemon did not receive the globs: %v", g)
+	}
+}
+
+func TestDownloadFilesUnsupportedForURL(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"--files", "*.mkv", "https://example.com/x.torrent"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if g := fake.gotFileGlobs(); g != nil {
+		t.Fatalf("expected no SetFileGlobs call for a URL target, got %v", g)
+	}
+}
+
 func TestDownloadForwardsURLToDaemon(t *testing.T) {
 	fake := &fakeEngine{}
 	serveFakeDaemon(t, fake)

@@ -42,6 +42,15 @@ type ReorderArgs struct {
 	InfoHash string
 	Delta    int
 }
+type SetFilesArgs struct {
+	InfoHash string
+	Paths    []string
+	Selected bool
+}
+type SetFileGlobsArgs struct {
+	InfoHash string
+	Globs    []string
+}
 type Empty struct{}
 type StatusesReply struct{ Statuses []engine.Status }
 type DetailReply struct{ Detail engine.Detail }

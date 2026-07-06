@@ -74,7 +74,10 @@ type Model struct {
 	dlDetail     engine.Detail // fetched per-file progress + trackers
 	dlDetailName string        // display name of the torrent the detail is for
 	dlDetailHash string        // its infohash — the canonical id used to match responses
+	dlDetailGen  int           // bumped on each toggle/open so a stale refetch is ignored
+	dlDetailBusy bool          // a file-selection write is in flight; serialize toggles until its refetch returns
 	dlDetailErr  string        // fetch error, if any
+	dlFileCursor int           // selected row within dlDetail.Files
 
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
@@ -259,6 +262,7 @@ type detailer interface {
 
 type dlDetailMsg struct {
 	infoHash string
+	gen      int // dlDetailGen at fetch time — stale responses are dropped
 	detail   engine.Detail
 	err      error
 }
@@ -282,15 +286,48 @@ func reorderCmd(eng engine.Engine, s engine.Status, delta int) tea.Cmd {
 }
 
 // fetchDetailCmd loads a download's per-file progress and trackers off the UI
-// thread.
-func fetchDetailCmd(eng engine.Engine, s engine.Status) tea.Cmd {
+// thread. gen is the model's dlDetailGen at call time, stamped into the
+// result so a slow, superseded fetch can be told apart from the latest one.
+func fetchDetailCmd(eng engine.Engine, s engine.Status, gen int) tea.Cmd {
 	d, ok := eng.(detailer)
 	if !ok {
 		return nil
 	}
 	return func() tea.Msg {
 		det, err := d.Detail(s.InfoHash)
-		return dlDetailMsg{infoHash: s.InfoHash, detail: det, err: err}
+		return dlDetailMsg{infoHash: s.InfoHash, gen: gen, detail: det, err: err}
+	}
+}
+
+// fileSelector is implemented by engines that support per-file
+// select/deselect (skip download of specific files within a torrent).
+type fileSelector interface {
+	SetFiles(infoHash string, paths []string, selected bool) error
+}
+
+// setFilesErrMsg reports a failed SetFiles call so the UI can surface it
+// instead of silently keeping the optimistic (possibly wrong) selection.
+// setFilesErrMsg reports a failed toggle, carrying the file and attempted state
+// so the optimistic checkbox can be reverted.
+type setFilesErrMsg struct {
+	err      error
+	path     string
+	selected bool
+}
+
+// setFilesCmd toggles a single file's selection off the UI thread. Returns
+// nil if the engine doesn't support it (e.g. the test fake, unless it opts
+// in).
+func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cmd {
+	fs, ok := eng.(fileSelector)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := fs.SetFiles(infoHash, []string{path}, selected); err != nil {
+			return setFilesErrMsg{err: err, path: path, selected: selected}
+		}
+		return nil
 	}
 }
 
@@ -521,14 +558,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case dlDetailMsg:
-		// Match by infohash (unique) — display names can collide.
-		if m.showDlDetail && msg.infoHash == m.dlDetailHash {
+		// Match by infohash (unique) and generation — a slow, superseded
+		// refetch must not clobber a newer optimistic toggle or a later open.
+		if m.showDlDetail && msg.infoHash == m.dlDetailHash && msg.gen == m.dlDetailGen {
+			m.dlDetailBusy = false // the in-flight toggle's write reconciled
 			if msg.err != nil {
 				m.dlDetailErr = msg.err.Error()
 			} else {
 				m.dlDetail = msg.detail
 			}
 		}
+		return m, nil
+
+	case setFilesErrMsg:
+		m.dlDetailBusy = false
+		// Revert the optimistic checkbox for the file whose write failed, so the
+		// UI stays consistent with the daemon.
+		for i := range m.dlDetail.Files {
+			if m.dlDetail.Files[i].Path == msg.path {
+				m.dlDetail.Files[i].Selected = !msg.selected
+				break
+			}
+		}
+		m.setError("Couldn't change file selection: " + msg.err.Error())
 		return m, nil
 
 	case reorderDoneMsg:
@@ -806,10 +858,49 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.showDlDetail {
 		switch msg.String() {
-		case "esc", "enter", "q":
+		case "esc", "q":
 			m.showDlDetail = false
 		case "ctrl+c":
 			return m, tea.Quit
+		case "up", "k":
+			if m.dlFileCursor > 0 {
+				m.dlFileCursor--
+			}
+		case "down", "j":
+			if m.dlFileCursor < len(m.dlDetail.Files)-1 {
+				m.dlFileCursor++
+			}
+		case " ", "enter":
+			if m.dlDetailBusy {
+				return m, nil // a write is in flight — serialize toggles so they can't reorder
+			}
+			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
+				f := &m.dlDetail.Files[i]
+				f.Selected = !f.Selected // optimistic
+				m.dlDetailGen++
+				gen := m.dlDetailGen
+				sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
+				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName}, gen)
+				// Mark busy only when a refetch will arrive to clear it (on success
+				// via dlDetailMsg, on failure via setFilesErrMsg); without a detailer
+				// there's no clearing message, so leave toggles unserialized.
+				m.dlDetailBusy = fc != nil
+				// Run sequentially (not tea.Batch): SetFiles must land at the
+				// engine before the refetch, or the refetched Detail can race
+				// ahead of the selection change. A SetFiles error is surfaced
+				// instead of the refetch, so it isn't silently dropped.
+				return m, func() tea.Msg {
+					if sc != nil {
+						if msg := sc(); msg != nil {
+							return msg
+						}
+					}
+					if fc != nil {
+						return fc()
+					}
+					return nil
+				}
+			}
 		}
 		return m, nil
 	}
@@ -1375,7 +1466,8 @@ func (m *Model) activate() tea.Cmd {
 		ds := m.downloading()
 		if len(ds) > 0 && m.dlCursor < len(ds) {
 			s := ds[m.dlCursor]
-			cmd := fetchDetailCmd(m.eng, s)
+			m.dlDetailGen++
+			cmd := fetchDetailCmd(m.eng, s, m.dlDetailGen)
 			if cmd == nil { // engine can't provide detail → don't open an empty overlay
 				m.setNotice("details aren't available for this download")
 				return nil
@@ -1385,6 +1477,8 @@ func (m *Model) activate() tea.Cmd {
 			m.dlDetailHash = s.InfoHash
 			m.dlDetail = engine.Detail{}
 			m.dlDetailErr = ""
+			m.dlFileCursor = 0
+			m.dlDetailBusy = false
 			return cmd
 		}
 		return nil

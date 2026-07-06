@@ -85,7 +85,9 @@ scrolls the selection in any pane.
 
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,
 **download speed**, and an **ETA** (time remaining). Press `enter` for a **details**
-screen (per-file progress + trackers). With a **Max active** limit set (Settings),
+screen showing per-file progress and trackers — each file has a `[✓]` (downloading) or
+`[ ]` (deselected) checkbox. Use `↑ ↓` to move between files and `space` to toggle a file
+(unchecked files stop downloading). With a **Max active** limit set (Settings),
 downloads past the limit show **⏳ queued** and start automatically as slots free (oldest
 first); `[` / `]` move the selected download **earlier / later** in that queue. Select a
 download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the partial
@@ -126,6 +128,10 @@ shoal sources enable  <name>         # turn a provider on
 shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (--sort, --min-seeders, --json)
 shoal download <magnet|url|infohash|id|file.torrent>   # background download (--wait to block)
+shoal download <target> --files '<glob>'  # download only files matching a comma-separated glob
+shoal files <id>                     # list a download's files (# / ✓·✗ / SIZE / PATH)
+shoal files <id> --only '<glob>'     # select files matching a glob (deselect the rest)
+shoal files <id> --json              # list files for scripting
 shoal status [id]                    # progress of background downloads (--json, --clear, --follow)
 shoal history [--json]               # list completed downloads
 shoal history rm <id> [--delete-files]    # remove a history entry
@@ -166,7 +172,13 @@ shoal completion bash|zsh|fish       # print a shell completion script
   between them. Engine settings (listen port, max peers, save-to, seed) configure the daemon and
   take effect when it restarts. Pass `--wait` to block until the download completes — it prints a
   live progress line and exits `0` on completion (non-zero if the daemon becomes unreachable), so a
-  script doesn't have to poll `status`.
+  script doesn't have to poll `status`. Add `--files '<glob>'` to download only files matching a
+  comma-separated glob pattern (e.g. `--files '*.mkv,*.srt'`) — applied once metadata arrives, so it
+  works for magnets; not yet supported for `.torrent`-URL targets.
+- **`files`** lists a download's files as a table (`# / ✓·✗ / SIZE / PATH`), with one row per file.
+  Add `--only '<glob>'` to select files matching a glob pattern and deselect the rest (format: comma-separated
+  patterns, case-insensitive, matched against full path and basename, same as `--files`).
+  Add `--json` for machine-readable output (scripts).
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files. `--follow` redraws the table
   live until you press Ctrl+C.
@@ -316,15 +328,13 @@ Shipped:
   slots free), with `[` / `]` to reorder the queue manually.
 - **Active-download details** — `enter` on a Downloads row shows per-file progress and
   the tracker list.
+- **Per-file selection** — TUI checkboxes in the details screen, `shoal download --files '<glob>'`,
+  and `shoal files <id>` to list/select files.
 - **Daemon socket hardening** — the socket dir is verified 0700 & user-owned (rejecting a
   symlink or a foreign owner) before binding; falls back to `XDG_RUNTIME_DIR`.
 - **CI + releases** — checks on every push/PR and tag-triggered GoReleaser binaries.
 
 Still planned — contributions welcome:
-
-- **Per-file selection** — pick which files of a multi-file torrent to download:
-  a file tree with checkboxes in the TUI details screen, and
-  `shoal download --files <glob>` / `shoal files <id>` in the CLI.
 - **Streaming** — `shoal stream <id|magnet>`: sequential piece priority so you can
   play a file while it downloads (e.g. pipe the path to `mpv`).
 - **More sources** behind the existing `source.Source` interface.
