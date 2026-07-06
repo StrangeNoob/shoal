@@ -53,6 +53,14 @@ func TestFilesOnlyNoMatch(t *testing.T) {
 	if len(fake.filesCalls) != 0 {
 		t.Fatalf("--only with no matches must not call SetFiles, got %v", fake.filesCalls)
 	}
+
+	// An empty / whitespace-only pattern must also fail without deselecting anything.
+	if code := runFiles([]string{"abc", "--only", "  "}, &buf); code == 0 {
+		t.Fatalf("--only with an empty pattern should fail, got exit 0")
+	}
+	if len(fake.filesCalls) != 0 {
+		t.Fatalf("empty --only must not call SetFiles, got %v", fake.filesCalls)
+	}
 }
 
 func TestFilesNoID(t *testing.T) {

@@ -63,6 +63,9 @@ func applyOnlyGlob(c *daemon.Client, infoHash, globsCSV string) error {
 		return err
 	}
 	globs := splitGlobs(globsCSV)
+	if len(globs) == 0 {
+		return fmt.Errorf("--only pattern is empty; selection unchanged")
+	}
 	var sel, deselect []string
 	for _, f := range det.Files {
 		if glob.Match(globs, f.Path) {

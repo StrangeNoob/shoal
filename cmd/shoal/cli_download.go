@@ -169,14 +169,16 @@ func runDownload(args []string, out io.Writer) int {
 	} else {
 		fmt.Fprintf(out, "started: %s\n", displayName(tgt))
 	}
-	if *files != "" {
+	if globs := splitGlobs(*files); len(globs) > 0 {
 		if fh := fullHashFor(tgt); fh != "" {
-			if err := eng.SetFileGlobs(fh, splitGlobs(*files)); err != nil {
+			if err := eng.SetFileGlobs(fh, globs); err != nil {
 				fmt.Fprintln(os.Stderr, "note: could not set file selection:", err)
 			}
 		} else {
 			fmt.Fprintln(os.Stderr, "note: --files isn't supported for URL downloads yet")
 		}
+	} else if strings.TrimSpace(*files) != "" {
+		fmt.Fprintln(os.Stderr, "note: --files pattern is empty; downloading all files")
 	}
 	if *wait {
 		return awaitDone(eng, tgt, pre, preErr == nil, out)

@@ -120,6 +120,9 @@ func TestStoreSnapshot(t *testing.T) {
 	}
 
 	snap = append(snap, Entry{InfoHash: "ccc"})
+	if len(snap) != 3 {
+		t.Fatalf("append to the snapshot should grow it to 3, got %d", len(snap))
+	}
 	if len(s.Entries) != 2 {
 		t.Fatal("mutating the returned slice header affected the store")
 	}
