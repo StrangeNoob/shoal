@@ -19,6 +19,20 @@ type fakeEngine struct {
 	paused        []string
 	resumed       []string
 	statuses      []engine.Status
+	detail        engine.Detail
+	filesCalls    []fakeSetFilesCall
+	globsCalls    []fakeSetFileGlobsCall
+}
+
+type fakeSetFilesCall struct {
+	infoHash string
+	paths    []string
+	selected bool
+}
+
+type fakeSetFileGlobsCall struct {
+	infoHash string
+	globs    []string
 }
 
 func (f *fakeEngine) AddMagnet(m string) error {
@@ -58,6 +72,47 @@ func (f *fakeEngine) Resume(h string) error {
 	return nil
 }
 func (f *fakeEngine) Close() error { return nil }
+
+func (f *fakeEngine) Detail(_ string) (engine.Detail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.detail, nil
+}
+func (f *fakeEngine) SetFiles(infoHash string, paths []string, selected bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.filesCalls = append(f.filesCalls, fakeSetFilesCall{infoHash, append([]string(nil), paths...), selected})
+	return nil
+}
+func (f *fakeEngine) SetFileGlobs(infoHash string, globs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.globsCalls = append(f.globsCalls, fakeSetFileGlobsCall{infoHash, append([]string(nil), globs...)})
+	return nil
+}
+
+// setFilesDeselected returns the paths from the last SetFiles call made with
+// selected=false (what --only deselects).
+func (f *fakeEngine) setFilesDeselected() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.filesCalls) - 1; i >= 0; i-- {
+		if !f.filesCalls[i].selected {
+			return append([]string(nil), f.filesCalls[i].paths...)
+		}
+	}
+	return nil
+}
+
+// gotFileGlobs returns the globs from the last SetFileGlobs call.
+func (f *fakeEngine) gotFileGlobs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.globsCalls) == 0 {
+		return nil
+	}
+	return append([]string(nil), f.globsCalls[len(f.globsCalls)-1].globs...)
+}
 
 func (f *fakeEngine) gotMagnets() []string {
 	f.mu.Lock()

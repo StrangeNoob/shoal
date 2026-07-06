@@ -68,6 +68,18 @@ func (c *Client) Detail(infoHash string) (engine.Detail, error) {
 	err := c.rpc.Call("Engine.Detail", HashArgs{InfoHash: infoHash}, &r)
 	return r.Detail, err
 }
+
+// SetFiles selects or deselects specific files within a torrent.
+func (c *Client) SetFiles(infoHash string, paths []string, selected bool) error {
+	return c.rpc.Call("Engine.SetFiles", SetFilesArgs{InfoHash: infoHash, Paths: paths, Selected: selected}, &Empty{})
+}
+
+// SetFileGlobs persists the file-selection globs for a torrent (selecting
+// matches, deselecting the rest), applying immediately if metadata is present.
+func (c *Client) SetFileGlobs(infoHash string, globs []string) error {
+	return c.rpc.Call("Engine.SetFileGlobs", SetFileGlobsArgs{InfoHash: infoHash, Globs: globs}, &Empty{})
+}
+
 func (c *Client) Pause(hash string) error {
 	return c.rpc.Call("Engine.Pause", HashArgs{InfoHash: hash}, &Empty{})
 }

@@ -111,6 +111,7 @@ func runDownload(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("download", flag.ContinueOnError)
 	outDir := fs.String("out", "", "(deprecated) downloads use the configured folder")
 	wait := fs.Bool("wait", false, "block until the download completes")
+	files := fs.String("files", "", "download only files matching this glob (comma-separated)")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
@@ -167,6 +168,15 @@ func runDownload(args []string, out io.Writer) int {
 		fmt.Fprintf(out, "started: %s (%s)\n", displayName(tgt), tgt.Handle)
 	} else {
 		fmt.Fprintf(out, "started: %s\n", displayName(tgt))
+	}
+	if *files != "" {
+		if fh := fullHashFor(tgt); fh != "" {
+			if err := eng.SetFileGlobs(fh, splitGlobs(*files)); err != nil {
+				fmt.Fprintln(os.Stderr, "note: could not set file selection:", err)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "note: --files isn't supported for URL downloads yet")
+		}
 	}
 	if *wait {
 		return awaitDone(eng, tgt, pre, preErr == nil, out)
@@ -243,6 +253,17 @@ func awaitDone(eng interface {
 		}
 		time.Sleep(waitPollInterval)
 	}
+}
+
+// fullHashFor derives the full 40-hex infohash for a target that has one
+// up front (magnet/hash/id/.torrent-file), or "" for a URL target — a .torrent
+// URL's infohash isn't known until the daemon fetches the metainfo, so --files
+// isn't supported for it in v1.
+func fullHashFor(t dlTarget) string {
+	if t.Magnet == "" {
+		return ""
+	}
+	return source.ParseMagnetInfoHash(t.Magnet)
 }
 
 // displayName is a friendly label for the "started:" line.

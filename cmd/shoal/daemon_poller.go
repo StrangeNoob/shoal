@@ -185,6 +185,12 @@ func (p *daemonPoller) Resume(h string) error {
 func (p *daemonPoller) Reorder(h string, delta int) error {
 	return p.callWithTimeout(func(c *daemon.Client) error { return c.Reorder(h, delta) })
 }
+func (p *daemonPoller) SetFiles(h string, paths []string, sel bool) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.SetFiles(h, paths, sel) })
+}
+func (p *daemonPoller) SetFileGlobs(h string, globs []string) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.SetFileGlobs(h, globs) })
+}
 
 // Close unconditionally drops the current client, regardless of identity.
 func (p *daemonPoller) Close() error {

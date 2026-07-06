@@ -54,6 +54,27 @@ func (s *EngineService) Reorder(a ReorderArgs, _ *Empty) error {
 	return nil
 }
 
+// fileSelector is implemented by engines that support per-file selection (the
+// Anacrolix backend). Kept off the Engine interface for the same reason as
+// detailer/reorderer: minimal/test engines don't need to implement it.
+type fileSelector interface {
+	SetFiles(infoHash string, paths []string, selected bool) error
+	SetFileGlobs(infoHash string, globs []string) error
+}
+
+func (s *EngineService) SetFiles(a SetFilesArgs, _ *Empty) error {
+	if fs, ok := s.eng.(fileSelector); ok {
+		return fs.SetFiles(a.InfoHash, a.Paths, a.Selected)
+	}
+	return nil
+}
+func (s *EngineService) SetFileGlobs(a SetFileGlobsArgs, _ *Empty) error {
+	if fs, ok := s.eng.(fileSelector); ok {
+		return fs.SetFileGlobs(a.InfoHash, a.Globs)
+	}
+	return nil
+}
+
 func (s *EngineService) Detail(a HashArgs, r *DetailReply) error {
 	d, ok := s.eng.(detailer)
 	if !ok {
