@@ -23,6 +23,10 @@ type fakeEngine struct {
 	resumed  []string
 	statuses []engine.Status
 	addErr   error
+
+	seqHash string
+	seqOn   bool
+	seqErr  error
 }
 
 func (f *fakeEngine) AddMagnet(m string) error {
@@ -61,6 +65,32 @@ func (f *fakeEngine) Resume(h string) error {
 	return nil
 }
 func (f *fakeEngine) Close() error { return nil }
+
+func (f *fakeEngine) SetSequential(h string, on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seqHash, f.seqOn = h, on
+	return f.seqErr
+}
+
+func (f *fakeEngine) seqSnap() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seqHash, f.seqOn
+}
+
+// bareEngine implements only the base engine.Engine methods — no SetSequential —
+// so tests can verify the daemon's optional-interface guard no-ops instead of
+// panicking when the backing engine doesn't support sequential mode.
+type bareEngine struct{}
+
+func (bareEngine) AddMagnet(string) error             { return nil }
+func (bareEngine) AddTorrentURL(string, string) error { return nil }
+func (bareEngine) Statuses() []engine.Status          { return nil }
+func (bareEngine) Remove(string, bool) error          { return nil }
+func (bareEngine) Pause(string) error                 { return nil }
+func (bareEngine) Resume(string) error                { return nil }
+func (bareEngine) Close() error                       { return nil }
 
 func (f *fakeEngine) snap() ([]string, [][2]string, []string, []string, []string) {
 	f.mu.Lock()
@@ -154,6 +184,31 @@ func TestServeReturnsNilOnClose(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Serve did not return after the listener closed")
+	}
+}
+
+func TestSetSequentialRoundTrip(t *testing.T) {
+	fake := &fakeEngine{}
+	c := serveTest(t, fake)
+	if err := c.SetSequential("h1", true); err != nil {
+		t.Fatal(err)
+	}
+	if h, on := fake.seqSnap(); h != "h1" || !on {
+		t.Errorf("SetSequential recorded hash=%q on=%v, want h1 true", h, on)
+	}
+}
+
+func TestSetSequentialErrorPropagation(t *testing.T) {
+	c := serveTest(t, &fakeEngine{seqErr: errors.New("boom")})
+	if err := c.SetSequential("h1", true); err == nil || err.Error() != "boom" {
+		t.Fatalf("want boom error, got %v", err)
+	}
+}
+
+func TestSetSequentialUnsupported(t *testing.T) {
+	c := serveTest(t, bareEngine{})
+	if err := c.SetSequential("h1", true); err != nil {
+		t.Fatalf("SetSequential on an engine without the optional interface should no-op, got %v", err)
 	}
 }
 

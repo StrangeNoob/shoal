@@ -415,6 +415,8 @@ func (m Model) renderDownloads(w, h int) string {
 			detail += "  ·  ⏸ paused"
 		case s.Queued:
 			detail += "  ·  ⏳ queued"
+		case s.Sequential:
+			detail += "  ·  ▶ sequential"
 		case m.dlSpeed[s.Name] > 0:
 			detail += fmt.Sprintf("  ·  %s/s", formatBytes(m.dlSpeed[s.Name]))
 			if eta := formatETA(etaSeconds(s, m.dlSpeed[s.Name])); eta != "" {
@@ -714,7 +716,7 @@ func (m Model) renderFooter() string {
 	case m.histConfirm:
 		parts = []string{hint("k", "remove"), hint("d", "+delete files"), hint("esc", "back")}
 	case m.section == sectionDownloads:
-		parts = []string{hint("↑↓", "move"), hint("enter", "details"), hint("[ ]", "queue order"), hint("o", "open"), hint("p", "pause/resume"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
+		parts = []string{hint("↑↓", "move"), hint("enter", "details"), hint("[ ]", "queue order"), hint("o", "open"), hint("p", "pause/resume"), hint("s", "sequential"), hint("x", "cancel"), hint("tab", "panes"), hint("?", "help"), hint("q", "quit")}
 	case m.section == sectionSearch:
 		parts = []string{
 			hint("/", "search"), hint("↑↓", "move"), hint("←→", "type"),

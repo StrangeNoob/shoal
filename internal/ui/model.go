@@ -331,6 +331,36 @@ func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cm
 	}
 }
 
+// sequencer is implemented by engines that support toggling sequential
+// (streaming) piece-priority mode for a torrent.
+type sequencer interface {
+	SetSequential(infoHash string, on bool) error
+}
+
+// setSequentialErrMsg reports a failed SetSequential call, carrying the
+// infohash and attempted state so the optimistic flip can be reverted.
+type setSequentialErrMsg struct {
+	err      error
+	infoHash string
+	on       bool
+}
+
+// setSequentialCmd toggles a download's sequential mode off the UI thread.
+// Returns nil if the engine doesn't support it (e.g. the test fake, unless it
+// opts in).
+func setSequentialCmd(eng engine.Engine, infoHash string, on bool) tea.Cmd {
+	sq, ok := eng.(sequencer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := sq.SetSequential(infoHash, on); err != nil {
+			return setSequentialErrMsg{err: err, infoHash: infoHash, on: on}
+		}
+		return nil
+	}
+}
+
 // statusPoller is implemented by engines that can report status off the UI
 // thread (the production daemon client and the test fake); pollCmd runs it
 // inside a tea.Cmd goroutine instead of blocking Update.
@@ -581,6 +611,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.setError("Couldn't change file selection: " + msg.err.Error())
+		return m, nil
+
+	case setSequentialErrMsg:
+		// Revert the optimistic flip for the download whose write failed.
+		for i := range m.statuses {
+			if m.statuses[i].InfoHash == msg.infoHash {
+				m.statuses[i].Sequential = !msg.on
+				break
+			}
+		}
+		m.setError("Couldn't toggle sequential mode: " + msg.err.Error())
 		return m, nil
 
 	case reorderDoneMsg:
@@ -1037,6 +1078,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ss := m.seeding()
 			if len(ss) > 0 && m.seedCursor < len(ss) {
 				return m, pauseToggleCmd(m.eng, ss[m.seedCursor])
+			}
+		}
+		return m, nil
+	case "s":
+		// Toggle sequential (streaming) mode on the selected download, optimistic
+		// flip + revert-on-error like the file-selection toggle.
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				hash := ds[m.dlCursor].InfoHash
+				for i := range m.statuses {
+					if m.statuses[i].InfoHash == hash {
+						m.statuses[i].Sequential = !m.statuses[i].Sequential
+						return m, setSequentialCmd(m.eng, hash, m.statuses[i].Sequential)
+					}
+				}
 			}
 		}
 		return m, nil

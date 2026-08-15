@@ -64,6 +64,10 @@ type fakeEngine struct {
 	setFilesPath     string
 	setFilesSelected bool
 	setFilesErr      error // returned by SetFiles when set
+
+	seqHash string
+	seqOn   bool
+	seqErr  error // returned by SetSequential when set
 }
 
 func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
@@ -108,6 +112,11 @@ func (e *fakeEngine) Resume(infoHash string) error {
 	return nil
 }
 func (e *fakeEngine) Close() error { return nil }
+
+func (e *fakeEngine) SetSequential(infoHash string, on bool) error {
+	e.seqHash, e.seqOn = infoHash, on
+	return e.seqErr
+}
 
 // --- helpers ---------------------------------------------------------------
 
@@ -674,6 +683,52 @@ func TestDetailToggleRevertsOnError(t *testing.T) {
 	}
 	if !m.dlDetail.Files[0].Selected {
 		t.Fatal("a failed SetFiles must revert the optimistic checkbox back to selected")
+	}
+	if m.notice == "" || !m.noticeErr {
+		t.Fatalf("a failed toggle should surface an error notice, got %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+func TestDownloadsSequentialToggle(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	m, cmd := update(m, key("s"))
+	if cmd == nil {
+		t.Fatal("s should return a SetSequential command")
+	}
+	if !m.statuses[0].Sequential {
+		t.Fatal("s should optimistically flip Sequential on before the write returns")
+	}
+	cmd() // runs SetSequential
+
+	if eng.seqHash != "a" || !eng.seqOn {
+		t.Fatalf("SetSequential called with hash=%q on=%v, want \"a\" true", eng.seqHash, eng.seqOn)
+	}
+}
+
+func TestDownloadsSequentialToggleRevertsOnError(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10}},
+		seqErr:   errors.New("daemon down"),
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	m, cmd := update(m, key("s")) // toggle sequential on (will fail)
+	if !m.statuses[0].Sequential {
+		t.Fatal("optimistic flip should mark Sequential on before the write returns")
+	}
+	msg := cmd() // runs SetSequential → returns setSequentialErrMsg
+	m, _ = update(m, msg)
+
+	if m.statuses[0].Sequential {
+		t.Fatal("a failed SetSequential must revert the optimistic flag")
 	}
 	if m.notice == "" || !m.noticeErr {
 		t.Fatalf("a failed toggle should surface an error notice, got %q err=%v", m.notice, m.noticeErr)

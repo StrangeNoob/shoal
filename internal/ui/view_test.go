@@ -47,8 +47,12 @@ func TestHomeAndHelpListCommands(t *testing.T) {
 	// The Downloads footer hint must say pause/resume (p toggles both), not just pause.
 	d := ready(New(&fakeSource{}, &fakeEngine{}))
 	d.section = sectionDownloads
-	if f := d.View(); !strings.Contains(f, "pause/resume") {
+	f := d.View()
+	if !strings.Contains(f, "pause/resume") {
 		t.Errorf("Downloads footer should read 'pause/resume':\n%s", f)
+	}
+	if !strings.Contains(f, "sequential") {
+		t.Errorf("Downloads footer should show the sequential hint:\n%s", f)
 	}
 }
 
@@ -310,6 +314,26 @@ func TestRenderDownloadsShowsSpeed(t *testing.T) {
 	m.dlSpeed = nil
 	if strings.Contains(m.View(), "/s") {
 		t.Fatalf("no sampled speed should render no /s suffix:\n%s", m.View())
+	}
+}
+
+func TestRenderDownloadsShowsSequentialTag(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Sequential: true}}
+	if v := m.View(); !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a sequential download should show the '▶ sequential' tag:\n%s", v)
+	}
+
+	// A paused-and-sequential download shows "paused", not a duplicate tag — the
+	// detail line's state slot is mutually exclusive (mirrors paused vs. queued).
+	m.statuses[0].Paused = true
+	v := m.View()
+	if !strings.Contains(v, "paused") {
+		t.Fatalf("a paused+sequential download should still show 'paused':\n%s", v)
+	}
+	if strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a paused+sequential download should not also show '▶ sequential':\n%s", v)
 	}
 }
 
