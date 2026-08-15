@@ -49,6 +49,11 @@ type Config struct {
 
 	// Updates
 	AutoUpdate bool `json:"auto_update"` // apply the latest release automatically on launch
+
+	// Subtitles (OpenSubtitles.com)
+	OpenSubsAPIKey string `json:"opensubs_api_key"` // user-supplied API key; empty disables subtitle fetch
+	SubsLang       string `json:"subs_lang"`        // preferred subtitle language code
+	SubsAuto       bool   `json:"subs_auto"`        // auto-fetch subtitles on download completion
 }
 
 // Default returns the built-in configuration.
@@ -64,6 +69,7 @@ func Default() Config {
 		ListenPort:        6881,
 		DaemonIdleMinutes: 10,
 		NotifyOnComplete:  true,
+		SubsLang:          "en",
 	}
 }
 

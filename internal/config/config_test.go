@@ -136,3 +136,32 @@ func TestDaemonIdleMinutesDefault(t *testing.T) {
 		t.Fatalf("Default().DaemonIdleMinutes = %d, want 10", got)
 	}
 }
+
+func TestSubtitlesDefaults(t *testing.T) {
+	c := Default()
+	if c.OpenSubsAPIKey != "" {
+		t.Errorf("OpenSubsAPIKey = %q, want empty", c.OpenSubsAPIKey)
+	}
+	if c.SubsLang != "en" {
+		t.Errorf("SubsLang = %q, want en", c.SubsLang)
+	}
+	if c.SubsAuto {
+		t.Errorf("SubsAuto = %v, want false", c.SubsAuto)
+	}
+}
+
+func TestSubtitlesRoundTrip(t *testing.T) {
+	isolate(t)
+	c := Default()
+	c.OpenSubsAPIKey = "abc123"
+	c.SubsLang = "fr"
+	c.SubsAuto = true
+	if err := c.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got := Load()
+	if got.OpenSubsAPIKey != "abc123" || got.SubsLang != "fr" || !got.SubsAuto {
+		t.Errorf("round trip mismatch: %+v", got)
+	}
+}
