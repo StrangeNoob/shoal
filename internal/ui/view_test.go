@@ -325,15 +325,22 @@ func TestRenderDownloadsShowsSequentialTag(t *testing.T) {
 		t.Fatalf("a sequential download should show the '▶ sequential' tag:\n%s", v)
 	}
 
-	// A paused-and-sequential download shows "paused", not a duplicate tag — the
-	// detail line's state slot is mutually exclusive (mirrors paused vs. queued).
+	// The tag is additive, not exclusive: a paused+sequential download shows
+	// both — the torrent being watched is exactly the one where sequential
+	// state matters most.
 	m.statuses[0].Paused = true
 	v := m.View()
-	if !strings.Contains(v, "paused") {
-		t.Fatalf("a paused+sequential download should still show 'paused':\n%s", v)
+	if !strings.Contains(v, "paused") || !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a paused+sequential download should show both 'paused' and '▶ sequential':\n%s", v)
 	}
-	if strings.Contains(v, "▶ sequential") {
-		t.Fatalf("a paused+sequential download should not also show '▶ sequential':\n%s", v)
+	m.statuses[0].Paused = false
+
+	// A downloading sequential torrent (with a sampled speed) keeps its
+	// speed/ETA alongside the tag — it's the one actively being streamed.
+	m.dlSpeed = map[string]int64{"Movie": 1024 * 1024} // 1 MiB/s
+	v = m.View()
+	if !strings.Contains(v, "MiB/s") || !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a downloading sequential torrent should show both speed and '▶ sequential':\n%s", v)
 	}
 }
 

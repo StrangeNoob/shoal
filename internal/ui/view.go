@@ -415,13 +415,17 @@ func (m Model) renderDownloads(w, h int) string {
 			detail += "  ·  ⏸ paused"
 		case s.Queued:
 			detail += "  ·  ⏳ queued"
-		case s.Sequential:
-			detail += "  ·  ▶ sequential"
 		case m.dlSpeed[s.Name] > 0:
 			detail += fmt.Sprintf("  ·  %s/s", formatBytes(m.dlSpeed[s.Name]))
 			if eta := formatETA(etaSeconds(s, m.dlSpeed[s.Name])); eta != "" {
 				detail += "  ·  ETA " + eta
 			}
+		}
+		// Sequential mode is independent of paused/queued/speed — a torrent being
+		// watched keeps its speed/ETA, so this appends rather than competing for
+		// the switch's single slot above.
+		if s.Sequential {
+			detail += "  ·  ▶ sequential"
 		}
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
