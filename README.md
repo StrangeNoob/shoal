@@ -181,7 +181,9 @@ shoal completion bash|zsh|fish       # print a shell completion script
   script doesn't have to poll `status`. Add `--files '<glob>'` to download only files matching a
   comma-separated glob pattern (e.g. `--files '*.mkv,*.srt'`) — applied once metadata arrives, so it
   works for magnets; not yet supported for `.torrent`-URL targets. Add `--sequential` to download in
-  sequential (streaming) piece order instead of rarest-first.
+  sequential (streaming) piece order instead of rarest-first — like `--files`, this only applies to
+  magnet targets today (a `.torrent`-URL download prints a note and continues without it); use
+  `shoal sequential <id> on` afterwards for those.
 - **`files`** lists a download's files as a table (`# / ✓·✗ / SIZE / PATH`), with one row per file.
   Add `--only '<glob>'` to select files matching a glob pattern and deselect the rest (format: comma-separated
   patterns, case-insensitive, matched against full path and basename, same as `--files`).
@@ -193,7 +195,8 @@ shoal completion bash|zsh|fish       # print a shell completion script
 - **`stream`** is the one-shot way to watch something while it downloads: `shoal stream <id|magnet>`
   resolves the target (an existing download, or a fresh magnet), turns on sequential mode, waits
   for its target file to become playable (first ~8 MiB plus the last piece complete — picked by
-  `--files '<glob>'` if given, else the largest video file), then prints its absolute path to
+  `--files '<glob>'` if given, else the largest video file, falling back to the largest file overall
+  when no file has a video extension; files being downloaded win over deselected ones), then prints its absolute path to
   **stdout** and exits — the download keeps going in the daemon. Progress goes to stderr, so the
   canonical use is `mpv "$(shoal stream <id>)"`.
 - **`status`** reports each background download as `downloading | done | seeding | paused`;

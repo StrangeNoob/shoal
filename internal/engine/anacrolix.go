@@ -175,10 +175,11 @@ func (a *Anacrolix) queueLoop(interval time.Duration) {
 // reconcileQueue holds/releases torrents so at most maxActive download at once
 // (oldest first), then re-applies sequential-mode piece priorities. The
 // hold/release decision is made by the pure planQueue; this only gathers state
-// and applies the result under the lock.
+// and applies the result under the lock. The sequential pass runs after the
+// lock is released (like SetSequential): it makes thousands of piece-priority
+// calls, which would otherwise block Statuses/Pause/Resume/Remove.
 func (a *Anacrolix) reconcileQueue() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.maxActive > 0 {
 		orderIdx := make(map[metainfo.Hash]int, len(a.order))
 		for i, h := range a.order {
@@ -221,10 +222,15 @@ func (a *Anacrolix) reconcileQueue() {
 			delete(a.queued, h)
 		}
 	}
+	var seq []*torrent.Torrent
 	for _, t := range a.client.Torrents() {
 		if a.sequential[t.InfoHash()] {
-			applySequential(t)
+			seq = append(seq, t)
 		}
+	}
+	a.mu.Unlock()
+	for _, t := range seq {
+		applySequential(t)
 	}
 }
 
@@ -452,6 +458,7 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 	for _, p := range paths {
 		want[p] = true
 	}
+	var off []*torrent.File
 	for _, f := range t.Files() {
 		if !want[f.DisplayPath()] {
 			continue
@@ -460,8 +467,12 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 			f.Download()
 		} else {
 			f.SetPriority(torrent.PiecePriorityNone)
+			off = append(off, f)
 		}
 	}
+	// A deselected file keeps downloading if sequential mode bumped its pieces
+	// (effective priority is max(file, piece)), so clear those too.
+	clearPieceBumps(t, off)
 	a.persistDeselected(t)
 	if seq {
 		applySequential(t)
@@ -532,13 +543,16 @@ func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
 	for _, p := range deselect {
 		off[p] = true
 	}
+	var cleared []*torrent.File
 	for _, f := range t.Files() {
 		if off[f.DisplayPath()] {
 			f.SetPriority(torrent.PiecePriorityNone)
+			cleared = append(cleared, f)
 		} else {
 			f.Download()
 		}
 	}
+	clearPieceBumps(t, cleared) // else sequential-mode bumps keep them downloading
 	a.persistDeselected(t)
 }
 
@@ -739,15 +753,15 @@ func (a *Anacrolix) Resume(infoHash string) error {
 // SetSequential toggles sequential (streaming) piece priority mode for the
 // torrent with the given hex infohash, and persists the flag. Turning it on
 // applies the plan immediately (also re-applied on the poll path, metadata
-// arrival, and file-selection changes). Turning it off resets every selected
-// file to Normal priority via f.SetPriority; deselected files are left alone
-// (they stay None). An unknown hash is a no-op (nil error).
+// arrival, and file-selection changes). Turning it off clears the piece-level
+// bumps the plan made and resets every selected file to Normal priority;
+// deselected files stay None. An unknown hash is an error.
 func (a *Anacrolix) SetSequential(infoHash string, on bool) error {
 	a.mu.Lock()
 	t, h, ok := a.torrentByHash(infoHash)
 	if !ok {
 		a.mu.Unlock()
-		return nil
+		return fmt.Errorf("no such torrent: %s", infoHash)
 	}
 	a.sequential[h] = on
 	if a.store != nil {
@@ -758,6 +772,7 @@ func (a *Anacrolix) SetSequential(infoHash string, on bool) error {
 	if on {
 		applySequential(t)
 	} else {
+		clearPieceBumps(t, t.Files()) // piece bumps outlive the mode otherwise
 		for _, f := range t.Files() {
 			if f.Priority() != torrent.PiecePriorityNone {
 				f.SetPriority(torrent.PiecePriorityNormal)

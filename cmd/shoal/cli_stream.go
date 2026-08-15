@@ -89,7 +89,25 @@ func runStream(args []string, out io.Writer) int {
 		return 1
 	}
 
+	var st engine.Status
 	for {
+		// Status first: a paused or queued torrent never advances, so waiting on
+		// it would hang forever. This also gives the path printed on success.
+		statuses, err := c.StatusesErr()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "\nshoal stream:", err)
+			return 1
+		}
+		var ok bool
+		st, ok = findStreamStatus(statuses, infoHash)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "\nshoal stream: torrent disappeared")
+			return 1
+		}
+		if reason := streamStuckReason(st, infoHash[:8]); reason != "" {
+			fmt.Fprintln(os.Stderr, "\nshoal stream:", reason)
+			return 1
+		}
 		f, ok := findStreamFile(det.Files, target.Path)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "\nshoal stream: target file disappeared:", target.Path)
@@ -119,20 +137,20 @@ func runStream(args []string, out io.Writer) int {
 		}
 	}
 	fmt.Fprint(os.Stderr, "\r\033[K")
-
-	statuses, err := c.StatusesErr()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "shoal stream:", err)
-		return 1
-	}
-	st, ok := findStreamStatus(statuses, infoHash)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "shoal stream: torrent disappeared")
-		return 1
-	}
-
 	fmt.Fprintln(out, filePathFor(st, det.Files, target))
 	return 0
+}
+
+// streamStuckReason explains why st can't make progress toward playability, or
+// "" when it can. id is the short torrent id to put in the suggested command.
+func streamStuckReason(st engine.Status, id string) string {
+	switch {
+	case st.Paused:
+		return fmt.Sprintf("%s is paused — run `shoal resume %s`", st.Name, id)
+	case st.Queued:
+		return fmt.Sprintf("%s is queued behind max-active downloads — finish or pause another download to free a slot (id %s)", st.Name, id)
+	}
+	return ""
 }
 
 // resolveStreamTarget resolves arg to an infohash: a magnet is added to the
@@ -159,7 +177,10 @@ func resolveStreamTarget(c *daemon.Client, arg string) (string, error) {
 
 // pickStreamTarget chooses the file to stream: the --files glob match if
 // given (error if nothing matches), else the largest file with a video
-// extension, else the largest file overall.
+// extension, else the largest file overall. Among the candidates, files being
+// downloaded win over deselected ones (a deselected file never becomes
+// playable); if none are selected the largest still wins, so the wait loop can
+// report the deselection with an actionable hint.
 func pickStreamTarget(files []engine.FileDetail, globsCSV string) (engine.FileDetail, error) {
 	if len(files) == 0 {
 		return engine.FileDetail{}, fmt.Errorf("torrent has no files")
@@ -179,13 +200,31 @@ func pickStreamTarget(files []engine.FileDetail, globsCSV string) (engine.FileDe
 	} else if video := filterVideo(files); len(video) > 0 {
 		candidates = video
 	}
+	if selected := filterSelected(candidates); len(selected) > 0 {
+		candidates = selected
+	}
 	best := candidates[0]
 	for _, f := range candidates[1:] {
 		if f.Length > best.Length {
 			best = f
 		}
 	}
+	if best.Length == 0 {
+		// Playability is "first N bytes + last piece"; a 0-byte file can never
+		// satisfy it, so waiting on it would spin forever.
+		return engine.FileDetail{}, fmt.Errorf("target file %q is empty (0 bytes)", best.Path)
+	}
 	return best, nil
+}
+
+func filterSelected(files []engine.FileDetail) []engine.FileDetail {
+	var out []engine.FileDetail
+	for _, f := range files {
+		if f.Selected {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func filterVideo(files []engine.FileDetail) []engine.FileDetail {

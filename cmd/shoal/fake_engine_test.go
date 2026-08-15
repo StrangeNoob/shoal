@@ -19,7 +19,13 @@ type fakeEngine struct {
 	paused        []string
 	resumed       []string
 	statuses      []engine.Status
-	detail        engine.Detail
+	// statusSeq, when non-empty, makes successive Statuses calls return
+	// successive snapshots (staying on the last once exhausted) — used to
+	// simulate a torrent being paused/queued mid-wait. statuses is used when
+	// empty. Mirrors detailSeq below.
+	statusSeq  [][]engine.Status
+	statusCall int
+	detail     engine.Detail
 	// detailSeq, when non-empty, makes successive Detail calls return successive
 	// states (staying on the last once exhausted) — used to simulate playability
 	// advancing across `shoal stream`'s poll loop. detail is used when empty.
@@ -64,7 +70,15 @@ func (f *fakeEngine) AddTorrentURL(u, n string) error {
 func (f *fakeEngine) Statuses() []engine.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]engine.Status(nil), f.statuses...)
+	if len(f.statusSeq) == 0 {
+		return append([]engine.Status(nil), f.statuses...)
+	}
+	i := f.statusCall
+	if i >= len(f.statusSeq) {
+		i = len(f.statusSeq) - 1
+	}
+	f.statusCall++
+	return append([]engine.Status(nil), f.statusSeq[i]...)
 }
 func (f *fakeEngine) Remove(h string, deleteData bool) error {
 	f.mu.Lock()

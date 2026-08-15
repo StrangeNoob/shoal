@@ -286,6 +286,126 @@ func TestStreamMetadataDetailErrorExitsNonZero(t *testing.T) {
 	}
 }
 
+// bufferingDetail is a target that is selected but not yet playable, so the
+// wait loop keeps polling.
+func bufferingDetail() engine.Detail {
+	return engine.Detail{Files: []engine.FileDetail{
+		{Path: "movie.mp4", Length: 100, Selected: true, HeadBytes: 10, TailDone: false},
+	}}
+}
+
+// A paused torrent makes no progress, so waiting for playability would hang
+// forever — stream must bail out with a hint instead.
+func TestStreamPausedMidWaitAborts(t *testing.T) {
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	running := []engine.Status{{InfoHash: streamIH, Path: "/data/Show"}}
+	paused := []engine.Status{{InfoHash: streamIH, Path: "/data/Show", Paused: true}}
+	fake := &fakeEngine{
+		statusSeq: [][]engine.Status{running, running, paused},
+		detail:    bufferingDetail(),
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runStream([]string{streamIH}, &buf) }()
+	select {
+	case code := <-done:
+		if code == 0 {
+			t.Fatalf("paused mid-wait should exit non-zero, got 0: %s", buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream hung on a paused torrent")
+	}
+	if buf.String() != "" {
+		t.Fatalf("stdout must stay empty on error, got %q", buf.String())
+	}
+}
+
+// The hints themselves (printed to stderr by the loop) are checked here, where
+// they're a plain string.
+func TestStreamStuckReason(t *testing.T) {
+	paused := streamStuckReason(engine.Status{Name: "Show", Paused: true}, "abcdef12")
+	if !strings.Contains(paused, "paused") || !strings.Contains(paused, "shoal resume abcdef12") {
+		t.Fatalf("paused hint = %q, want it to name `shoal resume <id>`", paused)
+	}
+	queued := streamStuckReason(engine.Status{Name: "Show", Queued: true}, "abcdef12")
+	if !strings.Contains(queued, "queued") || !strings.Contains(queued, "max-active") {
+		t.Fatalf("queued hint = %q, want it to mention the max-active limit", queued)
+	}
+	if got := streamStuckReason(engine.Status{Name: "Show"}, "abcdef12"); got != "" {
+		t.Fatalf("a downloading torrent is not stuck, got %q", got)
+	}
+}
+
+// Same for a torrent the scheduler is holding behind max-active downloads.
+func TestStreamQueuedMidWaitAborts(t *testing.T) {
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	running := []engine.Status{{InfoHash: streamIH, Path: "/data/Show"}}
+	queued := []engine.Status{{InfoHash: streamIH, Path: "/data/Show", Queued: true}}
+	fake := &fakeEngine{
+		statusSeq: [][]engine.Status{running, running, queued},
+		detail:    bufferingDetail(),
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runStream([]string{streamIH}, &buf) }()
+	select {
+	case code := <-done:
+		if code == 0 {
+			t.Fatalf("queued mid-wait should exit non-zero, got 0: %s", buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream hung on a queued torrent")
+	}
+	if buf.String() != "" {
+		t.Fatalf("stdout must stay empty on error, got %q", buf.String())
+	}
+}
+
+// A deselected file must not shadow a selected one: the largest video wins
+// only among the files actually being downloaded.
+func TestPickStreamTargetPrefersSelected(t *testing.T) {
+	files := []engine.FileDetail{
+		{Path: "big.mkv", Length: 900, Selected: false},
+		{Path: "small.mkv", Length: 100, Selected: true},
+	}
+	got, err := pickStreamTarget(files, "")
+	if err != nil {
+		t.Fatalf("pickStreamTarget: %v", err)
+	}
+	if got.Path != "small.mkv" {
+		t.Fatalf("picked %q, want the selected small.mkv", got.Path)
+	}
+	// With nothing selected, fall back to the largest (the wait loop then
+	// reports the deselection with an actionable hint).
+	files[1].Selected = false
+	got, err = pickStreamTarget(files, "")
+	if err != nil {
+		t.Fatalf("pickStreamTarget (none selected): %v", err)
+	}
+	if got.Path != "big.mkv" {
+		t.Fatalf("picked %q, want big.mkv when nothing is selected", got.Path)
+	}
+}
+
+// A zero-length target can never satisfy the playability check, so error
+// instead of waiting forever.
+func TestPickStreamTargetRejectsEmptyFile(t *testing.T) {
+	files := []engine.FileDetail{{Path: "empty.mkv", Length: 0, Selected: true}}
+	if _, err := pickStreamTarget(files, ""); err == nil {
+		t.Fatal("a zero-length target should be an error, got nil")
+	}
+}
+
 // TestStreamDeselectedMidWaitAborts covers a concurrent `shoal files --only`
 // deselecting the target while stream is polling for playability: the loop
 // must notice and abort rather than spin forever on frozen HeadBytes/TailDone.

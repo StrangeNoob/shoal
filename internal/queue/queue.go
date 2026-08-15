@@ -212,13 +212,18 @@ func (s *Store) SetName(infoHash, name string) {
 }
 
 // Save writes the store to Path (creating the dir). No-op when Path is empty.
+//
+// mu is held across both the marshal and the write: releasing it in between
+// lets two concurrent savers reach WriteFile in the reverse of their marshal
+// order, leaving the file older than the store (a lost update). No caller holds
+// mu — every mutator unlocks before calling Save — so this can't deadlock.
 func (s *Store) Save() error {
 	if s.Path == "" {
 		return nil
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, err := json.MarshalIndent(s, "", "  ") // marshal a consistent snapshot of Entries
-	s.mu.Unlock()
 	if err != nil {
 		return err
 	}

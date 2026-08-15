@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anacrolix/torrent"
 	atbencode "github.com/anacrolix/torrent/bencode"
 	atmetainfo "github.com/anacrolix/torrent/metainfo"
 
@@ -562,10 +563,109 @@ func waitMeta(t *testing.T, eng *Anacrolix) {
 	t.Fatal("metadata never resolved")
 }
 
-func TestSetSequentialUnknownHashIsNoop(t *testing.T) {
+func TestSetSequentialUnknownHashErrors(t *testing.T) {
 	eng := newEngine(t)
-	if err := eng.SetSequential("deadbeef00000000000000000000000000000000", true); err != nil {
-		t.Fatalf("SetSequential(unknown) = %v, want nil", err)
+	// Same contract as SetFiles/SetFileGlobs: an unknown hash is an error, so
+	// `shoal sequential <id> on` can't report success for nothing.
+	if err := eng.SetSequential("deadbeef00000000000000000000000000000000", true); err == nil {
+		t.Fatal("SetSequential(unknown hash) = nil, want a not-found error")
+	}
+}
+
+// addSequentialTestTorrent adds a real multi-piece torrent and returns the
+// engine, its hex infohash and the live *torrent.Torrent once its files are
+// selected (DownloadAll runs asynchronously on GotInfo).
+func addSequentialTestTorrent(t *testing.T) (*Anacrolix, string, *torrent.Torrent) {
+	t.Helper()
+	dir := t.TempDir()
+	// A queue store is what makes applyFileSelection call f.Download() (file
+	// priorities, which is what applySequential spans over) — the daemon always
+	// runs with one.
+	eng, err := NewAnacrolix(Config{DataDir: dir, QueuePath: filepath.Join(dir, "queue.json")})
+	if err != nil {
+		t.Skipf("cannot start torrent client in this environment: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 200000)) // ~1 MB => ~62 pieces
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+	if err := eng.AddTorrentURL(srv.URL, "seq-pieces"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, eng)
+	h := eng.Statuses()[0].InfoHash
+	tt, _, ok := eng.torrentByHash(h)
+	if !ok {
+		t.Fatal("torrent vanished after add")
+	}
+	// Wait for the file to be selected (applyFileSelection runs off GotInfo) and
+	// for piece priorities to read back: effective priority is None until
+	// storage completion is cached, which happens asynchronously after the add.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		d, err := eng.Detail(h)
+		if err == nil && len(d.Files) == 1 && d.Files[0].Selected &&
+			maxPiecePriority(tt) >= torrent.PiecePriorityNormal {
+			return eng, h, tt
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("file never became selected with readable piece priorities")
+	return nil, "", nil
+}
+
+// maxPiecePriority is the highest effective piece priority in t. anacrolix's
+// effective priority is max(file, piece), so it reads back the bumps
+// applySequential made.
+func maxPiecePriority(tt *torrent.Torrent) torrent.PiecePriority {
+	max := torrent.PiecePriorityNone
+	for i := 0; i < tt.NumPieces(); i++ {
+		if p := tt.PieceState(i).Priority; p > max {
+			max = p
+		}
+	}
+	return max
+}
+
+// Sequential mode raises piece-level priorities; turning it off must lower them
+// again. Effective priority is max(file, piece), so leftover Now/High pieces
+// would keep a window downloading out of order forever.
+func TestSetSequentialOffClearsPieceBumps(t *testing.T) {
+	eng, h, tt := addSequentialTestTorrent(t)
+
+	if err := eng.SetSequential(h, true); err != nil {
+		t.Fatalf("SetSequential(on): %v", err)
+	}
+	if got := maxPiecePriority(tt); got <= torrent.PiecePriorityNormal {
+		t.Fatalf("max piece priority with sequential on = %v, want > Normal", got)
+	}
+	if err := eng.SetSequential(h, false); err != nil {
+		t.Fatalf("SetSequential(off): %v", err)
+	}
+	if got := maxPiecePriority(tt); got > torrent.PiecePriorityNormal {
+		t.Fatalf("max piece priority after sequential off = %v, want <= Normal (piece bumps not cleared)", got)
+	}
+}
+
+// Deselecting a file while sequential is on must also drop its piece bumps —
+// otherwise the file keeps downloading despite being deselected.
+func TestSetFilesDeselectClearsPieceBumps(t *testing.T) {
+	eng, h, tt := addSequentialTestTorrent(t)
+
+	if err := eng.SetSequential(h, true); err != nil {
+		t.Fatalf("SetSequential(on): %v", err)
+	}
+	d, err := eng.Detail(h)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if err := eng.SetFiles(h, []string{d.Files[0].Path}, false); err != nil {
+		t.Fatalf("SetFiles(deselect): %v", err)
+	}
+	if got := maxPiecePriority(tt); got > torrent.PiecePriorityNone {
+		t.Fatalf("max piece priority after deselecting the only file = %v, want None", got)
 	}
 }
 

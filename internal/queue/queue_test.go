@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -175,4 +176,24 @@ func TestConcurrentAccess(t *testing.T) {
 		go func() { defer wg.Done(); s.Get("aaa") }()
 	}
 	wg.Wait()
+}
+
+// Save must not lose a concurrent saver's update. Marshalling a snapshot under
+// the lock but writing it after releasing it lets two savers reach WriteFile in
+// the reverse of their marshal order, so the file ends up older than the store.
+func TestConcurrentSavesDoNotLoseUpdates(t *testing.T) {
+	s := tmpStore(t)
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s.Upsert(Entry{InfoHash: fmt.Sprintf("hash%02d", i)})
+		}(i)
+	}
+	wg.Wait()
+	if got := len(LoadFrom(s.Path).Entries); got != n {
+		t.Fatalf("persisted %d entries, want %d — a Save overwrote a newer one", got, n)
+	}
 }
