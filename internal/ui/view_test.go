@@ -455,6 +455,13 @@ func TestViewFitsHeight(t *testing.T) {
 			m.seedCursor = 59
 			return m
 		}},
+		{"downloads, cancel banner up", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			m.cancelConfirm = true
+			m.cancelTarget = engine.Status{Name: "D0"}
+			return m
+		}},
 		{"downloads, no overflow (control)", 21, func(m Model) Model {
 			m.section = sectionDownloads
 			m.statuses = downloadsFixture(2)

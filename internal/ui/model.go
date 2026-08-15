@@ -1762,12 +1762,13 @@ func (m Model) bodyHeight() int {
 
 // downloadsWindow returns the [start,end) slice of downloads visible in a
 // pane of content height h (4 screen lines per item), sliding so dlCursor
-// stays visible. Shared by renderDownloads and click hit-testing.
-// ponytail: h is passed as the full bodyHeight; the cancel-confirm banner's
-// 2 lines aren't subtracted from the window budget, so a scrolled window can
-// sit 2 rows short of the pane while the banner is up.
+// stays visible. Shared by renderDownloads and click hit-testing, so the
+// cancel-confirm banner's 2 lines are budgeted here to keep both aligned.
 func (m Model) downloadsWindow(h int) (start, end int) {
 	ds := m.downloading()
+	if m.cancelConfirm {
+		h -= 2
+	}
 	visible := max(1, h/4)
 	if m.dlCursor >= visible {
 		start = m.dlCursor - visible + 1
