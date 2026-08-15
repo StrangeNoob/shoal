@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -496,6 +497,33 @@ func TestClickSelectsDownloadRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.dlCursor != 1 {
 		t.Fatalf("clicking DownloadTwo selected dlCursor=%d, want 1", m.dlCursor)
+	}
+}
+
+// downloadsFixture returns n downloads named D0..D9 (single digits so no name
+// is a substring of another), used to exercise downloadsWindow scrolling.
+func downloadsFixture(n int) []engine.Status {
+	ds := make([]engine.Status, n)
+	for i := range ds {
+		ds[i] = engine.Status{Name: fmt.Sprintf("D%d", i), InfoHash: fmt.Sprintf("h%d", i), TotalBytes: 100, CompletedBytes: 10}
+	}
+	return ds
+}
+
+func TestClickSelectsDownloadRowInWindow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 9 // window start = dlCursor - visible + 1 = 9-3+1 = 7
+
+	y := lineOf(m.View(), "D7") // first visible row once scrolled
+	if y < 0 {
+		t.Fatal("first visible download (D7) not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.dlCursor != 7 {
+		t.Fatalf("clicking the first visible row selected dlCursor=%d, want 7 (window start)", m.dlCursor)
 	}
 }
 

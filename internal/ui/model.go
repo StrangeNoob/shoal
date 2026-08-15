@@ -1316,10 +1316,9 @@ func (m *Model) clickSelect(x, y int) {
 			cancelLines = 2
 		}
 		base := m.headerHeight() + 1 + cancelLines // renderDownloads is body line 0 (no box)
-		visible := max(1, m.bodyHeight()/4)        // 4 screen lines per download row
-		shown := min(len(m.downloading()), visible)
+		start, end := m.downloadsWindow(m.bodyHeight())
 		if line := y - base; line >= 0 && line%4 <= 2 { // name/bar/detail, not the blank
-			if i := line / 4; i < shown {
+			if i := start + line/4; i < end {
 				m.dlCursor = i
 			}
 		}
@@ -1767,6 +1766,19 @@ func (m Model) mainWidth() int {
 // rules), mirroring View's bodyH. Body line 0 sits at screen row headerHeight()+1.
 func (m Model) bodyHeight() int {
 	return max(3, m.height-m.headerHeight()-3)
+}
+
+// downloadsWindow returns the [start,end) slice of downloads visible in a
+// pane of content height h (4 screen lines per item), sliding so dlCursor
+// stays visible. Shared by renderDownloads and click hit-testing.
+func (m Model) downloadsWindow(h int) (start, end int) {
+	ds := m.downloading()
+	visible := max(1, h/4)
+	if m.dlCursor >= visible {
+		start = m.dlCursor - visible + 1
+	}
+	end = min(len(ds), start+visible)
+	return start, end
 }
 
 // resultsWindow returns the [start,end) slice of filtered results visible in a

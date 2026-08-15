@@ -384,8 +384,6 @@ func (m Model) renderDownloads(w, h int) string {
 			st.Accent.Render("Search") + st.Meta.Render(" and press ") + st.Key.Render("d") + st.Meta.Render(".")
 	}
 
-	const perItem = 4
-	visible := max(1, h/perItem)
 	barWidth := max(10, min(48, w-24))
 
 	var b strings.Builder
@@ -397,8 +395,8 @@ func (m Model) renderDownloads(w, h int) string {
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
 	}
 
-	shown := min(len(ds), visible)
-	for i := 0; i < shown; i++ {
+	start, end := m.downloadsWindow(h)
+	for i := start; i < end; i++ {
 		s := ds[i]
 		head, nameStyle := st.Accent.Render(glyphDown+" "), st.Row
 		if i == m.dlCursor {
@@ -426,9 +424,12 @@ func (m Model) renderDownloads(w, h int) string {
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
 		b.WriteString("  " + st.Meta.Render(detail) + "\n")
-		if i < shown-1 {
+		if i < end-1 {
 			b.WriteString("\n")
 		}
+	}
+	if end < len(ds) {
+		b.WriteString("\n" + st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(ds)-end, glyphDown)))
 	}
 	return b.String()
 }

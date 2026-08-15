@@ -284,6 +284,35 @@ func TestRenderDownloadsShowsSpeed(t *testing.T) {
 	}
 }
 
+func TestRenderDownloadsWindowFollowsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 9
+
+	v := m.View()
+	if !strings.Contains(v, "D9") {
+		t.Fatalf("window should include the cursor's download (D9):\n%s", v)
+	}
+	if strings.Contains(v, "D0") {
+		t.Fatalf("window should have scrolled past the first download (D0):\n%s", v)
+	}
+}
+
+func TestRenderDownloadsMoreIndicator(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 0
+
+	v := m.View()
+	if !strings.Contains(v, glyphMore) {
+		t.Fatalf("overflow below the window should show the more indicator:\n%s", v)
+	}
+}
+
 func TestRenderDownloadsCancelPrompt(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionDownloads
