@@ -527,6 +527,44 @@ func TestClickSelectsDownloadRowInWindow(t *testing.T) {
 	}
 }
 
+// seedingFixture returns n completed seeding items named S0..S9 (single
+// digits so no name is a substring of another), used to exercise
+// seedingRowCounts/settingsWindow scrolling.
+func seedingFixture(n int) []engine.Status {
+	ss := make([]engine.Status, n)
+	for i := range ss {
+		ss[i] = engine.Status{Name: fmt.Sprintf("S%d", i), InfoHash: fmt.Sprintf("sh%d", i), TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}
+	}
+	return ss
+}
+
+// seedHistoryFixture returns n history entries named H0..H{n-1}, used to
+// exercise the Seeding pane's HISTORY-section windowing.
+func seedHistoryFixture(n int) []history.Entry {
+	hs := make([]history.Entry, n)
+	for i := range hs {
+		hs[i] = history.Entry{InfoHash: fmt.Sprintf("hh%d", i), Name: fmt.Sprintf("H%d", i), Size: 100, CompletedAt: time.Now()}
+	}
+	return hs
+}
+
+func TestClickSelectsSeedingRowInWindow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → forces a scrolled window
+	m.section = sectionSeeding
+	m.statuses = seedingFixture(10)
+	m.seedCursor = 9 // window start = 6 (see TestRenderSeedingWindowFollowsCursorAmongItems)
+
+	y := lineOf(m.View(), "S6") // first visible row once scrolled
+	if y < 0 {
+		t.Fatal("first visible seeding item (S6) not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if m.seedCursor != 6 {
+		t.Fatalf("clicking the first visible row selected seedCursor=%d, want 6 (window start)", m.seedCursor)
+	}
+}
+
 func TestClickSelectsSeedingRow(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionSeeding

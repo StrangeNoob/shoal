@@ -177,6 +177,35 @@ func TestRenderSeedingHistorySection(t *testing.T) {
 	}
 }
 
+func TestRenderSeedingWindowFollowsCursorAmongItems(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → smaller than 10 seeding items
+	m.section = sectionSeeding
+	m.statuses = seedingFixture(10)
+	m.seedCursor = 9 // last seeding item
+
+	v := m.View()
+	if !strings.Contains(v, "S9") {
+		t.Fatalf("seeding window should include the cursor's item (S9):\n%s", v)
+	}
+	if strings.Contains(v, "S0") {
+		t.Fatalf("seeding window should have scrolled past the first item (S0):\n%s", v)
+	}
+}
+
+func TestRenderSeedingWindowFollowsCursorInHistory(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12, far smaller than 60 history rows
+	m.section = sectionSeeding
+	m.history = history.Store{Entries: seedHistoryFixture(60)}
+	m.seedCursor = 59 // last history entry
+
+	v := m.View()
+	if !strings.Contains(v, "H59") {
+		t.Fatalf("seeding window should include the cursor's history entry (H59):\n%s", v)
+	}
+}
+
 func TestSeedingHistoryDedupsActive(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{
 		{Name: "Now Seeding", InfoHash: "dup", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 500, Done: true},

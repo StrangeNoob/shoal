@@ -444,15 +444,14 @@ func (m Model) renderSeeding(w, h int) string {
 		return "  " + st.Meta.Render("Nothing seeding yet. Completed downloads keep sharing here.")
 	}
 
-	const perItem = 3
-	visible := max(1, h/perItem)
-
 	var b strings.Builder
+	banner := 0
 	if m.stopConfirm {
 		b.WriteString("  " + st.Bad.Render("Stop seeding ") +
 			st.Row.Render("\""+truncate(m.stopTarget.Name, max(8, w-32))+"\"") + st.Meta.Render("?   ") +
 			st.Key.Render("enter") + st.Meta.Render(" stop (keep files)   ·   ") +
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+		banner += 2
 	}
 	if m.histConfirm {
 		b.WriteString("  " + st.Bad.Render("Delete ") +
@@ -460,18 +459,26 @@ func (m Model) renderSeeding(w, h int) string {
 			st.Key.Render("k") + st.Meta.Render(" remove   ·   ") +
 			st.Key.Render("d") + st.Meta.Render(" +delete files   ·   ") +
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+		banner += 2
 	}
-	shown := min(len(ss), visible)
-	for i := 0; i < shown; i++ {
-		s := ss[i]
+
+	// Build each cursor-indexed row into its own block of lines (leading
+	// separator/header lines included), mirroring renderSettings, so the
+	// window below can slice [start,end) without redoing the layout.
+	blocks := make([][]string, 0, len(ss)+len(hist))
+	for i, s := range ss {
+		var ls []string
+		if i > 0 {
+			ls = append(ls, "")
+		}
 		head, nameStyle := st.Good.Render(glyphSeed+" "), st.Row
 		if i == m.seedCursor {
 			head, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
 		}
-		b.WriteString(head + nameStyle.Render(truncate(s.Name, max(4, w-4))) + "\n")
+		ls = append(ls, head+nameStyle.Render(truncate(s.Name, max(4, w-4))))
 
 		if s.Paused {
-			b.WriteString("  " + st.Meta.Render("⏸ paused (not sharing)") + "\n")
+			ls = append(ls, "  "+st.Meta.Render("⏸ paused (not sharing)"))
 		} else {
 			label := "complete"
 			if s.Seeding {
@@ -494,33 +501,63 @@ func (m Model) renderSeeding(w, h int) string {
 			if sp := m.ulSpeed[s.Name]; sp > 0 {
 				detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
 			}
-			b.WriteString("  " + st.Good.Render(glyphDone+" "+label) + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
+			ls = append(ls, "  "+st.Good.Render(glyphDone+" "+label)+st.Meta.Render(truncate(detail, max(4, w-14))))
 		}
-		if i < shown-1 {
-			b.WriteString("\n")
+		blocks = append(blocks, ls)
+	}
+	for j, e := range hist {
+		var ls []string
+		if j == 0 {
+			if len(ss) > 0 {
+				ls = append(ls, "", "")
+			}
+			ls = append(ls, st.SectionHead.Render("HISTORY"))
 		}
+		meta := "  ·  " + sizeOrDash(e.Size) + "  ·  " + relTime(e.CompletedAt.Unix())
+		marker, nameStyle := st.Good.Render(glyphDone+" "), st.Row
+		if len(ss)+j == m.seedCursor {
+			marker, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
+		}
+		ls = append(ls, "  "+marker+nameStyle.Render(truncate(e.Name, max(4, w-24)))+st.Meta.Render(meta))
+		blocks = append(blocks, ls)
 	}
 
-	if len(hist) > 0 {
-		if len(ss) > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(st.SectionHead.Render("HISTORY") + "\n")
-		const histMax = 50
-		for i, e := range hist {
-			if i >= histMax {
-				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(hist)-histMax, glyphDown)) + "\n")
-				break
-			}
-			meta := "  ·  " + sizeOrDash(e.Size) + "  ·  " + relTime(e.CompletedAt.Unix())
-			marker, nameStyle := st.Good.Render(glyphDone+" "), st.Row
-			if len(ss)+i == m.seedCursor {
-				marker, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
-			}
-			b.WriteString("  " + marker + nameStyle.Render(truncate(e.Name, max(4, w-24))) + st.Meta.Render(meta) + "\n")
+	start, end := settingsWindow(m.seedingRowCounts(), m.seedCursor, max(1, h-banner))
+	for i := start; i < end; i++ {
+		for _, ln := range blocks[i] {
+			b.WriteString(ln + "\n")
 		}
 	}
 	return b.String()
+}
+
+// seedingRowCounts returns the rendered line count of each cursor-indexed
+// row in the Seeding pane (seeding items first, then HISTORY entries),
+// including each row's leading separator/header lines, mirroring
+// renderSeeding. Shared with click hit-testing and settingsWindow.
+func (m Model) seedingRowCounts() []int {
+	ss := m.seeding()
+	hist := m.seedHistory()
+	counts := make([]int, 0, len(ss)+len(hist))
+	for i := range ss {
+		if i == 0 {
+			counts = append(counts, 2) // name + detail
+		} else {
+			counts = append(counts, 3) // leading blank + name + detail
+		}
+	}
+	for j := range hist {
+		if j == 0 {
+			c := 1 + 1 // entry + HISTORY header
+			if len(ss) > 0 {
+				c += 2 // "\n\n" gap before HISTORY
+			}
+			counts = append(counts, c)
+		} else {
+			counts = append(counts, 1)
+		}
+	}
+	return counts
 }
 
 // --- Settings --------------------------------------------------------------

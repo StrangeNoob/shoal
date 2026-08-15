@@ -1343,41 +1343,33 @@ type clickRow struct {
 
 // seedingClickRows returns the screen-Y, cursor index, and line span of each
 // clickable row in the Seeding pane (seeding items span 2 lines; HISTORY entries
-// 1), mirroring renderSeeding's layout so clicks land on the right row.
+// 1), built from the same seedingRowCounts + settingsWindow layout renderSeeding
+// uses, so clicks land on the right row even when the window has scrolled.
 func (m Model) seedingClickRows() []clickRow {
 	ss := m.seeding()
-	hist := m.seedHistory()
-	shown := min(len(ss), max(1, m.bodyHeight()/3))
 
-	line := 0
+	banner := 0
 	if m.stopConfirm {
-		line += 2
+		banner += 2
 	}
 	if m.histConfirm {
-		line += 2
+		banner += 2
 	}
-	base := m.headerHeight() + 1
-	rows := make([]clickRow, 0, shown+len(hist))
-	for i := 0; i < shown; i++ {
-		rows = append(rows, clickRow{y: base + line, idx: i, span: 2}) // name + detail
-		line += 2
-		if i < shown-1 {
-			line++ // blank separator
+	base := m.headerHeight() + 1 + banner
+
+	counts := m.seedingRowCounts()
+	start, end := settingsWindow(counts, m.seedCursor, max(1, m.bodyHeight()-banner))
+
+	rows := make([]clickRow, 0, end-start)
+	y := base
+	for i := start; i < end; i++ {
+		c := counts[i]
+		if i < len(ss) {
+			rows = append(rows, clickRow{y: y + c - 2, idx: i, span: 2}) // name + detail, at the end of the block
+		} else {
+			rows = append(rows, clickRow{y: y + c - 1, idx: i, span: 1}) // the entry line, at the end of the block
 		}
-	}
-	if len(hist) > 0 {
-		if len(ss) > 0 {
-			line += 2 // the "\n\n" gap before HISTORY
-		}
-		line++ // HISTORY header
-		const histMax = 50
-		for j := range hist {
-			if j >= histMax {
-				break
-			}
-			rows = append(rows, clickRow{y: base + line, idx: len(ss) + j, span: 1})
-			line++
-		}
+		y += c
 	}
 	return rows
 }
