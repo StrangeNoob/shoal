@@ -70,14 +70,22 @@ func runStream(args []string, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "shoal stream:", err)
 		return 1
 	}
+	// A freshly-added magnet has no files until metadata arrives (the engine
+	// fetches it in the background) — wait for it the same way the playability
+	// loop below waits, instead of hard-erroring "no files" on the first poll.
+	for len(det.Files) == 0 {
+		fmt.Fprint(os.Stderr, "\r\033[Kwaiting for metadata…")
+		time.Sleep(waitPollInterval)
+		det, err = c.Detail(infoHash)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "\nshoal stream:", err)
+			return 1
+		}
+	}
+
 	target, err := pickStreamTarget(det.Files, *filesGlob)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "shoal stream:", err)
-		return 1
-	}
-	if !target.Selected {
-		fmt.Fprintf(os.Stderr, "shoal stream: %s is deselected; run `shoal files %s --only %q` to select it\n",
-			target.Path, infoHash[:8], target.Path)
 		return 1
 	}
 
@@ -85,6 +93,14 @@ func runStream(args []string, out io.Writer) int {
 		f, ok := findStreamFile(det.Files, target.Path)
 		if !ok {
 			fmt.Fprintln(os.Stderr, "\nshoal stream: target file disappeared:", target.Path)
+			return 1
+		}
+		if !f.Selected {
+			// Recheck every iteration, not just once up front: a concurrent
+			// `shoal files --only` can deselect the target mid-wait, which would
+			// otherwise freeze HeadBytes/TailDone and spin forever.
+			fmt.Fprintf(os.Stderr, "\nshoal stream: %s is deselected; run `shoal files %s --only %q` to select it\n",
+				f.Path, infoHash[:8], f.Path)
 			return 1
 		}
 		need := streamHeadBytes

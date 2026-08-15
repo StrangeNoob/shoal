@@ -25,6 +25,9 @@ type fakeEngine struct {
 	// advancing across `shoal stream`'s poll loop. detail is used when empty.
 	detailSeq  []engine.Detail
 	detailCall int
+	// detailErr, when set, is returned by every Detail call instead of a state
+	// (simulates the daemon/torrent becoming unreachable mid-wait).
+	detailErr  error
 	filesCalls []fakeSetFilesCall
 	globsCalls []fakeSetFileGlobsCall
 	seqCalls   []fakeSetSequentialCall
@@ -87,6 +90,9 @@ func (f *fakeEngine) Close() error { return nil }
 func (f *fakeEngine) Detail(_ string) (engine.Detail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.detailErr != nil {
+		return engine.Detail{}, f.detailErr
+	}
 	if len(f.detailSeq) == 0 {
 		return f.detail, nil
 	}

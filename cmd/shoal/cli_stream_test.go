@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -227,5 +228,93 @@ func TestStreamAbsolutePathMultiFileTorrent(t *testing.T) {
 	want := "/data/MyShow/Season1/ep01.mkv\n"
 	if buf.String() != want {
 		t.Fatalf("stdout = %q, want %q", buf.String(), want)
+	}
+}
+
+// TestStreamWaitsForMagnetMetadata covers a freshly-added magnet: the engine
+// fetches metadata in the background, so the first several Detail calls have
+// no files yet. `stream` must poll until files show up rather than
+// hard-erroring "no files" on the first empty response.
+func TestStreamWaitsForMagnetMetadata(t *testing.T) {
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: streamIH, Path: "/data/Show"}},
+		detailSeq: []engine.Detail{
+			{Files: nil},
+			{Files: nil},
+			{Files: []engine.FileDetail{readyFile("movie.mp4", 10)}},
+		},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runStream([]string{streamIH}, &buf) }()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit = %d: %s", code, buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream hung waiting for metadata")
+	}
+	want := "/data/Show/movie.mp4\n"
+	if buf.String() != want {
+		t.Fatalf("stdout = %q, want %q", buf.String(), want)
+	}
+}
+
+// TestStreamMetadataDetailErrorExitsNonZero covers the metadata-wait loop's
+// error path: a Detail failure (daemon/torrent unreachable) must exit
+// non-zero, not hang forever waiting for files that will never arrive.
+func TestStreamMetadataDetailErrorExitsNonZero(t *testing.T) {
+	fake := &fakeEngine{
+		statuses:  []engine.Status{{InfoHash: streamIH, Path: "/data/Show"}},
+		detailErr: errors.New("boom"),
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	if code := runStream([]string{streamIH}, &buf); code == 0 {
+		t.Fatalf("Detail error should exit non-zero, got 0")
+	}
+	if buf.String() != "" {
+		t.Fatalf("stdout must stay empty on error, got %q", buf.String())
+	}
+}
+
+// TestStreamDeselectedMidWaitAborts covers a concurrent `shoal files --only`
+// deselecting the target while stream is polling for playability: the loop
+// must notice and abort rather than spin forever on frozen HeadBytes/TailDone.
+func TestStreamDeselectedMidWaitAborts(t *testing.T) {
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: streamIH, Path: "/data/Show"}},
+		detailSeq: []engine.Detail{
+			{Files: []engine.FileDetail{{Path: "movie.mp4", Length: 100, Selected: true, HeadBytes: 40, TailDone: false}}},
+			{Files: []engine.FileDetail{{Path: "movie.mp4", Length: 100, Selected: false, HeadBytes: 60, TailDone: false}}},
+		},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runStream([]string{streamIH}, &buf) }()
+	select {
+	case code := <-done:
+		if code == 0 {
+			t.Fatalf("deselect mid-wait should exit non-zero, got 0: %s", buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream hung after target was deselected mid-wait")
+	}
+	if buf.String() != "" {
+		t.Fatalf("stdout must stay empty on error, got %q", buf.String())
 	}
 }
