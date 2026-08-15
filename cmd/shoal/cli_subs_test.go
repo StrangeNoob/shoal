@@ -118,14 +118,26 @@ func TestSubsFilePathJoin(t *testing.T) {
 	if got != want {
 		t.Errorf("multi-file join = %q, want %q", got, want)
 	}
+
+	// Third shape: a directory-mode torrent that happens to contain exactly
+	// one file. len(allFiles)==1 alone must not be treated as single-file
+	// format — f.Path ("movie.mkv") differs from the torrent's own name
+	// (base(statusPath) == "ReleaseFolder"), so this must still Join.
+	folderOneFile := []engine.FileDetail{{Path: "movie.mkv", Length: 200 << 20}}
+	folderPath := filepath.Join("/data", "ReleaseFolder")
+	gotFolder := subsFilePath(folderPath, folderOneFile, folderOneFile[0])
+	wantFolder := filepath.Join(folderPath, "movie.mkv")
+	if gotFolder != wantFolder {
+		t.Errorf("folder-with-one-file join = %q, want %q", gotFolder, wantFolder)
+	}
 }
 
 func TestSubsTargetFilesDefaultRule(t *testing.T) {
 	files := []engine.FileDetail{
-		{Path: "movie.mkv", Length: 200 << 20},      // qualifies: video ext + big
-		{Path: "sample.mkv", Length: 1 << 20},       // too small
-		{Path: "movie.srt", Length: 200 << 20},      // wrong ext
-		{Path: "extra/clip.mp4", Length: 150 << 20}, // qualifies
+		{Path: "movie.mkv", Length: 200 << 20, Selected: true},      // qualifies: video ext + big
+		{Path: "sample.mkv", Length: 1 << 20, Selected: true},       // too small
+		{Path: "movie.srt", Length: 200 << 20, Selected: true},      // wrong ext
+		{Path: "extra/clip.mp4", Length: 150 << 20, Selected: true}, // qualifies
 	}
 	got := subsTargetFiles(files, nil)
 	if len(got) != 2 || got[0].Path != "movie.mkv" || got[1].Path != "extra/clip.mp4" {
@@ -135,12 +147,36 @@ func TestSubsTargetFilesDefaultRule(t *testing.T) {
 
 func TestSubsTargetFilesGlobOverridesSizeRule(t *testing.T) {
 	files := []engine.FileDetail{
-		{Path: "movie.mkv", Length: 1 << 10}, // small — would fail the default rule
-		{Path: "readme.txt", Length: 10},
+		{Path: "movie.mkv", Length: 1 << 10, Selected: true}, // small — would fail the default rule
+		{Path: "readme.txt", Length: 10, Selected: true},
 	}
 	got := subsTargetFiles(files, []string{"*.mkv"})
 	if len(got) != 1 || got[0].Path != "movie.mkv" {
 		t.Fatalf("subsTargetFiles(glob) = %+v, want just movie.mkv (size rule bypassed)", got)
+	}
+}
+
+// A deselected file (never downloaded) must never be targeted, even when it
+// otherwise qualifies — fetching a subtitle for it would write an orphaned
+// .srt next to a file that doesn't exist on disk.
+func TestSubsTargetFilesSkipsDeselectedDefaultRule(t *testing.T) {
+	files := []engine.FileDetail{
+		{Path: "movie.mkv", Length: 200 << 20, Selected: true},
+		{Path: "deselected.mkv", Length: 200 << 20, Selected: false},
+	}
+	got := subsTargetFiles(files, nil)
+	if len(got) != 1 || got[0].Path != "movie.mkv" {
+		t.Fatalf("subsTargetFiles(default) = %+v, want only the selected file", got)
+	}
+}
+
+func TestSubsTargetFilesSkipsDeselectedGlob(t *testing.T) {
+	files := []engine.FileDetail{
+		{Path: "movie.mkv", Length: 200 << 20, Selected: false},
+	}
+	got := subsTargetFiles(files, []string{"*.mkv"})
+	if len(got) != 0 {
+		t.Fatalf("subsTargetFiles(glob) = %+v, want none (the only match is deselected)", got)
 	}
 }
 
@@ -376,5 +412,29 @@ func TestSubsNoQualifyingFilesExitsNonZero(t *testing.T) {
 	var buf bytes.Buffer
 	if code := runSubs([]string{"abc"}, &buf); code == 0 {
 		t.Fatalf("exit = 0, want non-zero when nothing qualifies")
+	}
+}
+
+func TestSubsFilesGlobMatchesOnlyDeselectedFileExitsNonZero(t *testing.T) {
+	isolateConfig(t)
+	setSubsConfig(t, "test-key", "en")
+	swapSubsFetch(t, func(apiKey, videoPath, lang string) (string, error) {
+		t.Fatal("subsFetch should not be called for a deselected file")
+		return "", nil
+	})
+
+	dataDir := t.TempDir()
+	moviePath := filepath.Join(dataDir, "movie.mkv")
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: "abc" + strings.Repeat("0", 37), Name: "movie", Path: moviePath}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "movie.mkv", Length: 200 << 20, Selected: false},
+		}},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	if code := runSubs([]string{"abc", "--files", "*.mkv"}, &buf); code == 0 {
+		t.Fatalf("exit = 0, want non-zero when the only glob match is deselected")
 	}
 }

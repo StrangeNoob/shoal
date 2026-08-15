@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/daemon"
@@ -15,16 +14,6 @@ import (
 	"github.com/StrangeNoob/shoal/internal/glob"
 	"github.com/StrangeNoob/shoal/internal/subtitles"
 )
-
-// subsVideoExts/subsMinVideoBytes mirror the default video-file rule in
-// internal/engine/anacrolix.go (auto-fetch on download completion). They're
-// unexported there, so this CLI package — the only other caller — duplicates
-// the two small values rather than exporting new API surface for one client.
-var subsVideoExts = map[string]bool{
-	".mkv": true, ".mp4": true, ".avi": true, ".webm": true, ".mov": true, ".m4v": true,
-}
-
-var subsMinVideoBytes = int64(100) << 20
 
 // subsFetch is a seam over subtitles.Fetch so CLI tests use a recorder, not HTTP.
 var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
@@ -83,20 +72,22 @@ func runSubs(args []string, out io.Writer) int {
 }
 
 // subsTargetFiles picks the files to fetch subtitles for: glob matches when
-// globs is non-empty, else the default video-extension + size rule.
+// globs is non-empty, else the default video-extension + size rule (shared
+// with the engine's auto-fetch hook via engine.IsSubsCandidate). Deselected
+// files are skipped in both branches — they were never downloaded, so
+// fetching a subtitle for one would write an orphaned .srt next to nothing.
 func subsTargetFiles(files []engine.FileDetail, globs []string) []engine.FileDetail {
 	var out []engine.FileDetail
 	if len(globs) > 0 {
 		for _, f := range files {
-			if glob.Match(globs, f.Path) {
+			if f.Selected && glob.Match(globs, f.Path) {
 				out = append(out, f)
 			}
 		}
 		return out
 	}
 	for _, f := range files {
-		ext := strings.ToLower(filepath.Ext(f.Path))
-		if subsVideoExts[ext] && f.Length >= subsMinVideoBytes {
+		if f.Selected && engine.IsSubsCandidate(f.Path, f.Length) {
 			out = append(out, f)
 		}
 	}
@@ -107,13 +98,16 @@ func subsTargetFiles(files []engine.FileDetail, globs []string) []engine.FileDet
 // (<data dir>/<torrent name>) and a FileDetail.Path from Detail(), which
 // comes from anacrolix's File.DisplayPath(). DisplayPath is documented as
 // "the relative file path for a multi-file torrent, and the torrent name for
-// a single-file torrent" — so for a single-file torrent (exactly one file)
-// FileDetail.Path duplicates the torrent name already baked into Status.Path,
-// and the file's absolute path is Status.Path itself; for a multi-file
-// torrent, Status.Path is the shared top-level directory and FileDetail.Path
-// is relative to it.
+// a single-file torrent" — so for a true single-file torrent, FileDetail.Path
+// duplicates the torrent name already baked into Status.Path (they're the
+// same string), and the file's absolute path is Status.Path itself. A
+// directory-mode torrent that happens to contain exactly one file looks
+// similar (len(allFiles)==1) but its one file's DisplayPath is relative to
+// the directory, not equal to the directory's own name — so the single-file
+// shortcut only applies when that equality actually holds; otherwise this
+// falls through to the multi-file join.
 func subsFilePath(statusPath string, allFiles []engine.FileDetail, f engine.FileDetail) string {
-	if len(allFiles) == 1 {
+	if len(allFiles) == 1 && f.Path == filepath.Base(statusPath) {
 		return statusPath
 	}
 	return filepath.Join(statusPath, filepath.FromSlash(f.Path))

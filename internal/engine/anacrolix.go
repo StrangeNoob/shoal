@@ -26,15 +26,26 @@ import (
 	"github.com/StrangeNoob/shoal/internal/subtitles"
 )
 
-// subsMinVideoBytes is the minimum file size auto-fetch treats as a real video
-// — filters out samples, extras, and thumbnails that share a video extension.
-// A var (not const) so tests can shrink it instead of hashing a real 100 MiB
-// fixture file.
-var subsMinVideoBytes = int64(100) << 20
+// SubsMinVideoBytes is the minimum file size the default subtitle rule treats
+// as a real video — filters out samples, extras, and thumbnails that share a
+// video extension. Exported so cmd/shoal's `subs` CLI command shares this one
+// rule instead of duplicating it; a var (not const) so tests — here and in
+// cmd/shoal — can shrink it instead of hashing a real 100 MiB fixture file.
+var SubsMinVideoBytes = int64(100) << 20
 
-// subsVideoExts are the file extensions auto-fetch considers a video file.
+// subsVideoExts are the file extensions the default subtitle rule considers a
+// video file.
 var subsVideoExts = map[string]bool{
 	".mkv": true, ".mp4": true, ".avi": true, ".webm": true, ".mov": true, ".m4v": true,
+}
+
+// IsSubsCandidate reports whether path qualifies for the default subtitle
+// fetch rule: a known video extension and at least SubsMinVideoBytes. Shared
+// by the daemon's on-completion auto-fetch hook (fetchSubsForFiles below) and
+// the `shoal subs` CLI command's default file-selection rule.
+func IsSubsCandidate(path string, size int64) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return subsVideoExts[ext] && size >= SubsMinVideoBytes
 }
 
 // subsFetch is a seam over subtitles.Fetch so tests never do HTTP.
@@ -325,13 +336,18 @@ func (a *Anacrolix) checkSubsCompletion() {
 	}
 }
 
-// fetchSubsForFiles fetches subtitles for each qualifying video file (right
-// extension, at least subsMinVideoBytes) serially. Failures are logged and
-// never affect torrent state — subtitles never block or fail a download.
+// fetchSubsForFiles fetches subtitles for each qualifying, selected video
+// file (right extension, at least SubsMinVideoBytes) serially. Deselected
+// files (PiecePriorityNone) are skipped — they were never downloaded, so
+// fetching a subtitle for one would write an orphaned .srt next to nothing.
+// Failures are logged and never affect torrent state — subtitles never block
+// or fail a download.
 func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
 	for _, f := range files {
-		ext := strings.ToLower(filepath.Ext(f.DisplayPath()))
-		if !subsVideoExts[ext] || f.Length() < subsMinVideoBytes {
+		if f.Priority() == torrent.PiecePriorityNone {
+			continue
+		}
+		if !IsSubsCandidate(f.DisplayPath(), f.Length()) {
 			continue
 		}
 		path := filepath.Join(dataDir, filepath.FromSlash(f.Path()))

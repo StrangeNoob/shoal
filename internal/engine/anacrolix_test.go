@@ -635,16 +635,16 @@ func TestSubsAutoCompletionNoKeyMakesNoCalls(t *testing.T) {
 }
 
 // A completed torrent with one qualifying video file (right extension, at
-// least subsMinVideoBytes) triggers exactly one subsFetch call with the file's
+// least SubsMinVideoBytes) triggers exactly one subsFetch call with the file's
 // absolute on-disk path and the configured language. A second completion
 // signal for the same torrent must not fetch again.
 func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
 	// Shrink the size threshold instead of hashing a real 100 MiB fixture —
 	// keeps the test fast and avoids CPU contention with the rest of the
 	// suite under -race.
-	origMin := subsMinVideoBytes
-	subsMinVideoBytes = 1024
-	t.Cleanup(func() { subsMinVideoBytes = origMin })
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
 
 	dir := t.TempDir()
 	content := bytes.Repeat([]byte("shoal"), 400) // 2000 bytes, above the shrunk threshold
@@ -681,8 +681,20 @@ func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if s := eng.Statuses(); len(s) != 1 || !s[0].Done {
-		t.Fatalf("torrent never completed: %+v", eng.Statuses())
+	s := eng.Statuses()
+	if len(s) != 1 || !s[0].Done {
+		t.Fatalf("torrent never completed: %+v", s)
+	}
+
+	// fetchSubsForFiles now skips deselected (never-downloaded) files by
+	// checking File.Priority(), the same convention Detail() uses for
+	// Selected. DownloadAll() (called on every new torrent) only raises
+	// piece priorities, not each File's own priority field, so a file must
+	// be explicitly selected — exactly as a real user action would via
+	// SetFiles — for Priority() to read Normal instead of the zero-value
+	// None.
+	if err := eng.SetFiles(s[0].InfoHash, []string{"movie.mkv"}, true); err != nil {
+		t.Fatalf("SetFiles: %v", err)
 	}
 
 	eng.checkSubsCompletion()
@@ -709,6 +721,126 @@ func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
 	select {
 	case c := <-calls:
 		t.Fatalf("unexpected second subsFetch call: %+v", c)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// buildTorrentBytesDir builds a real, self-contained multi-file .torrent from
+// an existing directory (root's basename becomes the torrent's Info.Name),
+// the multi-file counterpart to buildTorrentBytesNamed.
+func buildTorrentBytesDir(t *testing.T, root string) []byte {
+	t.Helper()
+	info := atmetainfo.Info{PieceLength: 16384}
+	if err := info.BuildFromFilePath(root); err != nil {
+		t.Fatalf("BuildFromFilePath: %v", err)
+	}
+	ib, err := atbencode.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal info: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := (&atmetainfo.MetaInfo{InfoBytes: ib}).Write(&buf); err != nil {
+		t.Fatalf("write metainfo: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// A completed multi-file torrent with one deselected qualifying video file
+// must not fetch subs for it — it was never downloaded, so a fetch would
+// write an orphaned .srt next to nothing.
+func TestSubsAutoCompletionSkipsDeselectedFile(t *testing.T) {
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
+
+	keep := bytes.Repeat([]byte("shoal"), 400) // 2000 bytes, above the shrunk threshold
+	skip := bytes.Repeat([]byte("nope!"), 400)
+
+	src := t.TempDir()
+	root := filepath.Join(src, "My Show")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.mkv"), keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.mkv"), skip, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := buildTorrentBytesDir(t, root)
+
+	// Pre-write the files at their final on-disk location so the torrent
+	// verifies complete immediately without needing peers (same trick as
+	// TestSubsAutoCompletionFetchesQualifyingFileOnce).
+	dataDir := t.TempDir()
+	finalDir := filepath.Join(dataDir, "My Show")
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "keep.mkv"), keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "skip.mkv"), skip, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dataDir, OpenSubsAPIKey: "test-key", SubsLang: "en", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "My Show"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	statuses := eng.Statuses()
+	if len(statuses) != 1 || !statuses[0].Done {
+		t.Fatalf("torrent never completed: %+v", statuses)
+	}
+
+	// DownloadAll() (called on every new torrent) only raises piece
+	// priorities, not each File's own priority field, so keep.mkv must be
+	// explicitly selected — same as a real user action — for its
+	// Priority() to read Normal instead of the zero-value None.
+	if err := eng.SetFiles(statuses[0].InfoHash, []string{"keep.mkv"}, true); err != nil {
+		t.Fatalf("SetFiles(select keep.mkv): %v", err)
+	}
+	if err := eng.SetFiles(statuses[0].InfoHash, []string{"skip.mkv"}, false); err != nil {
+		t.Fatalf("SetFiles(deselect skip.mkv): %v", err)
+	}
+
+	eng.checkSubsCompletion()
+
+	var got struct{ apiKey, path, lang string }
+	select {
+	case got = <-calls:
+	case <-time.After(3 * time.Second):
+		t.Fatal("subsFetch was never called for the selected file")
+	}
+	wantPath := filepath.Join(finalDir, "keep.mkv")
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+
+	select {
+	case c := <-calls:
+		t.Fatalf("subsFetch should not be called for the deselected file: %+v", c)
 	case <-time.After(300 * time.Millisecond):
 	}
 }
