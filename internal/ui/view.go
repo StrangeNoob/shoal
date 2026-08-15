@@ -429,7 +429,7 @@ func (m Model) renderDownloads(w, h int) string {
 		}
 	}
 	if end < len(ds) {
-		b.WriteString("\n" + st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(ds)-end, glyphDown)))
+		b.WriteString(st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(ds)-end, glyphDown)))
 	}
 	return b.String()
 }
@@ -462,11 +462,18 @@ func (m Model) renderSeeding(w, h int) string {
 		banner += 2
 	}
 
-	// Build each cursor-indexed row into its own block of lines (leading
-	// separator/header lines included), mirroring renderSettings, so the
-	// window below can slice [start,end) without redoing the layout.
-	blocks := make([][]string, 0, len(ss)+len(hist))
+	// Window first (seedingRowCounts is just line-counts, not styled blocks) so
+	// we only build styled row blocks for what's actually visible below —
+	// unbounded per-tick styling work for large history otherwise.
+	start, end := settingsWindow(m.seedingRowCounts(), m.seedCursor, max(1, h-banner))
+
+	// Build each cursor-indexed row in [start,end) into its own block of lines
+	// (leading separator/header lines included), mirroring renderSettings.
+	blocks := make([][]string, 0, end-start)
 	for i, s := range ss {
+		if i < start || i >= end {
+			continue
+		}
 		var ls []string
 		if i > 0 {
 			ls = append(ls, "")
@@ -506,6 +513,9 @@ func (m Model) renderSeeding(w, h int) string {
 		blocks = append(blocks, ls)
 	}
 	for j, e := range hist {
+		if idx := len(ss) + j; idx < start || idx >= end {
+			continue
+		}
 		var ls []string
 		if j == 0 {
 			if len(ss) > 0 {
@@ -522,13 +532,12 @@ func (m Model) renderSeeding(w, h int) string {
 		blocks = append(blocks, ls)
 	}
 
-	start, end := settingsWindow(m.seedingRowCounts(), m.seedCursor, max(1, h-banner))
-	for i := start; i < end; i++ {
-		for _, ln := range blocks[i] {
+	for _, blk := range blocks {
+		for _, ln := range blk {
 			b.WriteString(ln + "\n")
 		}
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // seedingRowCounts returns the rendered line count of each cursor-indexed

@@ -422,3 +422,54 @@ func TestSeedingRowShowsSeedingStatus(t *testing.T) {
 		t.Errorf("a non-seeding complete torrent should show 'complete':\n%s", v)
 	}
 }
+
+// TestViewFitsHeight asserts View() never emits more lines than m.height,
+// across scrolled states that previously overflowed by one line (each pane
+// body ran one line past its budget, so the terminal scrolled a row per
+// repaint).
+func TestViewFitsHeight(t *testing.T) {
+	cases := []struct {
+		name   string
+		height int
+		setup  func(m Model) Model
+	}{
+		{"downloads, more indicator, height 21", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			return m
+		}},
+		{"downloads, more indicator, height 25", 25, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			return m
+		}},
+		{"seeding, cursor at last item", 21, func(m Model) Model {
+			m.section = sectionSeeding
+			m.statuses = seedingFixture(10)
+			m.seedCursor = 9
+			return m
+		}},
+		{"seeding, cursor at last history entry", 21, func(m Model) Model {
+			m.section = sectionSeeding
+			m.history = history.Store{Entries: seedHistoryFixture(60)}
+			m.seedCursor = 59
+			return m
+		}},
+		{"downloads, no overflow (control)", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(2)
+			return m
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := ready(New(&fakeSource{}, &fakeEngine{}))
+			m.height = tc.height
+			m = tc.setup(m)
+			if lines := len(strings.Split(m.View(), "\n")); lines > m.height {
+				t.Fatalf("View() emitted %d lines, want <= height %d:\n%s", lines, m.height, m.View())
+			}
+		})
+	}
+}
