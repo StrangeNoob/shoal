@@ -827,6 +827,102 @@ func TestSettingsTextEdit(t *testing.T) {
 	}
 }
 
+// settingIndex finds a settingItems() row by label, mirroring the lookup used
+// elsewhere in this file (e.g. the "Auto-update" row) rather than a magic index.
+func settingIndex(t *testing.T, label string) int {
+	t.Helper()
+	for i, it := range settingItems() {
+		if it.label == label {
+			return i
+		}
+	}
+	t.Fatalf("no setting item labeled %q", label)
+	return -1
+}
+
+func TestSettingsSubtitlesGroupRenders(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	// The settings pane windows around the cursor (see settingsWindow); move the
+	// cursor into SUBTITLES so its rows are the ones rendered, not scrolled off.
+	m.setCursor = settingIndex(t, "OS API key")
+	v := m.View()
+	for _, want := range []string{"SUBTITLES", "OS API key", "Subs lang", "Auto subs"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("settings view missing %q:\n%s", want, v)
+		}
+	}
+}
+
+func TestSettingsAPIKeyEditRoundTrip(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "OS API key")
+	m, _ = update(m, key("enter"))
+	if !m.editingSetting {
+		t.Fatal("enter on OS API key should open the inline editor")
+	}
+	m.setInput.SetValue("sk-1234567890abcdef")
+	m, _ = update(m, key("enter"))
+	if m.editingSetting {
+		t.Error("enter should commit and close the editor")
+	}
+	if m.cfg.OpenSubsAPIKey != "sk-1234567890abcdef" {
+		t.Errorf("OpenSubsAPIKey = %q, want sk-1234567890abcdef", m.cfg.OpenSubsAPIKey)
+	}
+}
+
+func TestSettingsAPIKeyRenderedMasked(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.cfg.OpenSubsAPIKey = "sk-1234567890abcdef"
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "OS API key")
+	v := m.View()
+	if !strings.Contains(v, "•") {
+		t.Errorf("settings view should mask the API key with \u2022:\n%s", v)
+	}
+	if strings.Contains(v, "sk-1234567890abcdef") {
+		t.Error("settings view must never render the full API key")
+	}
+	if !strings.Contains(v, "cdef") {
+		t.Errorf("settings view should show the last 4 chars unmasked:\n%s", v)
+	}
+}
+
+func TestSettingsAPIKeyEmptyShowsUnset(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.cfg.OpenSubsAPIKey = ""
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "OS API key")
+	v := m.View()
+	if !strings.Contains(v, "unset") {
+		t.Errorf("empty API key should render as unset:\n%s", v)
+	}
+}
+
+func TestSettingsAutoSubsToggle(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "Auto subs")
+	if m.cfg.SubsAuto {
+		t.Fatal("default SubsAuto = true, want false")
+	}
+	m, _ = update(m, key("right"))
+	if !m.cfg.SubsAuto {
+		t.Error("after toggling, SubsAuto = false, want true")
+	}
+	m, _ = update(m, key("right"))
+	if m.cfg.SubsAuto {
+		t.Error("after toggling again, SubsAuto = true, want false")
+	}
+}
+
 func TestDownloadsAndSeedingSplit(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{
 		{Name: "Downloading", TotalBytes: 1000, CompletedBytes: 500, Peers: 3},
