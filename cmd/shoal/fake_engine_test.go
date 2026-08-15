@@ -22,6 +22,7 @@ type fakeEngine struct {
 	detail        engine.Detail
 	filesCalls    []fakeSetFilesCall
 	globsCalls    []fakeSetFileGlobsCall
+	seqCalls      []fakeSetSequentialCall
 }
 
 type fakeSetFilesCall struct {
@@ -33,6 +34,11 @@ type fakeSetFilesCall struct {
 type fakeSetFileGlobsCall struct {
 	infoHash string
 	globs    []string
+}
+
+type fakeSetSequentialCall struct {
+	infoHash string
+	on       bool
 }
 
 func (f *fakeEngine) AddMagnet(m string) error {
@@ -90,6 +96,12 @@ func (f *fakeEngine) SetFileGlobs(infoHash string, globs []string) error {
 	f.globsCalls = append(f.globsCalls, fakeSetFileGlobsCall{infoHash, append([]string(nil), globs...)})
 	return nil
 }
+func (f *fakeEngine) SetSequential(infoHash string, on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seqCalls = append(f.seqCalls, fakeSetSequentialCall{infoHash, on})
+	return nil
+}
 
 // setFilesDeselected returns the paths from the last SetFiles call made with
 // selected=false (what --only deselects).
@@ -112,6 +124,13 @@ func (f *fakeEngine) gotFileGlobs() []string {
 		return nil
 	}
 	return append([]string(nil), f.globsCalls[len(f.globsCalls)-1].globs...)
+}
+
+// gotSequential returns the calls made to SetSequential, in order.
+func (f *fakeEngine) gotSequential() []fakeSetSequentialCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeSetSequentialCall(nil), f.seqCalls...)
 }
 
 func (f *fakeEngine) gotMagnets() []string {

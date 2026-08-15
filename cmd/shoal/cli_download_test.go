@@ -149,6 +149,32 @@ func TestDownloadFilesForwardsGlobs(t *testing.T) {
 	}
 }
 
+func TestDownloadSequentialEnablesAfterAdd(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	const ih = "0123456789abcdef0123456789abcdef01234567"
+	var buf bytes.Buffer
+	if code := runDownload([]string{"--sequential", "magnet:?xt=urn:btih:" + ih}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	seq := fake.gotSequential()
+	if len(seq) != 1 || seq[0].infoHash != ih || !seq[0].on {
+		t.Fatalf("daemon did not receive SetSequential(true): %+v", seq)
+	}
+}
+
+func TestDownloadSequentialUnsupportedForURL(t *testing.T) {
+	fake := &fakeEngine{}
+	serveFakeDaemon(t, fake)
+	var buf bytes.Buffer
+	if code := runDownload([]string{"--sequential", "https://example.com/x.torrent"}, &buf); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if seq := fake.gotSequential(); seq != nil {
+		t.Fatalf("expected no SetSequential call for a URL target, got %+v", seq)
+	}
+}
+
 func TestDownloadFilesUnsupportedForURL(t *testing.T) {
 	fake := &fakeEngine{}
 	serveFakeDaemon(t, fake)
