@@ -20,9 +20,14 @@ type fakeEngine struct {
 	resumed       []string
 	statuses      []engine.Status
 	detail        engine.Detail
-	filesCalls    []fakeSetFilesCall
-	globsCalls    []fakeSetFileGlobsCall
-	seqCalls      []fakeSetSequentialCall
+	// detailSeq, when non-empty, makes successive Detail calls return successive
+	// states (staying on the last once exhausted) — used to simulate playability
+	// advancing across `shoal stream`'s poll loop. detail is used when empty.
+	detailSeq  []engine.Detail
+	detailCall int
+	filesCalls []fakeSetFilesCall
+	globsCalls []fakeSetFileGlobsCall
+	seqCalls   []fakeSetSequentialCall
 }
 
 type fakeSetFilesCall struct {
@@ -82,7 +87,15 @@ func (f *fakeEngine) Close() error { return nil }
 func (f *fakeEngine) Detail(_ string) (engine.Detail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.detail, nil
+	if len(f.detailSeq) == 0 {
+		return f.detail, nil
+	}
+	i := f.detailCall
+	if i >= len(f.detailSeq) {
+		i = len(f.detailSeq) - 1
+	}
+	f.detailCall++
+	return f.detailSeq[i], nil
 }
 func (f *fakeEngine) SetFiles(infoHash string, paths []string, selected bool) error {
 	f.mu.Lock()
