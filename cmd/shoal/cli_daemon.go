@@ -196,6 +196,10 @@ func runDaemon(args []string, out io.Writer) int {
 		DownloadRate: cfg.DownloadRateKB * 1024,
 		UploadRate:   cfg.UploadRateKB * 1024,
 		MaxActive:    cfg.MaxActiveDownloads,
+
+		OpenSubsAPIKey: cfg.OpenSubsAPIKey,
+		SubsLang:       cfg.SubsLang,
+		SubsAuto:       cfg.SubsAuto,
 	})
 	if err != nil {
 		l.Close()

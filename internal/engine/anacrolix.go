@@ -23,7 +23,25 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"github.com/StrangeNoob/shoal/internal/queue"
+	"github.com/StrangeNoob/shoal/internal/subtitles"
 )
+
+// subsMinVideoBytes is the minimum file size auto-fetch treats as a real video
+// — filters out samples, extras, and thumbnails that share a video extension.
+// A var (not const) so tests can shrink it instead of hashing a real 100 MiB
+// fixture file.
+var subsMinVideoBytes = int64(100) << 20
+
+// subsVideoExts are the file extensions auto-fetch considers a video file.
+var subsVideoExts = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".webm": true, ".mov": true, ".m4v": true,
+}
+
+// subsFetch is a seam over subtitles.Fetch so tests never do HTTP.
+var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+	c := subtitles.NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal")
+	return subtitles.Fetch(c, videoPath, lang)
+}
 
 // Anacrolix implements Engine on top of anacrolix/torrent — a mature, full
 // BitTorrent stack (DHT, magnet/BEP-9 metadata, UDP trackers, web seeds,
@@ -47,6 +65,11 @@ type Anacrolix struct {
 	maxConns  int
 	maxActive int
 	store     *queue.Store
+
+	openSubsAPIKey string
+	subsLang       string
+	subsAuto       bool
+	subsFetched    map[metainfo.Hash]bool // guards at-most-once auto-fetch per torrent per daemon run
 }
 
 // rateLimiter builds a token-bucket limiter for bytesPerSec (> 0). The burst is
@@ -126,6 +149,11 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		queued:    map[metainfo.Hash]bool{},
 		maxConns:  maxConnsFor(c.MaxPeers),
 		maxActive: c.MaxActive,
+
+		openSubsAPIKey: c.OpenSubsAPIKey,
+		subsLang:       c.SubsLang,
+		subsAuto:       c.SubsAuto,
+		subsFetched:    map[metainfo.Hash]bool{},
 	}
 	if c.QueuePath != "" {
 		a.store = queue.LoadFrom(c.QueuePath)
@@ -136,6 +164,9 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	}
 	if c.MaxActive > 0 {
 		go a.queueLoop(3 * time.Second)
+	}
+	if c.SubsAuto && c.OpenSubsAPIKey != "" {
+		go a.subsLoop(5 * time.Second)
 	}
 	return a, nil
 }
@@ -248,6 +279,64 @@ func (a *Anacrolix) enforceSeedRatio() {
 		if reachedRatio(uploaded, info.TotalLength(), a.seedRatio) {
 			// Drop peers so it stops uploading; idempotent to call repeatedly.
 			t.SetMaxEstablishedConns(0)
+		}
+	}
+}
+
+// subsLoop periodically checks for newly-completed torrents to auto-fetch
+// subtitles for, until Close signals done.
+func (a *Anacrolix) subsLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.done:
+			return
+		case <-ticker.C:
+			a.checkSubsCompletion()
+		}
+	}
+}
+
+// checkSubsCompletion fetches subtitles for every newly-completed torrent's
+// qualifying video files, at most once per torrent per daemon run
+// (subsFetched guards it). One goroutine is spawned per newly-completed
+// torrent so a slow fetch never blocks the caller; files within it are
+// fetched serially.
+func (a *Anacrolix) checkSubsCompletion() {
+	if !a.subsAuto || a.openSubsAPIKey == "" {
+		return
+	}
+	a.mu.Lock()
+	var newlyDone []*torrent.Torrent
+	for _, t := range a.client.Torrents() {
+		h := t.InfoHash()
+		if a.subsFetched[h] || !t.Complete().Bool() {
+			continue
+		}
+		a.subsFetched[h] = true
+		newlyDone = append(newlyDone, t)
+	}
+	apiKey, lang, dataDir := a.openSubsAPIKey, a.subsLang, a.dataDir
+	a.mu.Unlock()
+
+	for _, t := range newlyDone {
+		go fetchSubsForFiles(apiKey, lang, dataDir, t.Files())
+	}
+}
+
+// fetchSubsForFiles fetches subtitles for each qualifying video file (right
+// extension, at least subsMinVideoBytes) serially. Failures are logged and
+// never affect torrent state — subtitles never block or fail a download.
+func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.DisplayPath()))
+		if !subsVideoExts[ext] || f.Length() < subsMinVideoBytes {
+			continue
+		}
+		path := filepath.Join(dataDir, filepath.FromSlash(f.Path()))
+		if _, err := subsFetch(apiKey, path, lang); err != nil {
+			slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
 		}
 	}
 }

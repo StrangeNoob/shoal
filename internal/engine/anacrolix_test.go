@@ -19,8 +19,15 @@ import (
 // temp file, entirely offline.
 func buildTorrentBytes(t *testing.T, content []byte) []byte {
 	t.Helper()
+	return buildTorrentBytesNamed(t, "blob.bin", content)
+}
+
+// buildTorrentBytesNamed is buildTorrentBytes for a caller-chosen single file
+// name (so the resulting torrent's file has a specific extension).
+func buildTorrentBytesNamed(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "blob.bin")
+	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, content, 0o644); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
@@ -576,5 +583,132 @@ func TestExportedRemoveUnderDirRefusesEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(sub); !os.IsNotExist(err) {
 		t.Fatal("RemoveUnderDir should have deleted the in-dir path")
+	}
+}
+
+// swapSubsFetch replaces the subsFetch seam with a recorder for the duration
+// of the test, so tests never do HTTP.
+func swapSubsFetch(t *testing.T, calls chan<- struct{ apiKey, path, lang string }) {
+	t.Helper()
+	orig := subsFetch
+	subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+		calls <- struct{ apiKey, path, lang string }{apiKey, videoPath, lang}
+		return "", nil
+	}
+	t.Cleanup(func() { subsFetch = orig })
+}
+
+func TestSubsAutoCompletionOffMakesNoCalls(t *testing.T) {
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir(), OpenSubsAPIKey: "key", SubsAuto: false})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	eng.checkSubsCompletion()
+	select {
+	case <-calls:
+		t.Fatal("subsFetch called though SubsAuto is off")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestSubsAutoCompletionNoKeyMakesNoCalls(t *testing.T) {
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir(), OpenSubsAPIKey: "", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	eng.checkSubsCompletion()
+	select {
+	case <-calls:
+		t.Fatal("subsFetch called though no API key is configured")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A completed torrent with one qualifying video file (right extension, at
+// least subsMinVideoBytes) triggers exactly one subsFetch call with the file's
+// absolute on-disk path and the configured language. A second completion
+// signal for the same torrent must not fetch again.
+func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
+	// Shrink the size threshold instead of hashing a real 100 MiB fixture —
+	// keeps the test fast and avoids CPU contention with the rest of the
+	// suite under -race.
+	origMin := subsMinVideoBytes
+	subsMinVideoBytes = 1024
+	t.Cleanup(func() { subsMinVideoBytes = origMin })
+
+	dir := t.TempDir()
+	content := bytes.Repeat([]byte("shoal"), 400) // 2000 bytes, above the shrunk threshold
+	data := buildTorrentBytesNamed(t, "movie.mkv", content)
+
+	// Pre-write the full file at its final on-disk location so the torrent
+	// verifies complete immediately without needing peers (same trick as
+	// TestPartialProgressSurvivesRestart).
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dir, OpenSubsAPIKey: "test-key", SubsLang: "fr", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "movie"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s := eng.Statuses(); len(s) != 1 || !s[0].Done {
+		t.Fatalf("torrent never completed: %+v", eng.Statuses())
+	}
+
+	eng.checkSubsCompletion()
+
+	var got struct{ apiKey, path, lang string }
+	select {
+	case got = <-calls:
+	case <-time.After(3 * time.Second):
+		t.Fatal("subsFetch was never called")
+	}
+	if got.apiKey != "test-key" {
+		t.Errorf("apiKey = %q, want test-key", got.apiKey)
+	}
+	if got.lang != "fr" {
+		t.Errorf("lang = %q, want fr", got.lang)
+	}
+	wantPath := filepath.Join(dir, "movie.mkv")
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+
+	// A second completion signal for the same torrent must not fetch again.
+	eng.checkSubsCompletion()
+	select {
+	case c := <-calls:
+		t.Fatalf("unexpected second subsFetch call: %+v", c)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
