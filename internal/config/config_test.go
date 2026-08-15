@@ -150,6 +150,19 @@ func TestSubtitlesDefaults(t *testing.T) {
 	}
 }
 
+func TestSubsLangEmptyStringFallsBackToDefault(t *testing.T) {
+	isolate(t)
+	if err := os.MkdirAll(filepath.Dir(defaultPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultPath(), []byte(`{"subs_lang":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load().SubsLang; got != "en" {
+		t.Errorf("SubsLang = %q, want en (explicit empty string should fall back like Theme/ColorMode)", got)
+	}
+}
+
 func TestSubtitlesRoundTrip(t *testing.T) {
 	isolate(t)
 	c := Default()

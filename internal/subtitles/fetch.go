@@ -20,7 +20,7 @@ var queryReplacer = strings.NewReplacer(".", " ", "_", " ")
 // is used.
 func Fetch(c *Client, videoPath, lang string) (string, error) {
 	ext := filepath.Ext(videoPath)
-	query := queryReplacer.Replace(strings.TrimSuffix(filepath.Base(videoPath), ext))
+	query := strings.TrimSpace(queryReplacer.Replace(strings.TrimSuffix(filepath.Base(videoPath), ext)))
 
 	hash, err := Hash(videoPath)
 	if err != nil {

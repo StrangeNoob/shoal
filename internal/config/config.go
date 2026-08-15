@@ -126,6 +126,9 @@ func Load() Config {
 	if cfg.ColorMode == "" {
 		cfg.ColorMode = "auto"
 	}
+	if cfg.SubsLang == "" {
+		cfg.SubsLang = "en"
+	}
 	cfg.Path = defaultPath()
 	return cfg
 }

@@ -134,6 +134,35 @@ func TestFetchFallsBackToQueryOnlyForSmallFile(t *testing.T) {
 	}
 }
 
+func TestFetchAllSeparatorFilenameOmitsQueryParam(t *testing.T) {
+	dir := t.TempDir()
+	video := writeVideoFile(t, dir, "____.mkv", 200*1024) // basename cleans to whitespace-only
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/subtitles":
+			q := r.URL.Query()
+			if _, ok := q["query"]; ok {
+				t.Errorf("query param present = %v, want omitted for an all-separator filename", q["query"])
+			}
+			w.Write([]byte(`{"data":[{"attributes":{"language":"en","moviehash_match":true,"files":[{"file_id":1,"file_name":"x.srt"}]}}]}`))
+		case "/download":
+			w.Write([]byte(`{"link":"` + srv.URL + `/files/x.srt"}`))
+		case "/files/x.srt":
+			w.Write([]byte("ok"))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	if _, err := Fetch(c, video, "en"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+}
+
 func TestFetchNoResultsReturnsErrNotFound(t *testing.T) {
 	dir := t.TempDir()
 	video := writeVideoFile(t, dir, "no.matches.mkv", 200*1024)
