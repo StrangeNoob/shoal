@@ -177,6 +177,35 @@ func TestRenderSeedingHistorySection(t *testing.T) {
 	}
 }
 
+func TestRenderSeedingWindowFollowsCursorAmongItems(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → smaller than 10 seeding items
+	m.section = sectionSeeding
+	m.statuses = seedingFixture(10)
+	m.seedCursor = 9 // last seeding item
+
+	v := m.View()
+	if !strings.Contains(v, "S9") {
+		t.Fatalf("seeding window should include the cursor's item (S9):\n%s", v)
+	}
+	if strings.Contains(v, "S0") {
+		t.Fatalf("seeding window should have scrolled past the first item (S0):\n%s", v)
+	}
+}
+
+func TestRenderSeedingWindowFollowsCursorInHistory(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12, far smaller than 60 history rows
+	m.section = sectionSeeding
+	m.history = history.Store{Entries: seedHistoryFixture(60)}
+	m.seedCursor = 59 // last history entry
+
+	v := m.View()
+	if !strings.Contains(v, "H59") {
+		t.Fatalf("seeding window should include the cursor's history entry (H59):\n%s", v)
+	}
+}
+
 func TestSeedingHistoryDedupsActive(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{
 		{Name: "Now Seeding", InfoHash: "dup", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 500, Done: true},
@@ -284,6 +313,35 @@ func TestRenderDownloadsShowsSpeed(t *testing.T) {
 	}
 }
 
+func TestRenderDownloadsWindowFollowsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 9
+
+	v := m.View()
+	if !strings.Contains(v, "D9") {
+		t.Fatalf("window should include the cursor's download (D9):\n%s", v)
+	}
+	if strings.Contains(v, "D0") {
+		t.Fatalf("window should have scrolled past the first download (D0):\n%s", v)
+	}
+}
+
+func TestRenderDownloadsMoreIndicator(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 0
+
+	v := m.View()
+	if !strings.Contains(v, glyphMore) {
+		t.Fatalf("overflow below the window should show the more indicator:\n%s", v)
+	}
+}
+
 func TestRenderDownloadsCancelPrompt(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.section = sectionDownloads
@@ -362,5 +420,63 @@ func TestSeedingRowShowsSeedingStatus(t *testing.T) {
 	// Seed disabled → labelled 'complete', not 'seeding'
 	if !strings.Contains(v, "complete") {
 		t.Errorf("a non-seeding complete torrent should show 'complete':\n%s", v)
+	}
+}
+
+// TestViewFitsHeight asserts View() never emits more lines than m.height,
+// across scrolled states that previously overflowed by one line (each pane
+// body ran one line past its budget, so the terminal scrolled a row per
+// repaint).
+func TestViewFitsHeight(t *testing.T) {
+	cases := []struct {
+		name   string
+		height int
+		setup  func(m Model) Model
+	}{
+		{"downloads, more indicator, height 21", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			return m
+		}},
+		{"downloads, more indicator, height 25", 25, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			return m
+		}},
+		{"seeding, cursor at last item", 21, func(m Model) Model {
+			m.section = sectionSeeding
+			m.statuses = seedingFixture(10)
+			m.seedCursor = 9
+			return m
+		}},
+		{"seeding, cursor at last history entry", 21, func(m Model) Model {
+			m.section = sectionSeeding
+			m.history = history.Store{Entries: seedHistoryFixture(60)}
+			m.seedCursor = 59
+			return m
+		}},
+		{"downloads, cancel banner up", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(10)
+			m.cancelConfirm = true
+			m.cancelTarget = engine.Status{Name: "D0"}
+			return m
+		}},
+		{"downloads, no overflow (control)", 21, func(m Model) Model {
+			m.section = sectionDownloads
+			m.statuses = downloadsFixture(2)
+			return m
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := ready(New(&fakeSource{}, &fakeEngine{}))
+			m.height = tc.height
+			m = tc.setup(m)
+			if lines := len(strings.Split(m.View(), "\n")); lines > m.height {
+				t.Fatalf("View() emitted %d lines, want <= height %d:\n%s", lines, m.height, m.View())
+			}
+		})
 	}
 }

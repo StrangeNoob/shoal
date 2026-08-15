@@ -384,8 +384,6 @@ func (m Model) renderDownloads(w, h int) string {
 			st.Accent.Render("Search") + st.Meta.Render(" and press ") + st.Key.Render("d") + st.Meta.Render(".")
 	}
 
-	const perItem = 4
-	visible := max(1, h/perItem)
 	barWidth := max(10, min(48, w-24))
 
 	var b strings.Builder
@@ -397,8 +395,8 @@ func (m Model) renderDownloads(w, h int) string {
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
 	}
 
-	shown := min(len(ds), visible)
-	for i := 0; i < shown; i++ {
+	start, end := m.downloadsWindow(h)
+	for i := start; i < end; i++ {
 		s := ds[i]
 		head, nameStyle := st.Accent.Render(glyphDown+" "), st.Row
 		if i == m.dlCursor {
@@ -426,9 +424,12 @@ func (m Model) renderDownloads(w, h int) string {
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
 		b.WriteString("  " + st.Meta.Render(detail) + "\n")
-		if i < shown-1 {
+		if i < end-1 {
 			b.WriteString("\n")
 		}
+	}
+	if end < len(ds) {
+		b.WriteString(st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(ds)-end, glyphDown)))
 	}
 	return b.String()
 }
@@ -443,15 +444,14 @@ func (m Model) renderSeeding(w, h int) string {
 		return "  " + st.Meta.Render("Nothing seeding yet. Completed downloads keep sharing here.")
 	}
 
-	const perItem = 3
-	visible := max(1, h/perItem)
-
 	var b strings.Builder
+	banner := 0
 	if m.stopConfirm {
 		b.WriteString("  " + st.Bad.Render("Stop seeding ") +
 			st.Row.Render("\""+truncate(m.stopTarget.Name, max(8, w-32))+"\"") + st.Meta.Render("?   ") +
 			st.Key.Render("enter") + st.Meta.Render(" stop (keep files)   ·   ") +
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+		banner += 2
 	}
 	if m.histConfirm {
 		b.WriteString("  " + st.Bad.Render("Delete ") +
@@ -459,18 +459,33 @@ func (m Model) renderSeeding(w, h int) string {
 			st.Key.Render("k") + st.Meta.Render(" remove   ·   ") +
 			st.Key.Render("d") + st.Meta.Render(" +delete files   ·   ") +
 			st.Key.Render("esc") + st.Meta.Render(" back") + "\n\n")
+		banner += 2
 	}
-	shown := min(len(ss), visible)
-	for i := 0; i < shown; i++ {
-		s := ss[i]
+
+	// Window first (seedingRowCounts is just line-counts, not styled blocks) so
+	// we only build styled row blocks for what's actually visible below —
+	// unbounded per-tick styling work for large history otherwise.
+	start, end := settingsWindow(m.seedingRowCounts(), m.seedCursor, max(1, h-banner))
+
+	// Build each cursor-indexed row in [start,end) into its own block of lines
+	// (leading separator/header lines included), mirroring renderSettings.
+	blocks := make([][]string, 0, end-start)
+	for i, s := range ss {
+		if i < start || i >= end {
+			continue
+		}
+		var ls []string
+		if i > 0 {
+			ls = append(ls, "")
+		}
 		head, nameStyle := st.Good.Render(glyphSeed+" "), st.Row
 		if i == m.seedCursor {
 			head, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
 		}
-		b.WriteString(head + nameStyle.Render(truncate(s.Name, max(4, w-4))) + "\n")
+		ls = append(ls, head+nameStyle.Render(truncate(s.Name, max(4, w-4))))
 
 		if s.Paused {
-			b.WriteString("  " + st.Meta.Render("⏸ paused (not sharing)") + "\n")
+			ls = append(ls, "  "+st.Meta.Render("⏸ paused (not sharing)"))
 		} else {
 			label := "complete"
 			if s.Seeding {
@@ -493,33 +508,65 @@ func (m Model) renderSeeding(w, h int) string {
 			if sp := m.ulSpeed[s.Name]; sp > 0 {
 				detail += fmt.Sprintf("  ·  %s/s", formatBytes(sp))
 			}
-			b.WriteString("  " + st.Good.Render(glyphDone+" "+label) + st.Meta.Render(truncate(detail, max(4, w-14))) + "\n")
+			ls = append(ls, "  "+st.Good.Render(glyphDone+" "+label)+st.Meta.Render(truncate(detail, max(4, w-14))))
 		}
-		if i < shown-1 {
-			b.WriteString("\n")
+		blocks = append(blocks, ls)
+	}
+	for j, e := range hist {
+		if idx := len(ss) + j; idx < start || idx >= end {
+			continue
 		}
+		var ls []string
+		if j == 0 {
+			if len(ss) > 0 {
+				ls = append(ls, "", "")
+			}
+			ls = append(ls, st.SectionHead.Render("HISTORY"))
+		}
+		meta := "  ·  " + sizeOrDash(e.Size) + "  ·  " + relTime(e.CompletedAt.Unix())
+		marker, nameStyle := st.Good.Render(glyphDone+" "), st.Row
+		if len(ss)+j == m.seedCursor {
+			marker, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
+		}
+		ls = append(ls, "  "+marker+nameStyle.Render(truncate(e.Name, max(4, w-24)))+st.Meta.Render(meta))
+		blocks = append(blocks, ls)
 	}
 
-	if len(hist) > 0 {
-		if len(ss) > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(st.SectionHead.Render("HISTORY") + "\n")
-		const histMax = 50
-		for i, e := range hist {
-			if i >= histMax {
-				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("%s %d more %s", glyphMore, len(hist)-histMax, glyphDown)) + "\n")
-				break
-			}
-			meta := "  ·  " + sizeOrDash(e.Size) + "  ·  " + relTime(e.CompletedAt.Unix())
-			marker, nameStyle := st.Good.Render(glyphDone+" "), st.Row
-			if len(ss)+i == m.seedCursor {
-				marker, nameStyle = st.Accent.Render(glyphCursor+" "), st.RowSel
-			}
-			b.WriteString("  " + marker + nameStyle.Render(truncate(e.Name, max(4, w-24))) + st.Meta.Render(meta) + "\n")
+	for _, blk := range blocks {
+		for _, ln := range blk {
+			b.WriteString(ln + "\n")
 		}
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// seedingRowCounts returns the rendered line count of each cursor-indexed
+// row in the Seeding pane (seeding items first, then HISTORY entries),
+// including each row's leading separator/header lines, mirroring
+// renderSeeding. Shared with click hit-testing and settingsWindow.
+func (m Model) seedingRowCounts() []int {
+	ss := m.seeding()
+	hist := m.seedHistory()
+	counts := make([]int, 0, len(ss)+len(hist))
+	for i := range ss {
+		if i == 0 {
+			counts = append(counts, 2) // name + detail
+		} else {
+			counts = append(counts, 3) // leading blank + name + detail
+		}
+	}
+	for j := range hist {
+		if j == 0 {
+			c := 1 + 1 // entry + HISTORY header
+			if len(ss) > 0 {
+				c += 2 // "\n\n" gap before HISTORY
+			}
+			counts = append(counts, c)
+		} else {
+			counts = append(counts, 1)
+		}
+	}
+	return counts
 }
 
 // --- Settings --------------------------------------------------------------
