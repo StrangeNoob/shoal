@@ -562,6 +562,87 @@ func waitMeta(t *testing.T, eng *Anacrolix) {
 	t.Fatal("metadata never resolved")
 }
 
+func TestSetSequentialUnknownHashIsNoop(t *testing.T) {
+	eng := newEngine(t)
+	if err := eng.SetSequential("deadbeef00000000000000000000000000000000", true); err != nil {
+		t.Fatalf("SetSequential(unknown) = %v, want nil", err)
+	}
+}
+
+func TestSetSequentialTogglePersists(t *testing.T) {
+	dir := t.TempDir()
+	qpath := filepath.Join(dir, "queue.json")
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	eng, err := NewAnacrolix(Config{DataDir: dir, QueuePath: qpath})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+	if err := eng.AddTorrentURL(srv.URL, "seq-test"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	h := eng.Statuses()[0].InfoHash
+	if eng.Statuses()[0].Sequential {
+		t.Fatal("a new torrent should not be sequential")
+	}
+
+	if err := eng.SetSequential(h, true); err != nil {
+		t.Fatalf("SetSequential(on): %v", err)
+	}
+	if !eng.Statuses()[0].Sequential {
+		t.Fatal("SetSequential(true) did not set Status.Sequential")
+	}
+	if st, _ := queue.LoadFrom(qpath).Get(h); !st.Sequential {
+		t.Fatal("SetSequential(true) did not persist to the queue store")
+	}
+
+	if err := eng.SetSequential(h, false); err != nil {
+		t.Fatalf("SetSequential(off): %v", err)
+	}
+	if eng.Statuses()[0].Sequential {
+		t.Fatal("SetSequential(false) did not clear Status.Sequential")
+	}
+	if st, _ := queue.LoadFrom(qpath).Get(h); st.Sequential {
+		t.Fatal("SetSequential(false) did not persist to the queue store")
+	}
+}
+
+// FileDetail's HeadBytes/TailDone exist and read zero-value for a freshly added
+// (nothing downloaded) torrent; deeper coverage lives in the pure planner tests.
+func TestFileDetailHeadTailZeroValue(t *testing.T) {
+	eng := newEngine(t)
+	data := buildTorrentBytes(t, bytes.Repeat([]byte("shoal"), 8000))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+	if err := eng.AddTorrentURL(srv.URL, "detail-test"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, eng)
+	h := eng.Statuses()[0].InfoHash
+
+	d, err := eng.Detail(h)
+	if err != nil {
+		t.Fatalf("Detail: %v", err)
+	}
+	if len(d.Files) != 1 {
+		t.Fatalf("want 1 file, got %d", len(d.Files))
+	}
+	f := d.Files[0]
+	if f.HeadBytes != 0 {
+		t.Errorf("HeadBytes = %d, want 0 for an untouched torrent", f.HeadBytes)
+	}
+	if f.TailDone {
+		t.Error("TailDone = true, want false for an untouched torrent")
+	}
+}
+
 func TestExportedRemoveUnderDirRefusesEscape(t *testing.T) {
 	base := t.TempDir()
 	if err := RemoveUnderDir(base, "../escape"); err == nil {

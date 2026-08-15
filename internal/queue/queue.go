@@ -17,6 +17,7 @@ type Entry struct {
 	TorrentURL string   `json:"torrent_url,omitempty"`
 	Name       string   `json:"name"`
 	Paused     bool     `json:"paused"`
+	Sequential bool     `json:"sequential,omitempty"` // sequential (streaming) piece priority mode
 	FileGlobs  []string `json:"file_globs,omitempty"` // add-time --files patterns, until resolved
 	Deselected []string `json:"deselected,omitempty"` // file paths not being downloaded
 }
@@ -102,6 +103,24 @@ func (s *Store) SetPaused(infoHash string, paused bool) {
 	for i := range s.Entries {
 		if s.Entries[i].InfoHash == infoHash {
 			s.Entries[i].Paused = paused
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if found {
+		_ = s.Save()
+	}
+}
+
+// SetSequential updates the sequential (streaming) flag for infoHash (if
+// present) and persists.
+func (s *Store) SetSequential(infoHash string, sequential bool) {
+	s.mu.Lock()
+	found := false
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			s.Entries[i].Sequential = sequential
 			found = true
 			break
 		}

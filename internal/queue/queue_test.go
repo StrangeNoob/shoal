@@ -29,6 +29,17 @@ func TestUpsertRoundTrip(t *testing.T) {
 	}
 }
 
+// A Sequential entry survives a Save/LoadFrom round trip, like Paused.
+func TestSequentialRoundTrip(t *testing.T) {
+	s := tmpStore(t)
+	s.Upsert(Entry{InfoHash: "aaa", Sequential: true})
+
+	got := LoadFrom(s.Path)
+	if len(got.Entries) != 1 || !got.Entries[0].Sequential {
+		t.Fatalf("Sequential not persisted: %+v", got.Entries)
+	}
+}
+
 func TestUpsertReplacesByInfoHash(t *testing.T) {
 	s := tmpStore(t)
 	s.Upsert(Entry{InfoHash: "aaa", Name: "old"})

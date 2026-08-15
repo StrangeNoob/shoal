@@ -38,15 +38,16 @@ type Anacrolix struct {
 	closeOnce sync.Once
 	wg        sync.WaitGroup // tracks the background URL-restore goroutine
 
-	mu        sync.Mutex
-	addedAt   map[metainfo.Hash]time.Time
-	names     map[metainfo.Hash]string
-	paused    map[metainfo.Hash]bool
-	queued    map[metainfo.Hash]bool // held by the scheduler (max-concurrent)
-	order     []metainfo.Hash        // user-defined promotion order (front = first)
-	maxConns  int
-	maxActive int
-	store     *queue.Store
+	mu         sync.Mutex
+	addedAt    map[metainfo.Hash]time.Time
+	names      map[metainfo.Hash]string
+	paused     map[metainfo.Hash]bool
+	sequential map[metainfo.Hash]bool // sequential (streaming) piece priority mode
+	queued     map[metainfo.Hash]bool // held by the scheduler (max-concurrent)
+	order      []metainfo.Hash        // user-defined promotion order (front = first)
+	maxConns   int
+	maxActive  int
+	store      *queue.Store
 }
 
 // rateLimiter builds a token-bucket limiter for bytesPerSec (> 0). The burst is
@@ -115,17 +116,18 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		return nil, err
 	}
 	a := &Anacrolix{
-		client:    client,
-		http:      &http.Client{Timeout: 30 * time.Second},
-		dataDir:   c.DataDir,
-		seedRatio: c.SeedRatio,
-		done:      make(chan struct{}),
-		addedAt:   map[metainfo.Hash]time.Time{},
-		names:     map[metainfo.Hash]string{},
-		paused:    map[metainfo.Hash]bool{},
-		queued:    map[metainfo.Hash]bool{},
-		maxConns:  maxConnsFor(c.MaxPeers),
-		maxActive: c.MaxActive,
+		client:     client,
+		http:       &http.Client{Timeout: 30 * time.Second},
+		dataDir:    c.DataDir,
+		seedRatio:  c.SeedRatio,
+		done:       make(chan struct{}),
+		addedAt:    map[metainfo.Hash]time.Time{},
+		names:      map[metainfo.Hash]string{},
+		paused:     map[metainfo.Hash]bool{},
+		sequential: map[metainfo.Hash]bool{},
+		queued:     map[metainfo.Hash]bool{},
+		maxConns:   maxConnsFor(c.MaxPeers),
+		maxActive:  c.MaxActive,
 	}
 	if c.QueuePath != "" {
 		a.store = queue.LoadFrom(c.QueuePath)
@@ -134,9 +136,7 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	if c.Seed && c.SeedRatio > 0 {
 		go a.seedRatioLoop(10 * time.Second)
 	}
-	if c.MaxActive > 0 {
-		go a.queueLoop(3 * time.Second)
-	}
+	go a.queueLoop(3 * time.Second) // also drives periodic sequential-mode re-planning
 	return a, nil
 }
 
@@ -156,8 +156,9 @@ func (a *Anacrolix) seedRatioLoop(interval time.Duration) {
 	}
 }
 
-// queueLoop periodically enforces the max-concurrent-downloads limit until Close
-// signals done.
+// queueLoop periodically enforces the max-concurrent-downloads limit and
+// re-applies sequential-mode piece priorities (the window slides as pieces
+// complete) until Close signals done.
 func (a *Anacrolix) queueLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -172,52 +173,58 @@ func (a *Anacrolix) queueLoop(interval time.Duration) {
 }
 
 // reconcileQueue holds/releases torrents so at most maxActive download at once
-// (oldest first). The decision is made by the pure planQueue; this only gathers
-// state and applies the result under the lock.
+// (oldest first), then re-applies sequential-mode piece priorities. The
+// hold/release decision is made by the pure planQueue; this only gathers state
+// and applies the result under the lock.
 func (a *Anacrolix) reconcileQueue() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.maxActive <= 0 {
-		return
-	}
-	orderIdx := make(map[metainfo.Hash]int, len(a.order))
-	for i, h := range a.order {
-		orderIdx[h] = i
-	}
-	var items []queueItem
-	for _, t := range a.client.Torrents() {
-		h := t.InfoHash()
-		ord, ok := orderIdx[h]
-		if !ok {
-			ord = len(a.order) // untracked (shouldn't happen) → sort last
+	if a.maxActive > 0 {
+		orderIdx := make(map[metainfo.Hash]int, len(a.order))
+		for i, h := range a.order {
+			orderIdx[h] = i
 		}
-		items = append(items, queueItem{
-			Hash:       h,
-			AddedAt:    a.addedAt[h],
-			Order:      ord,
-			Done:       t.Complete().Bool(),
-			UserPaused: a.paused[h],
-			Queued:     a.queued[h],
-		})
-	}
-	release, hold := planQueue(items, a.maxActive)
-	for _, h := range hold {
-		if t, ok := a.client.Torrent(h); ok {
-			t.DisallowDataDownload()
-			t.SetMaxEstablishedConns(0)
-			a.queued[h] = true
+		var items []queueItem
+		for _, t := range a.client.Torrents() {
+			h := t.InfoHash()
+			ord, ok := orderIdx[h]
+			if !ok {
+				ord = len(a.order) // untracked (shouldn't happen) → sort last
+			}
+			items = append(items, queueItem{
+				Hash:       h,
+				AddedAt:    a.addedAt[h],
+				Order:      ord,
+				Done:       t.Complete().Bool(),
+				UserPaused: a.paused[h],
+				Queued:     a.queued[h],
+			})
 		}
-	}
-	for _, h := range release {
-		// Releasing clears the scheduler hold. Never resume a user-paused torrent
-		// — that would undo an explicit Pause; just drop the queued bookkeeping.
-		if !a.paused[h] {
+		release, hold := planQueue(items, a.maxActive)
+		for _, h := range hold {
 			if t, ok := a.client.Torrent(h); ok {
-				t.AllowDataDownload()
-				t.SetMaxEstablishedConns(a.maxConns)
+				t.DisallowDataDownload()
+				t.SetMaxEstablishedConns(0)
+				a.queued[h] = true
 			}
 		}
-		delete(a.queued, h)
+		for _, h := range release {
+			// Releasing clears the scheduler hold. Never resume a user-paused
+			// torrent — that would undo an explicit Pause; just drop the queued
+			// bookkeeping.
+			if !a.paused[h] {
+				if t, ok := a.client.Torrent(h); ok {
+					t.AllowDataDownload()
+					t.SetMaxEstablishedConns(a.maxConns)
+				}
+			}
+			delete(a.queued, h)
+		}
+	}
+	for _, t := range a.client.Torrents() {
+		if a.sequential[t.InfoHash()] {
+			applySequential(t)
+		}
 	}
 }
 
@@ -350,8 +357,13 @@ func (a *Anacrolix) restore() {
 		switch {
 		case e.Magnet != "":
 			// Magnets re-add instantly (no network), so do them synchronously.
-			if err := a.addMagnet(e.Magnet, e.Name, false); err == nil && e.Paused {
-				_ = a.Pause(e.InfoHash)
+			if err := a.addMagnet(e.Magnet, e.Name, false); err == nil {
+				if e.Paused {
+					_ = a.Pause(e.InfoHash)
+				}
+				if e.Sequential {
+					_ = a.SetSequential(e.InfoHash, true)
+				}
 			}
 		case e.TorrentURL != "":
 			urls = append(urls, e) // may be slow/dead: fetch off the startup path
@@ -374,8 +386,13 @@ func (a *Anacrolix) restoreURLs(entries []queue.Entry) {
 			return // shutting down
 		default:
 		}
-		if err := a.addTorrentURL(e.TorrentURL, e.Name, false); err == nil && e.Paused {
-			_ = a.Pause(e.InfoHash)
+		if err := a.addTorrentURL(e.TorrentURL, e.Name, false); err == nil {
+			if e.Paused {
+				_ = a.Pause(e.InfoHash)
+			}
+			if e.Sequential {
+				_ = a.SetSequential(e.InfoHash, true)
+			}
 		}
 	}
 }
@@ -405,11 +422,15 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 		if a.store != nil {
 			a.store.SetName(h.HexString(), a.names[h])
 		}
+		seq := a.sequential[h]
 		a.mu.Unlock()
 		t.DownloadAll()
 		// DownloadAll sets every piece to Normal priority, so any deselection
 		// must be applied after it or DownloadAll would clobber it.
 		a.applyFileSelection(t)
+		if seq {
+			applySequential(t)
+		}
 	}()
 }
 
@@ -418,7 +439,8 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 // before metadata (no files yet).
 func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) error {
 	a.mu.Lock()
-	t, _, ok := a.torrentByHash(infoHash)
+	t, h, ok := a.torrentByHash(infoHash)
+	seq := a.sequential[h]
 	a.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("no such torrent: %s", infoHash)
@@ -441,6 +463,9 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 		}
 	}
 	a.persistDeselected(t)
+	if seq {
+		applySequential(t)
+	}
 	return nil
 }
 
@@ -467,12 +492,16 @@ func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 	if ok && a.store != nil {
 		a.store.SetFileGlobs(h.HexString(), globs)
 	}
+	seq := a.sequential[h]
 	a.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("no such torrent: %s", infoHash)
 	}
 	if t.Info() != nil { // metadata already here → apply now
 		a.applyFileSelection(t)
+		if seq {
+			applySequential(t)
+		}
 	}
 	return nil
 }
@@ -511,6 +540,27 @@ func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
 		}
 	}
 	a.persistDeselected(t)
+}
+
+// applySequential recomputes and applies sequential-mode piece priorities for
+// t, a torrent with metadata. Selected files (priority != None) each get a
+// span; planSequential decides the priorities. A no-op before metadata.
+func applySequential(t *torrent.Torrent) {
+	info := t.Info()
+	if info == nil {
+		return
+	}
+	var spans []pieceSpan
+	for _, f := range t.Files() {
+		if f.Priority() == torrent.PiecePriorityNone {
+			continue
+		}
+		spans = append(spans, pieceSpan{f.BeginPieceIndex(), f.EndPieceIndex()})
+	}
+	complete := func(i int) bool { return t.PieceState(i).Complete }
+	for i, p := range planSequential(spans, complete, info.PieceLength, seqWindowBytes) {
+		t.Piece(i).SetPriority(p)
+	}
 }
 
 func (a *Anacrolix) Statuses() []Status {
@@ -563,6 +613,7 @@ func (a *Anacrolix) Statuses() []Status {
 			Done:       total > 0 && verified >= total,
 			Paused:     a.paused[h],
 			Queued:     a.queued[h],
+			Sequential: a.sequential[h],
 			Seeding:    !a.paused[h] && t.Seeding(),
 			Path:       diskPath,
 			AddedAt:    a.addedAt[h],
@@ -595,12 +646,23 @@ func (a *Anacrolix) Detail(infoHash string) (Detail, error) {
 	}
 	var d Detail
 	for _, f := range t.Files() {
-		d.Files = append(d.Files, FileDetail{
+		fd := FileDetail{
 			Path:      f.DisplayPath(),
 			Length:    f.Length(),
 			Completed: f.BytesCompleted(),
 			Selected:  f.Priority() != torrent.PiecePriorityNone,
-		})
+		}
+		states := f.State()
+		for _, ps := range states {
+			if !ps.Complete {
+				break
+			}
+			fd.HeadBytes += ps.Bytes
+		}
+		if len(states) > 0 {
+			fd.TailDone = states[len(states)-1].Complete
+		}
+		d.Files = append(d.Files, fd)
 	}
 	mi := t.Metainfo()
 	d.Trackers = mi.UpvertedAnnounceList().DistinctValues()
@@ -624,6 +686,7 @@ func (a *Anacrolix) Remove(infoHash string, deleteData bool) error {
 		return nil // already gone
 	}
 	delete(a.paused, hash)
+	delete(a.sequential, hash)
 	delete(a.queued, hash)
 	a.order = removeHash(a.order, hash)
 	diskName := found.Name() // the info name anacrolix wrote files under (attacker-influenced)
@@ -669,6 +732,37 @@ func (a *Anacrolix) Resume(infoHash string) error {
 	a.paused[h] = false
 	if a.store != nil {
 		a.store.SetPaused(infoHash, false)
+	}
+	return nil
+}
+
+// SetSequential toggles sequential (streaming) piece priority mode for the
+// torrent with the given hex infohash, and persists the flag. Turning it on
+// applies the plan immediately (also re-applied on the poll path, metadata
+// arrival, and file-selection changes). Turning it off resets every selected
+// file to Normal priority via f.SetPriority; deselected files are left alone
+// (they stay None). An unknown hash is a no-op (nil error).
+func (a *Anacrolix) SetSequential(infoHash string, on bool) error {
+	a.mu.Lock()
+	t, h, ok := a.torrentByHash(infoHash)
+	if !ok {
+		a.mu.Unlock()
+		return nil
+	}
+	a.sequential[h] = on
+	if a.store != nil {
+		a.store.SetSequential(infoHash, on)
+	}
+	a.mu.Unlock()
+
+	if on {
+		applySequential(t)
+	} else {
+		for _, f := range t.Files() {
+			if f.Priority() != torrent.PiecePriorityNone {
+				f.SetPriority(torrent.PiecePriorityNormal)
+			}
+		}
 	}
 	return nil
 }
