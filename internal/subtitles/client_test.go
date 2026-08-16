@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -187,6 +188,83 @@ func TestDownloadRejectsNonHTTPSNonLoopbackLink(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "evil.example") {
 		t.Errorf("err = %v, want it to mention the rejected link", err)
+	}
+}
+
+// The link policy must also hold across redirects: a validated loopback/https
+// link that redirects to an unsafe target must be rejected before the
+// redirected request is sent.
+func TestDownloadRejectsUnsafeRedirect(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/redir","file_name":"X.srt"}`))
+		case "/redir":
+			http.Redirect(w, r, "http://evil.example/x.srt", http.StatusFound)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	_, err := c.Download(123)
+	if err == nil {
+		t.Fatal("err = nil, want error for a redirect to a non-https, non-loopback target")
+	}
+	if !strings.Contains(err.Error(), "evil.example") {
+		t.Errorf("err = %v, want it to mention the rejected redirect target", err)
+	}
+}
+
+func TestDownloadFollowsSafeRedirect(t *testing.T) {
+	const body = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/redir","file_name":"X.srt"}`))
+		case "/redir":
+			http.Redirect(w, r, srv.URL+"/files/X.srt", http.StatusFound)
+		case "/files/X.srt":
+			_, _ = io.WriteString(w, body)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	got, err := c.Download(123)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if string(got) != body {
+		t.Fatalf("Download body = %q, want %q", got, body)
+	}
+}
+
+// An oversized response must be an error, not silently truncated data written
+// out as a "valid" .srt (which the auto-fetch existence guard would then trust).
+func TestDownloadRejectsOversizedBody(t *testing.T) {
+	big := bytes.Repeat([]byte("a"), maxDownloadBytes+2)
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/files/big.srt","file_name":"big.srt"}`))
+		case "/files/big.srt":
+			_, _ = w.Write(big)
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	if _, err := c.Download(123); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("err = %v, want an exceeds-limit error", err)
 	}
 }
 

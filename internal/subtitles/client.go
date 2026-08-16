@@ -194,11 +194,19 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 	// httptest-backed tests (that serve both the API and the "CDN" from the
 	// same local server) keep working — a real download link must be https.
 	link, err := url.Parse(parsed.Link)
-	if err != nil || link.Host == "" || !(link.Scheme == "https" || (link.Scheme == "http" && isLoopbackHost(link.Hostname()))) {
+	if err != nil || validateLinkURL(link) != nil {
 		return nil, fmt.Errorf("subtitles: download link is not an absolute https URL: %q", parsed.Link)
 	}
 
-	fileResp, err := c.httpClient().Get(link.String())
+	// The same policy must hold for every redirect target — http.Client
+	// follows redirects automatically, and a validated link could otherwise
+	// bounce to an http or internal address. The client copy keeps the
+	// caller's Transport/Timeout while adding the redirect check.
+	lc := *c.httpClient()
+	lc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return validateLinkURL(req.URL)
+	}
+	fileResp, err := lc.Get(link.String())
 	if err != nil {
 		return nil, err
 	}
@@ -206,9 +214,29 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 	if fileResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("subtitles: unexpected status %s fetching subtitle file", fileResp.Status)
 	}
-	// Cap the CDN read: a subtitle is kilobytes, and the link is followed
-	// unauthenticated, so never buffer an unbounded response.
-	return io.ReadAll(io.LimitReader(fileResp.Body, 10<<20))
+	// Cap the CDN read — and treat hitting the cap as an error rather than
+	// silently truncating: a partial body written as a "valid" .srt would be
+	// trusted by the auto-fetch existence guard and never retried.
+	data, err := io.ReadAll(io.LimitReader(fileResp.Body, maxDownloadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDownloadBytes {
+		return nil, fmt.Errorf("subtitles: subtitle file exceeds %d MiB limit", maxDownloadBytes>>20)
+	}
+	return data, nil
+}
+
+// maxDownloadBytes caps a subtitle download; a real .srt is kilobytes.
+const maxDownloadBytes = 10 << 20
+
+// validateLinkURL enforces the download-link policy (absolute https, or
+// loopback http for tests) on the initial link and on every redirect target.
+func validateLinkURL(u *url.URL) error {
+	if u == nil || u.Host == "" || !(u.Scheme == "https" || (u.Scheme == "http" && isLoopbackHost(u.Hostname()))) {
+		return fmt.Errorf("subtitles: download link target is not an absolute https URL: %q", u)
+	}
+	return nil
 }
 
 // isLoopbackHost reports whether host (already stripped of a port by
