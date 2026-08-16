@@ -65,10 +65,23 @@ type fakeEngine struct {
 	setFilesSelected bool
 	setFilesErr      error // returned by SetFiles when set
 
-	seqHash string
-	seqOn   bool
-	seqErr  error // returned by SetSequential when set
+	seqHash  string
+	seqOn    bool
+	seqCalls int
+	seqErr   error // returned by SetSequential when set
 }
+
+// bareEngine implements engine.Engine and nothing else — no sequencer — like a
+// build whose engine can't toggle sequential mode.
+type bareEngine struct{ statuses []engine.Status }
+
+func (e *bareEngine) AddTorrentURL(url, name string) error { return nil }
+func (e *bareEngine) AddMagnet(magnet string) error        { return nil }
+func (e *bareEngine) Statuses() []engine.Status            { return e.statuses }
+func (e *bareEngine) Remove(string, bool) error            { return nil }
+func (e *bareEngine) Pause(string) error                   { return nil }
+func (e *bareEngine) Resume(string) error                  { return nil }
+func (e *bareEngine) Close() error                         { return nil }
 
 func (e *fakeEngine) Detail(infoHash string) (engine.Detail, error) { return e.detail, nil }
 
@@ -115,6 +128,7 @@ func (e *fakeEngine) Close() error { return nil }
 
 func (e *fakeEngine) SetSequential(infoHash string, on bool) error {
 	e.seqHash, e.seqOn = infoHash, on
+	e.seqCalls++
 	return e.seqErr
 }
 
@@ -711,6 +725,65 @@ func TestDownloadsSequentialToggle(t *testing.T) {
 	}
 }
 
+// An engine that can't toggle sequential mode must not get an optimistic flip:
+// the command would be dropped and the UI would claim a mode the daemon never
+// entered, until the next poll silently corrected it.
+func TestDownloadsSequentialToggleUnsupportedEngine(t *testing.T) {
+	eng := &bareEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	m, cmd := update(m, key("s"))
+	if cmd != nil {
+		t.Fatal("s on an engine without sequential support should return no command")
+	}
+	if m.statuses[0].Sequential {
+		t.Fatal("s must not flip Sequential when the engine can't apply it")
+	}
+	if m.notice == "" || !m.noticeErr {
+		t.Fatalf("unsupported toggle should surface an error notice, got %q err=%v", m.notice, m.noticeErr)
+	}
+}
+
+// Two quick presses would otherwise race: the writes run concurrently and can
+// land on the daemon in reverse order, leaving the UI desynced until the next
+// poll. The second press is ignored until the first one reports back.
+func TestDownloadsSequentialToggleIgnoresPressWhilePending(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	m, cmd := update(m, key("s")) // toggle on; write still in flight
+	m, cmd2 := update(m, key("s"))
+	if cmd2 != nil {
+		t.Fatal("a second s while a toggle is in flight should return no command")
+	}
+	if !m.statuses[0].Sequential {
+		t.Fatal("the ignored press must not flip Sequential back")
+	}
+	msg := cmd() // first write completes
+	if eng.seqCalls != 1 {
+		t.Fatalf("SetSequential called %d times, want 1 (the second press must not reach the engine)", eng.seqCalls)
+	}
+
+	// The completion message clears the guard, so the next press works again.
+	m, _ = update(m, msg)
+	m, cmd3 := update(m, key("s"))
+	if cmd3 == nil {
+		t.Fatal("s after the toggle completed should return a command")
+	}
+	cmd3()
+	if eng.seqCalls != 2 || eng.seqOn {
+		t.Fatalf("SetSequential calls=%d on=%v, want 2 false", eng.seqCalls, eng.seqOn)
+	}
+}
+
 func TestDownloadsSequentialToggleRevertsOnError(t *testing.T) {
 	eng := &fakeEngine{
 		statuses: []engine.Status{{Name: "Movie", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10}},
@@ -732,6 +805,11 @@ func TestDownloadsSequentialToggleRevertsOnError(t *testing.T) {
 	}
 	if m.notice == "" || !m.noticeErr {
 		t.Fatalf("a failed toggle should surface an error notice, got %q err=%v", m.notice, m.noticeErr)
+	}
+	// The failure must also clear the in-flight guard, or `s` would be dead for
+	// this download until restart.
+	if _, cmd := update(m, key("s")); cmd == nil {
+		t.Fatal("s after a failed toggle should return a command (guard not cleared)")
 	}
 }
 

@@ -92,7 +92,7 @@ downloads past the limit show **⏳ queued** and start automatically as slots fr
 first); `[` / `]` move the selected download **earlier / later** in that queue. Select a
 download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the partial
 files or `d` delete them; `esc` aborts). Press `s` to toggle **sequential** (streaming) piece
-order on the selected download — a `▶ sequential` tag appears in its detail line, and the file
+priority on the selected download — a `▶ sequential` tag appears in its detail line, and the file
 becomes playable (e.g. with `shoal stream`) well before the whole torrent finishes. When a
 download finishes, shoal shows a notice and rings the terminal bell / posts a desktop
 notification (toggle in Settings).
@@ -132,11 +132,11 @@ shoal sources disable <name>         # turn a provider off
 shoal search "big buck bunny"        # search every source (--sort, --min-seeders, --json)
 shoal download <magnet|url|infohash|id|file.torrent>   # background download (--wait to block)
 shoal download <target> --files '<glob>'  # download only files matching a comma-separated glob
-shoal download <target> --sequential # download in sequential (streaming) piece order
+shoal download <target> --sequential # prioritize pieces for streaming (playable early)
 shoal files <id>                     # list a download's files (# / ✓·✗ / SIZE / PATH)
 shoal files <id> --only '<glob>'     # select files matching a glob (deselect the rest)
 shoal files <id> --json              # list files for scripting
-shoal sequential <id> on|off         # toggle sequential (streaming) piece order on an existing download
+shoal sequential <id> on|off         # toggle streaming piece priority on an existing download
 shoal stream <id|magnet>             # wait until playable, print the file path (add --files <glob>)
 shoal status [id]                    # progress of background downloads (--json, --clear, --follow)
 shoal history [--json]               # list completed downloads
@@ -180,18 +180,20 @@ shoal completion bash|zsh|fish       # print a shell completion script
   live progress line and exits `0` on completion (non-zero if the daemon becomes unreachable), so a
   script doesn't have to poll `status`. Add `--files '<glob>'` to download only files matching a
   comma-separated glob pattern (e.g. `--files '*.mkv,*.srt'`) — applied once metadata arrives, so it
-  works for magnets; not yet supported for `.torrent`-URL targets. Add `--sequential` to download in
-  sequential (streaming) piece order instead of rarest-first — like `--files`, this only applies to
-  magnet targets today (a `.torrent`-URL download prints a note and continues without it); use
-  `shoal sequential <id> on` afterwards for those.
+  works for magnets; not yet supported for `.torrent`-URL targets. Add `--sequential` to bias piece
+  order for streaming instead of rarest-first — like `--files`, this only applies to magnet targets
+  today (a `.torrent`-URL download prints a note and continues without it); use
+  `shoal sequential <id> on` afterward for those.
 - **`files`** lists a download's files as a table (`# / ✓·✗ / SIZE / PATH`), with one row per file.
   Add `--only '<glob>'` to select files matching a glob pattern and deselect the rest (format: comma-separated
   patterns, case-insensitive, matched against full path and basename, same as `--files`).
   Add `--json` for machine-readable output (scripts).
-- **`sequential`** toggles sequential (streaming) piece-priority mode on an existing download:
-  `shoal sequential <id> on|off`. With it on, the engine prioritizes each selected file's first and
-  last pieces plus a growing early window, so the file becomes playable long before the whole
-  torrent finishes, instead of filling in rarest-first order.
+- **`sequential`** toggles sequential (streaming) mode on an existing download:
+  `shoal sequential <id> on|off`. It's a priority overlay, not a strict in-file-order download: each
+  selected file's first and last pieces plus a rolling early window are prioritized, so the file
+  becomes playable long before the torrent finishes, while the remainder still backfills normally
+  (rarest-first). Pieces are hash-verified exactly as they always are — nothing about integrity
+  changes, only the order pieces are asked for.
 - **`stream`** is the one-shot way to watch something while it downloads: `shoal stream <id|magnet>`
   resolves the target (an existing download, or a fresh magnet), turns on sequential mode, waits
   for its target file to become playable (first ~8 MiB plus the last piece complete — picked by

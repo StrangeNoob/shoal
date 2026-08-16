@@ -649,6 +649,24 @@ func TestSetSequentialOffClearsPieceBumps(t *testing.T) {
 	}
 }
 
+// An apply that was already in flight when the mode was turned off must not
+// re-raise piece priorities: nothing would ever clear them again, and Status
+// would report Sequential=false while the window kept downloading.
+func TestApplySequentialAfterModeOffIsNoOp(t *testing.T) {
+	eng, h, tt := addSequentialTestTorrent(t)
+
+	if err := eng.SetSequential(h, true); err != nil {
+		t.Fatalf("SetSequential(on): %v", err)
+	}
+	if err := eng.SetSequential(h, false); err != nil {
+		t.Fatalf("SetSequential(off): %v", err)
+	}
+	eng.applySequential(tt) // a stale in-flight apply landing after the off
+	if got := maxPiecePriority(tt); got > torrent.PiecePriorityNormal {
+		t.Fatalf("max piece priority after a stale apply = %v, want <= Normal (stale apply re-raised priorities)", got)
+	}
+}
+
 // Deselecting a file while sequential is on must also drop its piece bumps —
 // otherwise the file keeps downloading despite being deselected.
 func TestSetFilesDeselectClearsPieceBumps(t *testing.T) {

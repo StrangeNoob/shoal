@@ -38,6 +38,13 @@ type Anacrolix struct {
 	closeOnce sync.Once
 	wg        sync.WaitGroup // tracks the background URL-restore goroutine
 
+	// seqApplyMu serializes sequential-mode piece-priority writes against mode
+	// changes: applySequential and SetSequential's off-branch both hold it for
+	// their whole body, so an apply that was already in flight can't re-raise
+	// priorities after the mode was turned off. Lock order is seqApplyMu → mu,
+	// never the reverse — release mu before taking seqApplyMu.
+	seqApplyMu sync.Mutex
+
 	mu         sync.Mutex
 	addedAt    map[metainfo.Hash]time.Time
 	names      map[metainfo.Hash]string
@@ -230,7 +237,7 @@ func (a *Anacrolix) reconcileQueue() {
 	}
 	a.mu.Unlock()
 	for _, t := range seq {
-		applySequential(t)
+		a.applySequential(t)
 	}
 }
 
@@ -435,7 +442,7 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 		// must be applied after it or DownloadAll would clobber it.
 		a.applyFileSelection(t)
 		if seq {
-			applySequential(t)
+			a.applySequential(t)
 		}
 	}()
 }
@@ -475,7 +482,7 @@ func (a *Anacrolix) SetFiles(infoHash string, paths []string, selected bool) err
 	clearPieceBumps(t, off)
 	a.persistDeselected(t)
 	if seq {
-		applySequential(t)
+		a.applySequential(t)
 	}
 	return nil
 }
@@ -511,7 +518,7 @@ func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 	if t.Info() != nil { // metadata already here → apply now
 		a.applyFileSelection(t)
 		if seq {
-			applySequential(t)
+			a.applySequential(t)
 		}
 	}
 	return nil
@@ -558,10 +565,22 @@ func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
 
 // applySequential recomputes and applies sequential-mode piece priorities for
 // t, a torrent with metadata. Selected files (priority != None) each get a
-// span; planSequential decides the priorities. A no-op before metadata.
-func applySequential(t *torrent.Torrent) {
+// span; planSequential decides the priorities. A no-op before metadata, and a
+// no-op if sequential mode is no longer on for t — every caller reads the mode
+// before releasing a.mu, so this re-check under seqApplyMu is what stops a
+// stale apply from re-raising priorities a concurrent SetSequential(off) just
+// cleared.
+func (a *Anacrolix) applySequential(t *torrent.Torrent) {
+	a.seqApplyMu.Lock()
+	defer a.seqApplyMu.Unlock()
 	info := t.Info()
 	if info == nil {
+		return
+	}
+	a.mu.Lock()
+	on := a.sequential[t.InfoHash()]
+	a.mu.Unlock()
+	if !on {
 		return
 	}
 	var spans []pieceSpan
@@ -770,14 +789,19 @@ func (a *Anacrolix) SetSequential(infoHash string, on bool) error {
 	a.mu.Unlock()
 
 	if on {
-		applySequential(t)
+		a.applySequential(t)
 	} else {
+		// a.mu is already released: lock order is seqApplyMu → mu. Clearing under
+		// seqApplyMu is what makes an in-flight applySequential either finish
+		// before this, or see sequential=false and skip.
+		a.seqApplyMu.Lock()
 		clearPieceBumps(t, t.Files()) // piece bumps outlive the mode otherwise
 		for _, f := range t.Files() {
 			if f.Priority() != torrent.PiecePriorityNone {
 				f.SetPriority(torrent.PiecePriorityNormal)
 			}
 		}
+		a.seqApplyMu.Unlock()
 	}
 	return nil
 }
