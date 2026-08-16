@@ -238,5 +238,30 @@ func (s *Store) Save() error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, b, 0o600)
+	// Write-temp-then-rename: os.WriteFile truncates in place, so a concurrent
+	// reader (or a crash mid-write) could observe an empty/partial queue.json.
+	// The temp file lives in the same dir so the rename can't cross filesystems.
+	tmp, err := os.CreateTemp(dir, ".queue-*.json")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), s.Path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }

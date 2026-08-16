@@ -36,7 +36,7 @@ type Anacrolix struct {
 	seedRatio float64
 	done      chan struct{}
 	closeOnce sync.Once
-	wg        sync.WaitGroup // tracks the background URL-restore goroutine
+	wg        sync.WaitGroup // tracks background goroutines: URL restore + per-torrent metadata tracking
 
 	// seqApplyMu serializes sequential-mode piece-priority writes against mode
 	// changes: applySequential and SetSequential's off-branch both hold it for
@@ -424,8 +424,14 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 	}
 	a.mu.Unlock()
 
+	a.wg.Add(1)
 	go func() {
-		<-t.GotInfo() // blocks until we have the metadata (instant for a .torrent)
+		defer a.wg.Done()
+		select {
+		case <-t.GotInfo(): // metadata arrived (instant for a .torrent)
+		case <-a.done: // engine closing before metadata (e.g. a stale magnet)
+			return
+		}
 		a.mu.Lock()
 		if a.names[h] == "" {
 			a.names[h] = t.Name()
@@ -825,8 +831,8 @@ func removeUnderDir(dir, name string) error {
 }
 
 func (a *Anacrolix) Close() error {
-	a.closeOnce.Do(func() { close(a.done) }) // stop the seed-ratio loop + signal restore; safe if called twice
-	a.wg.Wait()                              // let the background URL-restore finish before tearing down the client
+	a.closeOnce.Do(func() { close(a.done) }) // stop the loops + signal restore/track goroutines; safe if called twice
+	a.wg.Wait()                              // no store writes or torrent access may outlive Close
 	a.client.Close()
 	return nil
 }

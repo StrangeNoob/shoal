@@ -245,6 +245,31 @@ func TestAnacrolixPauseResume(t *testing.T) {
 	}
 }
 
+// Close waits for the per-torrent metadata goroutine (so no store writes
+// outlive Close), but a magnet whose metadata never arrives must not make
+// Close hang — the goroutine bails out on the engine's done signal.
+func TestCloseReturnsWithPendingMagnet(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := NewAnacrolix(Config{DataDir: dir, QueuePath: filepath.Join(dir, "queue.json")})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	magnet := "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=never-resolves"
+	if err := eng.AddMagnet(magnet); err != nil {
+		t.Fatalf("AddMagnet: %v", err)
+	}
+	closed := make(chan struct{})
+	go func() {
+		eng.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close hung waiting for a magnet that never resolves metadata")
+	}
+}
+
 func TestAnacrolixPersistsAndRestores(t *testing.T) {
 	dir := t.TempDir()
 	qpath := filepath.Join(dir, "queue.json")
