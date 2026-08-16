@@ -52,9 +52,24 @@ var AppVersion = "dev"
 // OpenSubtitles API, a request timeout (never hang a fetch forever), and
 // shoal's versioned User-Agent — which OpenSubtitles asks API consumers to send.
 func NewDefaultClient(apiKey string) *Client {
-	c := NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal "+AppVersion)
+	c := NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal "+versionedUA(AppVersion))
 	c.HTTP = &http.Client{Timeout: 30 * time.Second}
 	return c
+}
+
+// versionedUA normalizes AppVersion into the "vX.Y.Z" shape OpenSubtitles
+// expects in a User-Agent, tolerating callers that already included the "v"
+// prefix. AppVersion is "dev" (its zero value) before a real build version is
+// resolved, or possibly empty in tests — both map to a fixed placeholder
+// rather than sending "shoal v" or "shoal vdev".
+func versionedUA(version string) string {
+	if version == "" || version == "dev" {
+		return "v0.0.0-dev"
+	}
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -79,14 +94,19 @@ func (c *Client) do(method, endpoint string, body io.Reader) (*http.Response, er
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		switch resp.StatusCode {
 		case http.StatusTooManyRequests:
 			return nil, ErrRateLimited
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return nil, ErrBadKey
 		default:
-			return nil, fmt.Errorf("subtitles: unexpected status %s", resp.Status)
+			// Bounded: the body is normally a short JSON error, but it's
+			// still an unauthenticated-status response, so never buffer it
+			// unbounded.
+			const maxErrBody = 1 << 10
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrBody))
+			return nil, fmt.Errorf("subtitles: unexpected status %s: %s", resp.Status, strings.TrimSpace(string(b)))
 		}
 	}
 	return resp, nil
@@ -110,7 +130,7 @@ func (c *Client) Search(hash, query, lang string) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var parsed struct {
 		Data []struct {
@@ -158,7 +178,7 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var parsed struct {
 		Link     string `json:"link"`
@@ -168,15 +188,34 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 		return nil, fmt.Errorf("subtitles: decode download response: %w", err)
 	}
 
-	fileResp, err := c.httpClient().Get(parsed.Link)
+	// The link is unauthenticated and comes straight from the API response,
+	// so validate it before following: require an absolute https URL. The
+	// one exception is a loopback host over http, which only exists so
+	// httptest-backed tests (that serve both the API and the "CDN" from the
+	// same local server) keep working — a real download link must be https.
+	link, err := url.Parse(parsed.Link)
+	if err != nil || link.Host == "" || !(link.Scheme == "https" || (link.Scheme == "http" && isLoopbackHost(link.Hostname()))) {
+		return nil, fmt.Errorf("subtitles: download link is not an absolute https URL: %q", parsed.Link)
+	}
+
+	fileResp, err := c.httpClient().Get(link.String())
 	if err != nil {
 		return nil, err
 	}
-	defer fileResp.Body.Close()
+	defer func() { _ = fileResp.Body.Close() }()
 	if fileResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("subtitles: unexpected status %s fetching subtitle file", fileResp.Status)
 	}
 	// Cap the CDN read: a subtitle is kilobytes, and the link is followed
 	// unauthenticated, so never buffer an unbounded response.
 	return io.ReadAll(io.LimitReader(fileResp.Body, 10<<20))
+}
+
+// isLoopbackHost reports whether host (already stripped of a port by
+// url.URL.Hostname) names the local machine — the only case a plain http
+// download link is allowed, so tests can serve their fake CDN over
+// httptest's http:// loopback server without weakening the check for real
+// OpenSubtitles links, which must be https.
+func isLoopbackHost(host string) bool {
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }

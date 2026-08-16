@@ -29,8 +29,11 @@ matching, since the file is on disk.
   wraparound, formatted `%016x`. Files smaller than 128 KiB return an error
   (protocol minimum).
 - `Client` — REST client with injectable base URL and `http.Client` (httptest
-  in tests). Required headers on every request: `Api-Key: <key>`,
-  `User-Agent: shoal v<version>`. Two operations:
+  in tests). Required headers on every *API* request (`/subtitles`,
+  `/download`): `Api-Key: <key>`, `User-Agent: shoal v<version>`. The CDN GET
+  that follows `/download`'s returned `link` deliberately carries neither
+  header — it's an unauthenticated file host, not the OpenSubtitles API. Two
+  operations:
   - `Search(hash, query, lang string) ([]Result, error)` — GET
     `/subtitles?moviehash=<hash>&languages=<lang>&query=<query>`; a `Result`
     carries `FileID int64`, `FileName string`, `Language string`,
@@ -74,9 +77,12 @@ defaults to the configured `SubsLang`.
 
 A `SUBTITLES` group with three rows following existing setting-item patterns:
 "OS API key" (text, rendered masked except last 4 chars), "Subs lang" (text),
-"Auto subs" (on/off enum). Engine-applied note not needed: key/lang/auto are
-read per fetch, so they apply live for the CLI; the daemon auto-hook picks up
-changes on daemon restart like other engine settings.
+"Auto subs" (on/off enum). Setting-timing note: the CLI (`shoal subs`) reads
+`OpenSubsAPIKey`/`SubsLang` live from config on every invocation, so edits
+apply immediately there. The daemon, by contrast, receives all three values
+(including `SubsAuto`) once, via engine `Config` at startup — so a change to
+any of them only takes effect for the auto-fetch hook after a daemon restart,
+same as other engine settings.
 
 ## Testing
 

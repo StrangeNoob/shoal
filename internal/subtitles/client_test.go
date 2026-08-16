@@ -10,18 +10,31 @@ import (
 )
 
 // NewDefaultClient is the single place the production base URL, request
-// timeout and versioned User-Agent live.
+// timeout and versioned User-Agent live. OpenSubtitles requires a
+// "AppName vX.Y.Z"-shaped User-Agent, so AppVersion is normalized into that
+// form regardless of whether the caller already included a "v" prefix.
 func TestNewDefaultClientHasTimeoutAndVersionedUA(t *testing.T) {
 	orig := AppVersion
-	AppVersion = "v1.2.3"
 	t.Cleanup(func() { AppVersion = orig })
 
+	cases := []struct{ version, wantUA string }{
+		{"1.2.3", "shoal v1.2.3"},
+		{"v1.2.3", "shoal v1.2.3"},
+		{"dev", "shoal v0.0.0-dev"},
+		{"", "shoal v0.0.0-dev"},
+	}
+	for _, tc := range cases {
+		AppVersion = tc.version
+		c := NewDefaultClient("key")
+		if c.userAgent != tc.wantUA {
+			t.Errorf("AppVersion = %q: userAgent = %q, want %q", tc.version, c.userAgent, tc.wantUA)
+		}
+	}
+
+	AppVersion = "v1.2.3"
 	c := NewDefaultClient("key")
 	if c.HTTP == nil || c.HTTP.Timeout <= 0 {
 		t.Fatalf("HTTP = %+v, want a non-nil client with a timeout", c.HTTP)
-	}
-	if !strings.Contains(c.userAgent, AppVersion) {
-		t.Errorf("User-Agent = %q, want it to contain %q", c.userAgent, AppVersion)
 	}
 	if !strings.HasPrefix(c.baseURL, "https://api.opensubtitles.com") {
 		t.Errorf("baseURL = %q, want the public API", c.baseURL)
@@ -56,7 +69,7 @@ func TestSearchRequestAndParsing(t *testing.T) {
 		if got := r.Header.Get("User-Agent"); got != testUA {
 			t.Errorf("User-Agent = %q, want %q", got, testUA)
 		}
-		io.WriteString(w, searchFixture)
+		_, _ = io.WriteString(w, searchFixture)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -88,7 +101,7 @@ func TestSearchHashOnlyOmitsQueryParam(t *testing.T) {
 		if _, ok := q["query"]; ok {
 			t.Errorf("query param present = %v, want omitted when empty", q["query"])
 		}
-		io.WriteString(w, `{"data":[]}`)
+		_, _ = io.WriteString(w, `{"data":[]}`)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -125,9 +138,9 @@ func TestDownloadFlow(t *testing.T) {
 			if reqBody.FileID != 123 {
 				t.Errorf("file_id = %d, want 123", reqBody.FileID)
 			}
-			w.Write([]byte(`{"link":"` + srv.URL + `/files/X.srt","file_name":"X.srt"}`))
+			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/files/X.srt","file_name":"X.srt"}`))
 		case "/files/X.srt":
-			io.WriteString(w, body)
+			_, _ = io.WriteString(w, body)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -141,6 +154,59 @@ func TestDownloadFlow(t *testing.T) {
 	}
 	if string(got) != body {
 		t.Fatalf("Download body = %q, want %q", got, body)
+	}
+}
+
+// Download follows the CDN link the API hands back unauthenticated, so it
+// must validate that link before making a second network request — otherwise
+// a compromised or misbehaving API response could redirect the client
+// anywhere. Real-world links must be https; the http:// loopback exception
+// exists only so these httptest-backed tests keep working.
+func TestDownloadRejectsEmptyLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"link":""}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	if _, err := c.Download(123); err == nil {
+		t.Fatal("err = nil, want error for an empty download link")
+	}
+}
+
+func TestDownloadRejectsNonHTTPSNonLoopbackLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"link":"http://evil.example/x.srt"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	_, err := c.Download(123)
+	if err == nil {
+		t.Fatal("err = nil, want error for a non-https, non-loopback download link")
+	}
+	if !strings.Contains(err.Error(), "evil.example") {
+		t.Errorf("err = %v, want it to mention the rejected link", err)
+	}
+}
+
+// do()'s non-200 default branch must include a bounded snippet of the
+// response body so callers (and their error logs) see why the API rejected
+// the request, not just the bare status line.
+func TestSearchOtherStatusErrorIncludesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"message":"invalid moviehash format"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	_, err := c.Search("abc123", "", "en")
+	if err == nil {
+		t.Fatal("err = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "invalid moviehash format") {
+		t.Errorf("err = %v, want it to include the response body", err)
 	}
 }
 

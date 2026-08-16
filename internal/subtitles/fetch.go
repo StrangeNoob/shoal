@@ -40,9 +40,15 @@ func Fetch(c *Client, videoPath, lang string) (string, error) {
 	ext := filepath.Ext(videoPath)
 	query := strings.TrimSpace(queryReplacer.Replace(strings.TrimSuffix(filepath.Base(videoPath), ext)))
 
+	// Only a too-small file falls back to a query-only search. Any other Hash
+	// error (missing/unreadable file, ...) must not be swallowed: a silent
+	// fallback here could write an orphan .srt beside a video that isn't
+	// actually there, which would then poison the auto-fetch existence guard.
 	hash, err := Hash(videoPath)
-	if err != nil {
+	if errors.Is(err, ErrTooSmall) {
 		hash = ""
+	} else if err != nil {
+		return "", err
 	}
 
 	results, err := c.Search(hash, query, lang)
@@ -92,7 +98,7 @@ func writeAtomic(path string, data []byte) error {
 		err = os.Rename(tmp, path)
 	}
 	if err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return nil

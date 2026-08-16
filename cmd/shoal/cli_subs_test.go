@@ -10,6 +10,7 @@ import (
 
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/engine"
+	"github.com/StrangeNoob/shoal/internal/subtitles"
 )
 
 // isolateConfig points HOME/XDG at a temp dir so config.Load()/Save() use a
@@ -357,6 +358,42 @@ func TestSubsPerFileFailureContinuesAndPartialSuccessExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "bad.mkv") {
 		t.Errorf("stderr should mention the failed file:\n%s", stderr)
+	}
+}
+
+// A rate-limit or bad-key error means every remaining fetch will fail the
+// same way, so runSubs must stop the loop instead of burning through the
+// rest of the targets one failed request at a time.
+func TestSubsRateLimitedStopsLoop(t *testing.T) {
+	isolateConfig(t)
+	setSubsConfig(t, "test-key", "en")
+
+	calls := swapSubsFetch(t, func(apiKey, videoPath, lang string) (string, error) {
+		return "", subtitles.ErrRateLimited
+	})
+
+	dataDir := t.TempDir()
+	torrentDir := filepath.Join(dataDir, "My Show")
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: "abc" + strings.Repeat("0", 37), Name: "My Show", Path: torrentDir}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "ep01.mkv", Length: 200 << 20, Selected: true},
+			{Path: "ep02.mkv", Length: 200 << 20, Selected: true},
+			{Path: "ep03.mkv", Length: 200 << 20, Selected: true},
+		}},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	var code int
+	_ = captureStderr(t, func() {
+		code = runSubs([]string{"abc"}, &buf)
+	})
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero when rate limited")
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("subsFetch calls = %d, want 1 (loop should stop after ErrRateLimited)", len(*calls))
 	}
 }
 

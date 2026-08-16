@@ -11,7 +11,7 @@ import (
 )
 
 func readJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
@@ -131,6 +131,30 @@ func TestFetchFallsBackToQueryOnlyForSmallFile(t *testing.T) {
 	}
 	if string(data) != "fallback subtitle" {
 		t.Errorf("srt content = %q, want %q", data, "fallback subtitle")
+	}
+}
+
+// A Hash error that isn't ErrTooSmall (e.g. the file is missing or
+// unreadable) must not silently fall back to a query-only search: that could
+// write an orphan .srt beside a video that was never actually downloaded,
+// which would then poison the auto-fetch existence guard.
+func TestFetchNonexistentFileReturnsErrorWithoutHTTP(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "does-not-exist.mkv")
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	if _, err := Fetch(c, video, "en"); err == nil {
+		t.Fatal("err = nil, want an error for a nonexistent file")
+	}
+	if called {
+		t.Error("HTTP server was called, want zero requests when Hash fails for a reason other than ErrTooSmall")
 	}
 }
 

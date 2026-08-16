@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -61,6 +62,12 @@ func runSubs(args []string, out io.Writer) int {
 			srt, err := subsFetch(cfg.OpenSubsAPIKey, path, useLang)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "shoal subs: %s: %v\n", f.Path, err)
+				// A rate limit or a rejected key will fail every remaining
+				// target the same way — stop instead of burning through
+				// the rest of the list one failed request at a time.
+				if errors.Is(err, subtitles.ErrRateLimited) || errors.Is(err, subtitles.ErrBadKey) {
+					break
+				}
 				continue
 			}
 			fmt.Fprintln(out, srt)

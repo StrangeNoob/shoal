@@ -115,6 +115,8 @@ matched against both the full path and the basename (so `*.mkv` catches nested f
   — downloads an OpenSubtitles `.srt` next to each qualifying video file (video extension,
   ≥100 MiB, selected). Needs an OpenSubtitles API key (Settings → OS API key, config field
   `opensubs_api_key`); prints the written `.srt` paths.
+- `--files <glob>` on `shoal subs` replaces the default video-extension/100 MiB rule entirely —
+  the glob is matched among the torrent's selected files only, with no size filtering.
 
 ## Notes
 
