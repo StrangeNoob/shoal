@@ -198,6 +198,78 @@ func TestFetchRateLimitedPropagates(t *testing.T) {
 	}
 }
 
+func TestSrtPath(t *testing.T) {
+	cases := []struct{ video, lang, want string }{
+		{"/data/My.Movie.mkv", "en", "/data/My.Movie.en.srt"},
+		{"/data/My.Movie.mkv", "", "/data/My.Movie.en.srt"}, // empty lang must not yield "My.Movie..srt"
+		{"/data/show/ep1.mp4", "fr", "/data/show/ep1.fr.srt"},
+		{"/data/noext", "en", "/data/noext.en.srt"},
+	}
+	for _, c := range cases {
+		if got := SrtPath(c.video, c.lang); got != c.want {
+			t.Errorf("SrtPath(%q, %q) = %q, want %q", c.video, c.lang, got, c.want)
+		}
+	}
+}
+
+// Fetch writes the .srt atomically: the finished file holds the full content
+// and no temp file is left behind, so the auto-fetch existence guard never
+// mistakes a half-written file for a fetched subtitle. Also pins the empty-lang
+// default ("en", not a "movie..srt" path).
+func TestFetchWritesAtomicallyAndDefaultsLang(t *testing.T) {
+	dir := t.TempDir()
+	video := writeVideoFile(t, dir, "atomic.mkv", 200*1024)
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/subtitles":
+			if got := r.URL.Query().Get("languages"); got != "en" {
+				t.Errorf("languages = %q, want en (empty lang defaults)", got)
+			}
+			w.Write([]byte(`{"data":[{"attributes":{"language":"en","moviehash_match":true,"files":[{"file_id":1,"file_name":"a.srt"}]}}]}`))
+		case "/download":
+			w.Write([]byte(`{"link":"` + srv.URL + `/files/a.srt"}`))
+		case "/files/a.srt":
+			w.Write([]byte("atomic subtitle"))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := Fetch(NewClient(srv.URL, "test-key", testUA), video, "")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if want := filepath.Join(dir, "atomic.en.srt"); got != want {
+		t.Fatalf("Fetch path = %q, want %q", got, want)
+	}
+	data, err := os.ReadFile(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "atomic subtitle" {
+		t.Errorf("srt content = %q, want %q", data, "atomic subtitle")
+	}
+	fi, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o644 {
+		t.Errorf("srt perms = %o, want 0644", fi.Mode().Perm())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "atomic.mkv" && e.Name() != "atomic.en.srt" {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
 func TestFetchBadKeyPropagates(t *testing.T) {
 	dir := t.TempDir()
 	video := writeVideoFile(t, dir, "badkey.mkv", 200*1024)

@@ -56,8 +56,9 @@ func TestHashKnownContent(t *testing.T) {
 	}
 }
 
-func TestHashOverlappingHeadTail(t *testing.T) {
-	// 128 KiB exactly: head and tail are the same bytes, both still summed.
+func TestHashMinimumSize128KiB(t *testing.T) {
+	// 128 KiB exactly, the minimum hashable size: the head and tail windows are
+	// adjacent (they meet at the midpoint, no overlap) and cover the whole file.
 	size := int64(128 * 1024)
 	path := writeFixture(t, size)
 	got, err := Hash(path)

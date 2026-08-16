@@ -17,8 +17,7 @@ import (
 
 // subsFetch is a seam over subtitles.Fetch so CLI tests use a recorder, not HTTP.
 var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
-	c := subtitles.NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal")
-	return subtitles.Fetch(c, videoPath, lang)
+	return subtitles.Fetch(subtitles.NewDefaultClient(apiKey), videoPath, lang)
 }
 
 // runSubs implements `shoal subs <id> [--lang <code>] [--files <glob>]`:
@@ -53,6 +52,9 @@ func runSubs(args []string, out io.Writer) int {
 			return err
 		}
 		targets := subsTargetFiles(det.Files, globs)
+		if len(targets) == 0 {
+			return fmt.Errorf("no matching files") // nothing qualified — not a fetch failure
+		}
 		ok := 0
 		for _, f := range targets {
 			path := subsFilePath(s.Path, det.Files, f)

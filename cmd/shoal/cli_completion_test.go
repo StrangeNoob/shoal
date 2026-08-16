@@ -8,9 +8,9 @@ import (
 
 func TestRunCompletion(t *testing.T) {
 	cases := map[string][]string{ // shell -> substrings the script must contain
-		"bash": {"complete -o bashdefault -o default -F _shoal shoal", "download", "shoal status"},
-		"zsh":  {"#compdef shoal", "compdef _shoal shoal", "download"},
-		"fish": {"complete -c shoal", "__fish_use_subcommand", "download"},
+		"bash": {"complete -o bashdefault -o default -F _shoal shoal", "download", "shoal status", "subs"},
+		"zsh":  {"#compdef shoal", "compdef _shoal shoal", "download", "subs"},
+		"fish": {"complete -c shoal", "__fish_use_subcommand", "download", "subs"},
 	}
 	for shell, wants := range cases {
 		var buf bytes.Buffer

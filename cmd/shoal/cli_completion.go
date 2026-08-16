@@ -38,7 +38,7 @@ const bashCompletion = `# bash completion for shoal
 _shoal() {
     local cur cmds ids
     cur="${COMP_WORDS[COMP_CWORD]}"
-    cmds="sources search download status history pause resume remove open daemon skill update version help completion"
+    cmds="sources search download status history pause resume remove subs open daemon skill update version help completion"
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
         return
@@ -62,7 +62,7 @@ complete -o bashdefault -o default -F _shoal shoal
 const zshCompletion = `#compdef shoal
 _shoal() {
     local -a cmds ids
-    cmds=(sources search download status history pause resume remove open daemon skill update version help completion)
+    cmds=(sources search download status history pause resume remove subs open daemon skill update version help completion)
     if (( CURRENT == 2 )); then
         compadd -- $cmds
         return
@@ -82,7 +82,7 @@ compdef _shoal shoal
 `
 
 const fishCompletion = `# fish completion for shoal
-complete -c shoal -f -n __fish_use_subcommand -a 'sources search download status history pause resume remove open daemon skill update version help completion'
+complete -c shoal -f -n __fish_use_subcommand -a 'sources search download status history pause resume remove subs open daemon skill update version help completion'
 complete -c shoal -f -n '__fish_seen_subcommand_from status pause resume remove open' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
 # download also accepts a local .torrent path, so leave file completion on (no -f)
 complete -c shoal -n '__fish_seen_subcommand_from download' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'

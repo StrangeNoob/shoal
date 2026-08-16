@@ -18,6 +18,7 @@ import (
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/history"
 	"github.com/StrangeNoob/shoal/internal/source"
+	"github.com/StrangeNoob/shoal/internal/subtitles"
 	"github.com/StrangeNoob/shoal/internal/ui"
 	"github.com/StrangeNoob/shoal/internal/update"
 )
@@ -157,6 +158,9 @@ func runUpdate(out io.Writer, version string) int {
 
 func main() {
 	v := resolveVersion()
+	// Every entry point (CLI, daemon subprocess, TUI) starts here, so this one
+	// assignment versions the OpenSubtitles User-Agent everywhere.
+	subtitles.AppVersion = v
 	if handled, code := cli(os.Args, v, os.Stdout); handled {
 		os.Exit(code)
 	}

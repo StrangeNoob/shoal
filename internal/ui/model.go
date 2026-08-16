@@ -1484,6 +1484,11 @@ func (m *Model) activate() tea.Cmd {
 			return nil
 		}
 		// Text setting: open the inline editor seeded with the current value.
+		// The API key stays hidden while typing (the pane masks it when idle).
+		m.setInput.EchoMode = textinput.EchoNormal
+		if it.label == "OS API key" {
+			m.setInput.EchoMode = textinput.EchoPassword
+		}
 		m.editingSetting = true
 		m.setInput.SetValue(it.get(m))
 		m.setInput.CursorEnd()

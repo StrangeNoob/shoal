@@ -586,6 +586,73 @@ func TestExportedRemoveUnderDirRefusesEscape(t *testing.T) {
 	}
 }
 
+// A plain add with persistence off (QueuePath: "") must still establish every
+// file's priority: Detail reports each file Selected. The queue store only
+// supplies the deselect list; when it's absent (or the entry hasn't been
+// upserted yet) files must not be left at the zero-value PiecePriorityNone,
+// which silently reads as "deselected" everywhere (Detail, subs auto-fetch).
+func TestPlainAddSelectsEveryFileWithoutStore(t *testing.T) {
+	src := t.TempDir()
+	root := filepath.Join(src, "Pack")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.mkv", "b.mkv"} {
+		if err := os.WriteFile(filepath.Join(root, name), bytes.Repeat([]byte("x"), 2000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := buildTorrentBytesDir(t, root)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir()}) // no QueuePath → no store
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "Pack"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, eng)
+
+	var det Detail
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		det, err = eng.Detail(eng.Statuses()[0].InfoHash)
+		if err == nil && len(det.Files) == 2 && det.Files[0].Selected && det.Files[1].Selected {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("files never became selected: %+v (err %v)", det.Files, err)
+}
+
+// waitAllSelected blocks until every file of infoHash reads Selected — i.e.
+// the post-GotInfo applyFileSelection goroutine has run — so a test can act on
+// a settled selection instead of racing it.
+func waitAllSelected(t *testing.T, eng *Anacrolix, infoHash string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		det, err := eng.Detail(infoHash)
+		if err == nil && len(det.Files) > 0 {
+			all := true
+			for _, f := range det.Files {
+				all = all && f.Selected
+			}
+			if all {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("files never became selected")
+}
+
 // swapSubsFetch replaces the subsFetch seam with a recorder for the duration
 // of the test, so tests never do HTTP.
 func swapSubsFetch(t *testing.T, calls chan<- struct{ apiKey, path, lang string }) {
@@ -686,16 +753,10 @@ func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
 		t.Fatalf("torrent never completed: %+v", s)
 	}
 
-	// fetchSubsForFiles now skips deselected (never-downloaded) files by
-	// checking File.Priority(), the same convention Detail() uses for
-	// Selected. DownloadAll() (called on every new torrent) only raises
-	// piece priorities, not each File's own priority field, so a file must
-	// be explicitly selected — exactly as a real user action would via
-	// SetFiles — for Priority() to read Normal instead of the zero-value
-	// None.
-	if err := eng.SetFiles(s[0].InfoHash, []string{"movie.mkv"}, true); err != nil {
-		t.Fatalf("SetFiles: %v", err)
-	}
+	// fetchSubsForFiles skips deselected (never-downloaded) files by checking
+	// File.Priority(), the same convention Detail() uses for Selected — so
+	// wait for the add path's own applyFileSelection to have selected the file.
+	waitAllSelected(t, eng, s[0].InfoHash)
 
 	eng.checkSubsCompletion()
 
@@ -722,6 +783,67 @@ func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
 	case c := <-calls:
 		t.Fatalf("unexpected second subsFetch call: %+v", c)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A completed torrent whose subtitle file is already on disk must not be
+// fetched again: subsFetched is memory-only, so after a daemon restart every
+// restored complete torrent looks "newly done" — refetching would overwrite
+// the .srt and burn the user's OpenSubtitles quota. The written file is the record.
+func TestSubsAutoSkipsFileWithExistingSrt(t *testing.T) {
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
+
+	dir := t.TempDir()
+	content := bytes.Repeat([]byte("shoal"), 400)
+	data := buildTorrentBytesNamed(t, "movie.mkv", content)
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The subtitle from a previous run.
+	if err := os.WriteFile(filepath.Join(dir, "movie.en.srt"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dir, OpenSubsAPIKey: "test-key", SubsLang: "en", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "movie"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	s := eng.Statuses()
+	if len(s) != 1 || !s[0].Done {
+		t.Fatalf("torrent never completed: %+v", s)
+	}
+	waitAllSelected(t, eng, s[0].InfoHash)
+
+	eng.checkSubsCompletion()
+	select {
+	case c := <-calls:
+		t.Fatalf("subsFetch called though the .srt already exists: %+v", c)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "movie.en.srt")); err != nil || string(b) != "1\n" {
+		t.Fatalf("existing .srt = %q (err %v), want it left untouched", b, err)
 	}
 }
 
@@ -814,13 +936,9 @@ func TestSubsAutoCompletionSkipsDeselectedFile(t *testing.T) {
 		t.Fatalf("torrent never completed: %+v", statuses)
 	}
 
-	// DownloadAll() (called on every new torrent) only raises piece
-	// priorities, not each File's own priority field, so keep.mkv must be
-	// explicitly selected — same as a real user action — for its
-	// Priority() to read Normal instead of the zero-value None.
-	if err := eng.SetFiles(statuses[0].InfoHash, []string{"keep.mkv"}, true); err != nil {
-		t.Fatalf("SetFiles(select keep.mkv): %v", err)
-	}
+	// The add path selects every file; deselect one on top of that (as a user
+	// would), after waiting so the deselect can't be clobbered by it.
+	waitAllSelected(t, eng, statuses[0].InfoHash)
 	if err := eng.SetFiles(statuses[0].InfoHash, []string{"skip.mkv"}, false); err != nil {
 		t.Fatalf("SetFiles(deselect skip.mkv): %v", err)
 	}

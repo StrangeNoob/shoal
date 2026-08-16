@@ -109,6 +109,13 @@ matched against both the full path and the basename (so `*.mkv` catches nested f
   persists across restarts. An empty pattern or one that matches nothing is rejected (it
   won't silently deselect everything).
 
+## Subtitles
+
+- **Fetch subtitles for a finished download:** `shoal subs <id> [--lang <code>] [--files <glob>]`
+  — downloads an OpenSubtitles `.srt` next to each qualifying video file (video extension,
+  ≥100 MiB, selected). Needs an OpenSubtitles API key (Settings → OS API key, config field
+  `opensubs_api_key`); prints the written `.srt` paths.
+
 ## Notes
 
 All downloads run in a shared background `shoal daemon` (auto-started on the first `download` command). This means multiple downloads and all `shoal status` queries share a single engine and download folder. All downloads land in shoal's configured folder (Settings → Save to, or in `config.json`).

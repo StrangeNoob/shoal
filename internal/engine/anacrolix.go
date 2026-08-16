@@ -50,8 +50,7 @@ func IsSubsCandidate(path string, size int64) bool {
 
 // subsFetch is a seam over subtitles.Fetch so tests never do HTTP.
 var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
-	c := subtitles.NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal")
-	return subtitles.Fetch(c, videoPath, lang)
+	return subtitles.Fetch(subtitles.NewDefaultClient(apiKey), videoPath, lang)
 }
 
 // Anacrolix implements Engine on top of anacrolix/torrent — a mature, full
@@ -337,9 +336,10 @@ func (a *Anacrolix) checkSubsCompletion() {
 }
 
 // fetchSubsForFiles fetches subtitles for each qualifying, selected video
-// file (right extension, at least SubsMinVideoBytes) serially. Deselected
-// files (PiecePriorityNone) are skipped — they were never downloaded, so
-// fetching a subtitle for one would write an orphaned .srt next to nothing.
+// file (right extension, at least SubsMinVideoBytes) serially, skipping files
+// whose .srt is already on disk. Deselected files (PiecePriorityNone) are
+// skipped — they were never downloaded, so fetching a subtitle for one would
+// write an orphaned .srt next to nothing.
 // Failures are logged and never affect torrent state — subtitles never block
 // or fail a download.
 func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
@@ -351,6 +351,12 @@ func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
 			continue
 		}
 		path := filepath.Join(dataDir, filepath.FromSlash(f.Path()))
+		// The written .srt is the record of a past fetch — subsFetched is
+		// memory-only, so without this every restored complete torrent would
+		// refetch on restart, overwriting subtitles and burning API quota.
+		if _, err := os.Stat(subtitles.SrtPath(path, lang)); err == nil {
+			continue
+		}
 		if _, err := subsFetch(apiKey, path, lang); err != nil {
 			slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
 		}
@@ -584,25 +590,27 @@ func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 
 // applyFileSelection deselects files per the torrent's persisted FileGlobs
 // (resolved once, then cleared) or its persisted Deselected set (restart path).
+// Only that deselect list depends on the store: the per-file priority loop
+// always runs, because DownloadAll raises piece priorities without touching
+// each File's own priority — which stays at the zero value PiecePriorityNone
+// until something calls Download(). Skipping the loop (no store, or an entry
+// not upserted yet) would leave every file reading "deselected".
 func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
-	if a.store == nil {
-		return
-	}
-	hash := t.InfoHash().HexString()
-	entry, ok := a.store.Get(hash)
-	if !ok {
-		return
-	}
 	var deselect []string
-	if len(entry.FileGlobs) > 0 {
-		var paths []string
-		for _, f := range t.Files() {
-			paths = append(paths, f.DisplayPath())
+	if a.store != nil {
+		hash := t.InfoHash().HexString()
+		if entry, ok := a.store.Get(hash); ok {
+			if len(entry.FileGlobs) > 0 {
+				var paths []string
+				for _, f := range t.Files() {
+					paths = append(paths, f.DisplayPath())
+				}
+				deselect = resolveDeselected(paths, entry.FileGlobs)
+				a.store.SetFileGlobs(hash, nil) // resolved once
+			} else {
+				deselect = entry.Deselected
+			}
 		}
-		deselect = resolveDeselected(paths, entry.FileGlobs)
-		a.store.SetFileGlobs(hash, nil) // resolved once
-	} else {
-		deselect = entry.Deselected
 	}
 	off := make(map[string]bool, len(deselect))
 	for _, p := range deselect {

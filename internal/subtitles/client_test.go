@@ -5,8 +5,31 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+// NewDefaultClient is the single place the production base URL, request
+// timeout and versioned User-Agent live.
+func TestNewDefaultClientHasTimeoutAndVersionedUA(t *testing.T) {
+	orig := AppVersion
+	AppVersion = "v1.2.3"
+	t.Cleanup(func() { AppVersion = orig })
+
+	c := NewDefaultClient("key")
+	if c.HTTP == nil || c.HTTP.Timeout <= 0 {
+		t.Fatalf("HTTP = %+v, want a non-nil client with a timeout", c.HTTP)
+	}
+	if !strings.Contains(c.userAgent, AppVersion) {
+		t.Errorf("User-Agent = %q, want it to contain %q", c.userAgent, AppVersion)
+	}
+	if !strings.HasPrefix(c.baseURL, "https://api.opensubtitles.com") {
+		t.Errorf("baseURL = %q, want the public API", c.baseURL)
+	}
+	if c.apiKey != "key" {
+		t.Errorf("apiKey = %q, want key", c.apiKey)
+	}
+}
 
 const testUA = "shoal vtest"
 

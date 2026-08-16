@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
@@ -872,6 +873,37 @@ func TestSettingsAPIKeyEditRoundTrip(t *testing.T) {
 	}
 	if m.cfg.OpenSubsAPIKey != "sk-1234567890abcdef" {
 		t.Errorf("OpenSubsAPIKey = %q, want sk-1234567890abcdef", m.cfg.OpenSubsAPIKey)
+	}
+}
+
+// Auto subs is read by the engine at startup, so the restart hint must list it.
+func TestSettingsRestartHintMentionsAutoSubs(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	if v := m.View(); !strings.Contains(v, "auto subs") {
+		t.Errorf("settings restart hint should mention auto subs:\n%s", v)
+	}
+}
+
+// The key must stay hidden while it's being typed, not just once stored.
+func TestSettingsAPIKeyEditUsesPasswordEcho(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "OS API key")
+	m, _ = update(m, key("enter"))
+	if m.setInput.EchoMode != textinput.EchoPassword {
+		t.Errorf("EchoMode = %v, want EchoPassword while editing the API key", m.setInput.EchoMode)
+	}
+	m, _ = update(m, key("esc"))
+
+	// Any other text setting keeps normal echo.
+	m.setCursor = settingIndex(t, "Save to")
+	m, _ = update(m, key("enter"))
+	if m.setInput.EchoMode != textinput.EchoNormal {
+		t.Errorf("EchoMode = %v, want EchoNormal for a non-secret setting", m.setInput.EchoMode)
 	}
 }
 

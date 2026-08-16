@@ -410,8 +410,14 @@ func TestSubsNoQualifyingFilesExitsNonZero(t *testing.T) {
 	serveFakeDaemon(t, fake)
 
 	var buf bytes.Buffer
-	if code := runSubs([]string{"abc"}, &buf); code == 0 {
+	var code int
+	stderr := captureStderr(t, func() { code = runSubs([]string{"abc"}, &buf) })
+	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero when nothing qualifies")
+	}
+	// "nothing qualified" is a different problem from "every fetch failed".
+	if !strings.Contains(stderr, "no matching files") {
+		t.Errorf("stderr = %q, want it to say no matching files", stderr)
 	}
 }
 

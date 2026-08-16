@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ErrRateLimited is returned when the OpenSubtitles API responds 429.
@@ -41,6 +42,19 @@ type Client struct {
 // identifying itself as userAgent on every request.
 func NewClient(baseURL, apiKey, userAgent string) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, userAgent: userAgent}
+}
+
+// AppVersion is the shoal version reported in the User-Agent. Set once at
+// startup (cmd/shoal) from the resolved build version; "dev" otherwise.
+var AppVersion = "dev"
+
+// NewDefaultClient builds the Client every production caller uses: the public
+// OpenSubtitles API, a request timeout (never hang a fetch forever), and
+// shoal's versioned User-Agent — which OpenSubtitles asks API consumers to send.
+func NewDefaultClient(apiKey string) *Client {
+	c := NewClient("https://api.opensubtitles.com/api/v1", apiKey, "shoal "+AppVersion)
+	c.HTTP = &http.Client{Timeout: 30 * time.Second}
+	return c
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -162,5 +176,7 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 	if fileResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("subtitles: unexpected status %s fetching subtitle file", fileResp.Status)
 	}
-	return io.ReadAll(fileResp.Body)
+	// Cap the CDN read: a subtitle is kilobytes, and the link is followed
+	// unauthenticated, so never buffer an unbounded response.
+	return io.ReadAll(io.LimitReader(fileResp.Body, 10<<20))
 }
