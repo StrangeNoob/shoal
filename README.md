@@ -86,8 +86,9 @@ scrolls the selection in any pane.
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,
 **download speed**, and an **ETA** (time remaining). Press `enter` for a **details**
 screen showing per-file progress and trackers — each file has a `[✓]` (downloading) or
-`[ ]` (deselected) checkbox. Use `↑ ↓` to move between files and `space` to toggle a file
-(unchecked files stop downloading). With a **Max active** limit set (Settings),
+`[ ]` (deselected) checkbox. Use `↑ ↓` to move between files, `space` to toggle a file
+(unchecked files stop downloading), and `o` to open the selected file directly. With a
+**Max active** limit set (Settings),
 downloads past the limit show **⏳ queued** and start automatically as slots free (oldest
 first); `[` / `]` move the selected download **earlier / later** in that queue. Select a
 download with `↑ ↓` and press `x` to **cancel** it (a prompt lets you `k` keep the partial

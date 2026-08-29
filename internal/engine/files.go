@@ -1,6 +1,28 @@
 package engine
 
-import "github.com/StrangeNoob/shoal/internal/glob"
+import (
+	"path/filepath"
+
+	"github.com/StrangeNoob/shoal/internal/glob"
+)
+
+// AbsFilePath returns the on-disk absolute path of f within a torrent whose
+// top-level path is statusPath (Status.Path). Status.Path comes from
+// anacrolix's File.DisplayPath(), documented as "the relative file path for
+// a multi-file torrent, and the torrent name for a single-file torrent" — so
+// for a true single-file torrent, f.Path duplicates the torrent name already
+// baked into statusPath (they're the same string), and the file's absolute
+// path is statusPath itself. A directory-mode torrent that happens to
+// contain exactly one file looks similar (len(files)==1) but its file's
+// DisplayPath is relative to the directory, not equal to the directory's own
+// name — so the single-file shortcut only applies when that equality
+// actually holds; otherwise this falls through to the multi-file join.
+func AbsFilePath(statusPath string, files []FileDetail, f FileDetail) string {
+	if len(files) == 1 && f.Path == filepath.Base(statusPath) {
+		return statusPath
+	}
+	return filepath.Join(statusPath, filepath.FromSlash(f.Path))
+}
 
 // resolveDeselected returns the file paths to deselect for the given --files
 // globs: every path that matches none of the globs. Empty globs → nil (keep all).

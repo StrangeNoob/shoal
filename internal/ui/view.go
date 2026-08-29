@@ -316,7 +316,7 @@ func (m Model) dlDetailView() string {
 		}
 	}
 
-	b.WriteString("\n  " + st.Meta.Render("↑↓ move · space select · esc back"))
+	b.WriteString("\n  " + st.Meta.Render("↑↓ move · space select · o open file · esc back"))
 	content := b.String()
 	if pad := m.height - strings.Count(content, "\n") - 1; pad > 0 {
 		content += strings.Repeat("\n", pad)
