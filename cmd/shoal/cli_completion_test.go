@@ -7,10 +7,15 @@ import (
 )
 
 func TestRunCompletion(t *testing.T) {
+	// files/sequential/stream all take an id or prefix, so they belong in both
+	// the command list and the id-completion list of every shell.
 	cases := map[string][]string{ // shell -> substrings the script must contain
-		"bash": {"complete -o bashdefault -o default -F _shoal shoal", "download", "shoal status"},
-		"zsh":  {"#compdef shoal", "compdef _shoal shoal", "download"},
-		"fish": {"complete -c shoal", "__fish_use_subcommand", "download"},
+		"bash": {"complete -o bashdefault -o default -F _shoal shoal", "download", "shoal status",
+			"download files sequential stream", "status|pause|resume|remove|open|download|files|sequential|stream)"},
+		"zsh": {"#compdef shoal", "compdef _shoal shoal", "download",
+			"download files sequential stream", "status|pause|resume|remove|open|download|files|sequential|stream)"},
+		"fish": {"complete -c shoal", "__fish_use_subcommand", "download",
+			"download files sequential stream", "__fish_seen_subcommand_from status pause resume remove open files sequential stream"},
 	}
 	for shell, wants := range cases {
 		var buf bytes.Buffer

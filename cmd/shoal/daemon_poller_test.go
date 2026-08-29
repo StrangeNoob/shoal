@@ -30,6 +30,15 @@ func TestDaemonPollerPollsAndReconnects(t *testing.T) {
 	if got := fake.gotMagnets(); len(got) != 1 {
 		t.Fatalf("daemon did not receive the magnet: %v", got)
 	}
+	// SetSequential must be forwarded too: the TUI's `s` key asserts the poller
+	// against an optional SetSequential interface, so a missing forwarder makes
+	// the toggle a silent no-op in production.
+	if err := p.SetSequential("a", true); err != nil {
+		t.Fatalf("SetSequential: %v", err)
+	}
+	if seq := fake.gotSequential(); len(seq) != 1 || seq[0].infoHash != "a" || !seq[0].on {
+		t.Fatalf("daemon did not receive SetSequential: %+v", seq)
+	}
 	p.Close()
 }
 

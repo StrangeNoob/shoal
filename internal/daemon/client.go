@@ -80,6 +80,11 @@ func (c *Client) SetFileGlobs(infoHash string, globs []string) error {
 	return c.rpc.Call("Engine.SetFileGlobs", SetFileGlobsArgs{InfoHash: infoHash, Globs: globs}, &Empty{})
 }
 
+// SetSequential toggles sequential (streaming) piece-priority mode for a torrent.
+func (c *Client) SetSequential(infoHash string, on bool) error {
+	return c.rpc.Call("Engine.SetSequential", SetSequentialArgs{InfoHash: infoHash, On: on}, &Empty{})
+}
+
 func (c *Client) Pause(hash string) error {
 	return c.rpc.Call("Engine.Pause", HashArgs{InfoHash: hash}, &Empty{})
 }

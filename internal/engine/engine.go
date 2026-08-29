@@ -32,6 +32,8 @@ type Status struct {
 	// torrent because the max-concurrent-downloads limit is reached. It resumes
 	// automatically when a slot frees.
 	Queued bool
+	// Sequential reports whether sequential (streaming) piece priority mode is on.
+	Sequential bool
 	// Seeding reports whether the client is actively seeding this torrent
 	// (Seed enabled, upload allowed, not paused) — independent of peer count.
 	Seeding bool
@@ -67,6 +69,13 @@ type FileDetail struct {
 	Length    int64
 	Completed int64
 	Selected  bool // false = deselected (priority none)
+	// HeadBytes is the contiguous complete bytes from the start of the file —
+	// how much a player can safely read from offset 0. Stops at the first
+	// incomplete piece.
+	HeadBytes int64
+	// TailDone reports whether the file's last piece is complete (mp4 moov
+	// atoms are often at the tail). Used with HeadBytes to gauge playability.
+	TailDone bool
 }
 
 // Detail is the on-demand extra information for one torrent (the Downloads

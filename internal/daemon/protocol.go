@@ -51,6 +51,10 @@ type SetFileGlobsArgs struct {
 	InfoHash string
 	Globs    []string
 }
+type SetSequentialArgs struct {
+	InfoHash string
+	On       bool
+}
 type Empty struct{}
 type StatusesReply struct{ Statuses []engine.Status }
 type DetailReply struct{ Detail engine.Detail }

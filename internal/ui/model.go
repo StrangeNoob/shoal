@@ -79,6 +79,12 @@ type Model struct {
 	dlDetailErr  string        // fetch error, if any
 	dlFileCursor int           // selected row within dlDetail.Files
 
+	// seqPending marks infohashes with a sequential-mode write in flight.
+	// Toggles run concurrently with no ordering guarantee, so a rapid double
+	// press could reach the daemon in reverse order; one press at a time per
+	// download until it reports back.
+	seqPending map[string]bool
+
 	input       textinput.Model // search box
 	setInput    textinput.Model // settings inline editor
 	filterInput textinput.Model // in-results fuzzy filter (narrows loaded results)
@@ -328,6 +334,43 @@ func setFilesCmd(eng engine.Engine, infoHash, path string, selected bool) tea.Cm
 			return setFilesErrMsg{err: err, path: path, selected: selected}
 		}
 		return nil
+	}
+}
+
+// sequencer is implemented by engines that support toggling sequential
+// (streaming) piece-priority mode for a torrent.
+type sequencer interface {
+	SetSequential(infoHash string, on bool) error
+}
+
+// setSequentialErrMsg reports a failed SetSequential call, carrying the
+// infohash and attempted state so the optimistic flip can be reverted.
+type setSequentialErrMsg struct {
+	err      error
+	infoHash string
+	on       bool
+}
+
+// setSequentialDoneMsg reports a successful SetSequential. Success has to
+// report back too, or the per-download in-flight guard would never clear.
+type setSequentialDoneMsg struct {
+	infoHash string
+	on       bool
+}
+
+// setSequentialCmd toggles a download's sequential mode off the UI thread.
+// Returns nil if the engine doesn't support it (e.g. the test fake, unless it
+// opts in) — callers check for sequencer before flipping anything.
+func setSequentialCmd(eng engine.Engine, infoHash string, on bool) tea.Cmd {
+	sq, ok := eng.(sequencer)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := sq.SetSequential(infoHash, on); err != nil {
+			return setSequentialErrMsg{err: err, infoHash: infoHash, on: on}
+		}
+		return setSequentialDoneMsg{infoHash: infoHash, on: on}
 	}
 }
 
@@ -581,6 +624,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.setError("Couldn't change file selection: " + msg.err.Error())
+		return m, nil
+
+	case setSequentialDoneMsg:
+		delete(m.seqPending, msg.infoHash)
+		return m, nil
+
+	case setSequentialErrMsg:
+		delete(m.seqPending, msg.infoHash)
+		// Revert the optimistic flip for the download whose write failed.
+		for i := range m.statuses {
+			if m.statuses[i].InfoHash == msg.infoHash {
+				m.statuses[i].Sequential = !msg.on
+				break
+			}
+		}
+		m.setError("Couldn't toggle sequential mode: " + msg.err.Error())
 		return m, nil
 
 	case reorderDoneMsg:
@@ -1037,6 +1096,35 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ss := m.seeding()
 			if len(ss) > 0 && m.seedCursor < len(ss) {
 				return m, pauseToggleCmd(m.eng, ss[m.seedCursor])
+			}
+		}
+		return m, nil
+	case "s":
+		// Toggle sequential (streaming) mode on the selected download, optimistic
+		// flip + revert-on-error like the file-selection toggle — but only once
+		// we know the write will actually happen: an engine without sequential
+		// support would drop it, and a second press would race the first.
+		if m.section == sectionDownloads {
+			ds := m.downloading()
+			if len(ds) > 0 && m.dlCursor < len(ds) {
+				hash := ds[m.dlCursor].InfoHash
+				if _, ok := m.eng.(sequencer); !ok {
+					m.setError("sequential not supported by this engine")
+					return m, nil
+				}
+				if m.seqPending[hash] {
+					return m, nil // wait for the in-flight toggle to report back
+				}
+				for i := range m.statuses {
+					if m.statuses[i].InfoHash == hash {
+						m.statuses[i].Sequential = !m.statuses[i].Sequential
+						if m.seqPending == nil {
+							m.seqPending = map[string]bool{}
+						}
+						m.seqPending[hash] = true
+						return m, setSequentialCmd(m.eng, hash, m.statuses[i].Sequential)
+					}
+				}
 			}
 		}
 		return m, nil

@@ -17,6 +17,7 @@ type Entry struct {
 	TorrentURL string   `json:"torrent_url,omitempty"`
 	Name       string   `json:"name"`
 	Paused     bool     `json:"paused"`
+	Sequential bool     `json:"sequential,omitempty"` // sequential (streaming) piece priority mode
 	FileGlobs  []string `json:"file_globs,omitempty"` // add-time --files patterns, until resolved
 	Deselected []string `json:"deselected,omitempty"` // file paths not being downloaded
 }
@@ -112,6 +113,24 @@ func (s *Store) SetPaused(infoHash string, paused bool) {
 	}
 }
 
+// SetSequential updates the sequential (streaming) flag for infoHash (if
+// present) and persists.
+func (s *Store) SetSequential(infoHash string, sequential bool) {
+	s.mu.Lock()
+	found := false
+	for i := range s.Entries {
+		if s.Entries[i].InfoHash == infoHash {
+			s.Entries[i].Sequential = sequential
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if found {
+		_ = s.Save()
+	}
+}
+
 // SetFileGlobs records add-time --files patterns for infoHash (if present) and persists.
 func (s *Store) SetFileGlobs(infoHash string, globs []string) {
 	s.mu.Lock()
@@ -193,13 +212,18 @@ func (s *Store) SetName(infoHash, name string) {
 }
 
 // Save writes the store to Path (creating the dir). No-op when Path is empty.
+//
+// mu is held across both the marshal and the write: releasing it in between
+// lets two concurrent savers reach WriteFile in the reverse of their marshal
+// order, leaving the file older than the store (a lost update). No caller holds
+// mu — every mutator unlocks before calling Save — so this can't deadlock.
 func (s *Store) Save() error {
 	if s.Path == "" {
 		return nil
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, err := json.MarshalIndent(s, "", "  ") // marshal a consistent snapshot of Entries
-	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -214,5 +238,30 @@ func (s *Store) Save() error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, b, 0o600)
+	// Write-temp-then-rename: os.WriteFile truncates in place, so a concurrent
+	// reader (or a crash mid-write) could observe an empty/partial queue.json.
+	// The temp file lives in the same dir so the rename can't cross filesystems.
+	tmp, err := os.CreateTemp(dir, ".queue-*.json")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), s.Path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }

@@ -75,6 +75,21 @@ func (s *EngineService) SetFileGlobs(a SetFileGlobsArgs, _ *Empty) error {
 	return nil
 }
 
+// sequencer is implemented by engines that support toggling sequential
+// (streaming) piece-priority mode (the Anacrolix backend). Kept off the Engine
+// interface for the same reason as detailer/reorderer/fileSelector: minimal/test
+// engines don't need to implement it.
+type sequencer interface {
+	SetSequential(infoHash string, on bool) error
+}
+
+func (s *EngineService) SetSequential(a SetSequentialArgs, _ *Empty) error {
+	if sq, ok := s.eng.(sequencer); ok {
+		return sq.SetSequential(a.InfoHash, a.On)
+	}
+	return nil
+}
+
 func (s *EngineService) Detail(a HashArgs, r *DetailReply) error {
 	d, ok := s.eng.(detailer)
 	if !ok {

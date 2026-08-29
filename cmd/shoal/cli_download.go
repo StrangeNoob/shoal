@@ -112,6 +112,7 @@ func runDownload(args []string, out io.Writer) int {
 	outDir := fs.String("out", "", "(deprecated) downloads use the configured folder")
 	wait := fs.Bool("wait", false, "block until the download completes")
 	files := fs.String("files", "", "download only files matching this glob (comma-separated)")
+	sequential := fs.Bool("sequential", false, "download in sequential (streaming) piece order")
 	positionals, err := parseArgs(fs, args)
 	if err != nil {
 		return 2
@@ -179,6 +180,15 @@ func runDownload(args []string, out io.Writer) int {
 		}
 	} else if strings.TrimSpace(*files) != "" {
 		fmt.Fprintln(os.Stderr, "note: --files pattern is empty; downloading all files")
+	}
+	if *sequential {
+		if fh := fullHashFor(tgt); fh != "" {
+			if err := eng.SetSequential(fh, true); err != nil {
+				fmt.Fprintln(os.Stderr, "note: could not enable sequential mode:", err)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "note: --sequential isn't supported for URL downloads yet")
+		}
 	}
 	if *wait {
 		return awaitDone(eng, tgt, pre, preErr == nil, out)

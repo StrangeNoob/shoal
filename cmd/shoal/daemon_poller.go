@@ -191,6 +191,14 @@ func (p *daemonPoller) SetFiles(h string, paths []string, sel bool) error {
 func (p *daemonPoller) SetFileGlobs(h string, globs []string) error {
 	return p.callWithTimeout(func(c *daemon.Client) error { return c.SetFileGlobs(h, globs) })
 }
+func (p *daemonPoller) SetSequential(h string, on bool) error {
+	return p.callWithTimeout(func(c *daemon.Client) error { return c.SetSequential(h, on) })
+}
+
+// The TUI reaches these beyond-Engine methods through optional-interface
+// assertions (see internal/ui/model.go), which fail silently when a forwarder
+// is missing — assert them at compile time instead.
+var _ interface{ SetSequential(string, bool) error } = (*daemonPoller)(nil)
 
 // Close unconditionally drops the current client, regardless of identity.
 func (p *daemonPoller) Close() error {
