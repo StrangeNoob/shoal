@@ -38,7 +38,10 @@ func Fetch(c *Client, videoPath, lang string) (string, error) {
 		lang = defaultLang
 	}
 	ext := filepath.Ext(videoPath)
-	query := strings.TrimSpace(queryReplacer.Replace(strings.TrimSuffix(filepath.Base(videoPath), ext)))
+	// Lowercased: the API's gateway 301s non-canonical requests (sorted params,
+	// lowercase query — it answers with x-os-rule: canonical), and skipping that
+	// redirect hop avoids a flaky edge. Search is case-insensitive server-side.
+	query := strings.ToLower(strings.TrimSpace(queryReplacer.Replace(strings.TrimSuffix(filepath.Base(videoPath), ext))))
 
 	// Only a too-small file falls back to a query-only search. Any other Hash
 	// error (missing/unreadable file, ...) must not be swallowed: a silent

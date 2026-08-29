@@ -38,8 +38,8 @@ func TestFetchPrefersHashMatchAndWritesSrt(t *testing.T) {
 			if q.Get("moviehash") == "" {
 				t.Errorf("moviehash = %q, want non-empty for a hashable file", q.Get("moviehash"))
 			}
-			if q.Get("query") != "My Movie 2020" {
-				t.Errorf("query = %q, want %q", q.Get("query"), "My Movie 2020")
+			if q.Get("query") != "my movie 2020" {
+				t.Errorf("query = %q, want %q", q.Get("query"), "my movie 2020")
 			}
 			// Non-match listed first to prove selection isn't just "first result".
 			w.Write([]byte(`{"data":[

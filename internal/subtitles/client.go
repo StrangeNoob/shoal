@@ -88,6 +88,10 @@ func (c *Client) do(method, endpoint string, body io.Reader) (*http.Response, er
 	}
 	req.Header.Set("Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", c.userAgent)
+	// Verified live: the API gateway 503s requests with NO Accept header
+	// (Go sends none by default; curl's default Accept: */* is why curl
+	// "just works"). Sending an explicit Accept keeps us off that path.
+	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
