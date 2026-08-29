@@ -96,7 +96,9 @@ files or `d` delete them; `esc` aborts). Press `s` to toggle **sequential** (str
 priority on the selected download — a `▶ sequential` tag appears in its detail line, and the file
 becomes playable (e.g. with `shoal stream`) well before the whole torrent finishes. When a
 download finishes, shoal shows a notice and rings the terminal bell / posts a desktop
-notification (toggle in Settings).
+notification (toggle in Settings). If a download sits at 0 connected and 0 known peers for
+more than 2 minutes, its detail line shows **⚠ no peers found** — a source's seed count can
+be stale, so this checks the engine's own announce results instead of trusting it.
 
 **Seeding** — completed torrents you're still sharing (name, ratio, uploaded, peers, and
 **upload speed**), followed by a **History** of everything you've downloaded (name, size,

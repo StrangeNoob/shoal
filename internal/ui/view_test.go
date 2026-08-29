@@ -344,6 +344,38 @@ func TestRenderDownloadsShowsSequentialTag(t *testing.T) {
 	}
 }
 
+func TestRenderDownloadsShowsNoPeersWarning(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+
+	old := time.Now().Add(-5 * time.Minute)
+	fresh := time.Now().Add(-30 * time.Second)
+
+	// Stale AddedAt + zero peers (connected and known): warn.
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Peers: 0, TotalPeers: 0, AddedAt: old}}
+	if v := m.View(); !strings.Contains(v, "no peers found") {
+		t.Fatalf("a stale zero-peer download should show the no-peers warning:\n%s", v)
+	}
+
+	// TotalPeers > 0 (announce found peers, even if none connected yet): no warning.
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Peers: 0, TotalPeers: 2, AddedAt: old}}
+	if v := m.View(); strings.Contains(v, "no peers found") {
+		t.Fatalf("a download with known TotalPeers should not show the no-peers warning:\n%s", v)
+	}
+
+	// Fresh AddedAt: still within the grace period, no warning.
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Peers: 0, TotalPeers: 0, AddedAt: fresh}}
+	if v := m.View(); strings.Contains(v, "no peers found") {
+		t.Fatalf("a freshly-added download should not show the no-peers warning yet:\n%s", v)
+	}
+
+	// Paused: the state switch already explains the stall, no warning.
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Peers: 0, TotalPeers: 0, AddedAt: old, Paused: true}}
+	if v := m.View(); strings.Contains(v, "no peers found") {
+		t.Fatalf("a paused download should not show the no-peers warning:\n%s", v)
+	}
+}
+
 func TestRenderDownloadsWindowFollowsCursor(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
