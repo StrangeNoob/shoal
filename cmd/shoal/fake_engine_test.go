@@ -19,9 +19,24 @@ type fakeEngine struct {
 	paused        []string
 	resumed       []string
 	statuses      []engine.Status
-	detail        engine.Detail
-	filesCalls    []fakeSetFilesCall
-	globsCalls    []fakeSetFileGlobsCall
+	// statusSeq, when non-empty, makes successive Statuses calls return
+	// successive snapshots (staying on the last once exhausted) — used to
+	// simulate a torrent being paused/queued mid-wait. statuses is used when
+	// empty. Mirrors detailSeq below.
+	statusSeq  [][]engine.Status
+	statusCall int
+	detail     engine.Detail
+	// detailSeq, when non-empty, makes successive Detail calls return successive
+	// states (staying on the last once exhausted) — used to simulate playability
+	// advancing across `shoal stream`'s poll loop. detail is used when empty.
+	detailSeq  []engine.Detail
+	detailCall int
+	// detailErr, when set, is returned by every Detail call instead of a state
+	// (simulates the daemon/torrent becoming unreachable mid-wait).
+	detailErr  error
+	filesCalls []fakeSetFilesCall
+	globsCalls []fakeSetFileGlobsCall
+	seqCalls   []fakeSetSequentialCall
 }
 
 type fakeSetFilesCall struct {
@@ -33,6 +48,11 @@ type fakeSetFilesCall struct {
 type fakeSetFileGlobsCall struct {
 	infoHash string
 	globs    []string
+}
+
+type fakeSetSequentialCall struct {
+	infoHash string
+	on       bool
 }
 
 func (f *fakeEngine) AddMagnet(m string) error {
@@ -50,7 +70,15 @@ func (f *fakeEngine) AddTorrentURL(u, n string) error {
 func (f *fakeEngine) Statuses() []engine.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]engine.Status(nil), f.statuses...)
+	if len(f.statusSeq) == 0 {
+		return append([]engine.Status(nil), f.statuses...)
+	}
+	i := f.statusCall
+	if i >= len(f.statusSeq) {
+		i = len(f.statusSeq) - 1
+	}
+	f.statusCall++
+	return append([]engine.Status(nil), f.statusSeq[i]...)
 }
 func (f *fakeEngine) Remove(h string, deleteData bool) error {
 	f.mu.Lock()
@@ -76,7 +104,18 @@ func (f *fakeEngine) Close() error { return nil }
 func (f *fakeEngine) Detail(_ string) (engine.Detail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.detail, nil
+	if f.detailErr != nil {
+		return engine.Detail{}, f.detailErr
+	}
+	if len(f.detailSeq) == 0 {
+		return f.detail, nil
+	}
+	i := f.detailCall
+	if i >= len(f.detailSeq) {
+		i = len(f.detailSeq) - 1
+	}
+	f.detailCall++
+	return f.detailSeq[i], nil
 }
 func (f *fakeEngine) SetFiles(infoHash string, paths []string, selected bool) error {
 	f.mu.Lock()
@@ -88,6 +127,12 @@ func (f *fakeEngine) SetFileGlobs(infoHash string, globs []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.globsCalls = append(f.globsCalls, fakeSetFileGlobsCall{infoHash, append([]string(nil), globs...)})
+	return nil
+}
+func (f *fakeEngine) SetSequential(infoHash string, on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seqCalls = append(f.seqCalls, fakeSetSequentialCall{infoHash, on})
 	return nil
 }
 
@@ -112,6 +157,13 @@ func (f *fakeEngine) gotFileGlobs() []string {
 		return nil
 	}
 	return append([]string(nil), f.globsCalls[len(f.globsCalls)-1].globs...)
+}
+
+// gotSequential returns the calls made to SetSequential, in order.
+func (f *fakeEngine) gotSequential() []fakeSetSequentialCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeSetSequentialCall(nil), f.seqCalls...)
 }
 
 func (f *fakeEngine) gotMagnets() []string {

@@ -47,8 +47,12 @@ func TestHomeAndHelpListCommands(t *testing.T) {
 	// The Downloads footer hint must say pause/resume (p toggles both), not just pause.
 	d := ready(New(&fakeSource{}, &fakeEngine{}))
 	d.section = sectionDownloads
-	if f := d.View(); !strings.Contains(f, "pause/resume") {
+	f := d.View()
+	if !strings.Contains(f, "pause/resume") {
 		t.Errorf("Downloads footer should read 'pause/resume':\n%s", f)
+	}
+	if !strings.Contains(f, "sequential") {
+		t.Errorf("Downloads footer should show the sequential hint:\n%s", f)
 	}
 }
 
@@ -310,6 +314,33 @@ func TestRenderDownloadsShowsSpeed(t *testing.T) {
 	m.dlSpeed = nil
 	if strings.Contains(m.View(), "/s") {
 		t.Fatalf("no sampled speed should render no /s suffix:\n%s", m.View())
+	}
+}
+
+func TestRenderDownloadsShowsSequentialTag(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "Movie", TotalBytes: 100, CompletedBytes: 10, Sequential: true}}
+	if v := m.View(); !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a sequential download should show the '▶ sequential' tag:\n%s", v)
+	}
+
+	// The tag is additive, not exclusive: a paused+sequential download shows
+	// both — the torrent being watched is exactly the one where sequential
+	// state matters most.
+	m.statuses[0].Paused = true
+	v := m.View()
+	if !strings.Contains(v, "paused") || !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a paused+sequential download should show both 'paused' and '▶ sequential':\n%s", v)
+	}
+	m.statuses[0].Paused = false
+
+	// A downloading sequential torrent (with a sampled speed) keeps its
+	// speed/ETA alongside the tag — it's the one actively being streamed.
+	m.dlSpeed = map[string]int64{"Movie": 1024 * 1024} // 1 MiB/s
+	v = m.View()
+	if !strings.Contains(v, "MiB/s") || !strings.Contains(v, "▶ sequential") {
+		t.Fatalf("a downloading sequential torrent should show both speed and '▶ sequential':\n%s", v)
 	}
 }
 

@@ -73,6 +73,8 @@ Usage:
   shoal resume <id>             resume a paused download
   shoal remove <id>             cancel/remove a download (add --delete-files)
   shoal files <id>              list a download's files (add --only <glob>, --json)
+  shoal sequential <id> on|off  toggle sequential (streaming) piece order
+  shoal stream <id|magnet>      wait until playable, print the file path (add --files <glob>)
   shoal subs <id>               fetch subtitles (add --lang <code>, --files <glob>)
   shoal open <id>               reveal download folder
   shoal daemon                  run the shared background engine (experimental)
@@ -122,6 +124,10 @@ func cli(args []string, version string, out io.Writer) (handled bool, code int) 
 		return true, runRemove(args[2:], out)
 	case "files":
 		return true, runFiles(args[2:], out)
+	case "sequential":
+		return true, runSequential(args[2:], out)
+	case "stream":
+		return true, runStream(args[2:], out)
 	case "subs":
 		return true, runSubs(args[2:], out)
 	case "open":
