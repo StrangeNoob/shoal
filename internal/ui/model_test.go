@@ -1780,6 +1780,49 @@ func TestOpenFolderNotices(t *testing.T) {
 	}
 }
 
+// A crafted torrent can carry traversal paths in its metadata; the o key must
+// refuse to open a path AbsFilePath rejected, and must say something (not
+// silently no-op) when there's no file row to act on.
+func TestOpenFileDetailsGuards(t *testing.T) {
+	fe := &fakeEngine{
+		statuses: []engine.Status{{Name: "Evil", InfoHash: "a", Path: "/tmp/evil"}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "../../outside.mkv", Length: 1, Selected: true},
+			{Path: "ok.mkv", Length: 1, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionDownloads
+	m.statuses = fe.statuses
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	called := false
+	orig := openPath
+	openPath = func(string) error { called = true; return nil }
+	defer func() { openPath = orig }()
+
+	m, _ = update(m, key("o")) // cursor on the traversal row
+	if called {
+		t.Fatal("openPath must not be called for a traversal path")
+	}
+	if m.notice == "" {
+		t.Fatal("refusing a traversal path must set a notice")
+	}
+
+	// No file rows at all (details still loading) → an explanatory notice.
+	m.dlDetail = engine.Detail{}
+	m.dlFileCursor = 0
+	m.notice = ""
+	m, _ = update(m, key("o"))
+	if called {
+		t.Fatal("openPath must not be called with no file rows")
+	}
+	if m.notice == "" {
+		t.Fatal("o with no file rows must set a notice, not silently no-op")
+	}
+}
+
 func TestOpenSelectedFileFromDetails(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "movie.mkv")

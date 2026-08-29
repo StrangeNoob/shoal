@@ -966,12 +966,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				path := engine.AbsFilePath(s.Path, m.dlDetail.Files, f)
+				if path == "" { // metadata path escaped the torrent dir — never open it
+					m.setError("file path looks unsafe — not opening it")
+					return m, nil
+				}
 				if _, err := os.Stat(path); err != nil {
 					m.setError("file not found — it may not have downloaded yet")
 					return m, nil
 				}
 				return m, openFileCmd(path)
 			}
+			m.setNotice("select a file first") // no rows yet (details still loading)
+			return m, nil
 		case " ", "enter":
 			if m.dlDetailBusy {
 				return m, nil // a write is in flight — serialize toggles so they can't reorder

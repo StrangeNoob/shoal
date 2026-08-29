@@ -47,3 +47,28 @@ func TestAbsFilePath(t *testing.T) {
 		t.Errorf("folder-with-one-file join = %q, want %q", gotFolder, wantFolder)
 	}
 }
+
+// FileDetail.Path is raw torrent metadata (anacrolix's DisplayPath does no
+// sanitizing), so a crafted path must never resolve outside the torrent's own
+// directory — AbsFilePath returns "" for any escape attempt.
+func TestAbsFilePathRejectsEscapes(t *testing.T) {
+	files := []FileDetail{
+		{Path: "../../etc/passwd"},
+		{Path: "ok.mkv"}, // len(files) > 1 so the single-file shortcut can't apply
+	}
+	cases := []string{
+		"../../etc/passwd",
+		"sub/../../outside.mkv",
+		".",
+		"..",
+	}
+	for _, p := range cases {
+		if got := AbsFilePath("/data/My Show", files, FileDetail{Path: p}); got != "" {
+			t.Errorf("AbsFilePath(%q) = %q, want \"\" (escape must be refused)", p, got)
+		}
+	}
+	// A benign nested path still joins.
+	if got, want := AbsFilePath("/data/My Show", files, files[1]), filepath.Join("/data/My Show", "ok.mkv"); got != want {
+		t.Errorf("benign join = %q, want %q", got, want)
+	}
+}
