@@ -566,9 +566,12 @@ func (a *Anacrolix) track(t *torrent.Torrent, name string) {
 		}
 		seq := a.sequential[h]
 		a.mu.Unlock()
-		t.DownloadAll()
-		// DownloadAll sets every piece to Normal priority, so any deselection
-		// must be applied after it or DownloadAll would clobber it.
+		// applyFileSelection is the sole authority for what downloads: it calls
+		// f.Download() per selected file (piece priorities follow file priority,
+		// per-file). It used to be preceded by t.DownloadAll(), which raises
+		// every PIECE's priority regardless of file selection — since effective
+		// priority is max(file, piece), that piece-level Normal floor could
+		// outlive a deselected file's own None. Removed; see #44.
 		a.applyFileSelection(t)
 		if seq {
 			a.applySequential(t)
@@ -656,10 +659,10 @@ func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 // applyFileSelection deselects files per the torrent's persisted FileGlobs
 // (resolved once, then cleared) or its persisted Deselected set (restart path).
 // Only that deselect list depends on the store: the per-file priority loop
-// always runs, because DownloadAll raises piece priorities without touching
-// each File's own priority — which stays at the zero value PiecePriorityNone
-// until something calls Download(). Skipping the loop (no store, or an entry
-// not upserted yet) would leave every file reading "deselected".
+// always runs, because each File's own priority starts at the zero value
+// PiecePriorityNone until something calls Download() — it never downloads on
+// its own. Skipping the loop (no store, or an entry not upserted yet) would
+// leave every file reading "deselected".
 func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
 	var deselect []string
 	if a.store != nil {
