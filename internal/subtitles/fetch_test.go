@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -66,7 +67,7 @@ func TestFetchPrefersHashMatchAndWritesSrt(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	got, err := Fetch(c, video, "en")
+	got, err := Fetch(context.Background(), c, video, "en")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestFetchFallsBackToQueryOnlyForSmallFile(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	got, err := Fetch(c, video, "en")
+	got, err := Fetch(context.Background(), c, video, "en")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestFetchNonexistentFileReturnsErrorWithoutHTTP(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := Fetch(c, video, "en"); err == nil {
+	if _, err := Fetch(context.Background(), c, video, "en"); err == nil {
 		t.Fatal("err = nil, want an error for a nonexistent file")
 	}
 	if called {
@@ -182,7 +183,7 @@ func TestFetchAllSeparatorFilenameOmitsQueryParam(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := Fetch(c, video, "en"); err != nil {
+	if _, err := Fetch(context.Background(), c, video, "en"); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 }
@@ -197,7 +198,7 @@ func TestFetchNoResultsReturnsErrNotFound(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := Fetch(c, video, "en")
+	_, err := Fetch(context.Background(), c, video, "en")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -216,7 +217,7 @@ func TestFetchRateLimitedPropagates(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := Fetch(c, video, "en")
+	_, err := Fetch(context.Background(), c, video, "en")
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want ErrRateLimited", err)
 	}
@@ -262,7 +263,7 @@ func TestFetchWritesAtomicallyAndDefaultsLang(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	got, err := Fetch(NewClient(srv.URL, "test-key", testUA), video, "")
+	got, err := Fetch(context.Background(), NewClient(srv.URL, "test-key", testUA), video, "")
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestFetchBadKeyPropagates(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := Fetch(c, video, "en")
+	_, err := Fetch(context.Background(), c, video, "en")
 	if !errors.Is(err, ErrBadKey) {
 		t.Fatalf("err = %v, want ErrBadKey", err)
 	}

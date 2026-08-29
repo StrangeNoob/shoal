@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -49,8 +50,8 @@ func IsSubsCandidate(path string, size int64) bool {
 }
 
 // subsFetch is a seam over subtitles.Fetch so tests never do HTTP.
-var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
-	return subtitles.Fetch(subtitles.NewDefaultClient(apiKey), videoPath, lang)
+var subsFetch = func(ctx context.Context, apiKey, videoPath, lang string) (string, error) {
+	return subtitles.Fetch(ctx, subtitles.NewDefaultClient(apiKey), videoPath, lang)
 }
 
 // Anacrolix implements Engine on top of anacrolix/torrent — a mature, full
@@ -65,6 +66,13 @@ type Anacrolix struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup // tracks background goroutines: URL restore + per-torrent metadata tracking
+
+	// ctx is canceled by Close, before wg.Wait — so an in-flight subtitle
+	// fetch (the only caller today) aborts immediately instead of blocking
+	// Close for up to its 30s HTTP timeout. cancel released it; only Close
+	// calls cancel, so no separate mutex guards it.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// seqApplyMu serializes sequential-mode piece-priority writes against mode
 	// changes: applySequential and SetSequential's off-branch both hold it for
@@ -155,12 +163,15 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	a := &Anacrolix{
 		client:     client,
 		http:       &http.Client{Timeout: 30 * time.Second},
 		dataDir:    c.DataDir,
 		seedRatio:  c.SeedRatio,
 		done:       make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
 		addedAt:    map[metainfo.Hash]time.Time{},
 		names:      map[metainfo.Hash]string{},
 		paused:     map[metainfo.Hash]bool{},
@@ -355,6 +366,7 @@ func (a *Anacrolix) checkSubsCompletion() {
 	apiKey, lang, dataDir := a.openSubsAPIKey, a.subsLang, a.dataDir
 	a.mu.Unlock()
 
+	ctx := a.ctx // set once in NewAnacrolix; canceled by Close, so no lock needed to read it
 	for _, t := range newlyDone {
 		// wg-tracked so Close waits for in-flight fetches: no fetch outlives the
 		// engine, and tests can restore swapped seams safely after Close.
@@ -363,7 +375,7 @@ func (a *Anacrolix) checkSubsCompletion() {
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			fetchSubsForFiles(apiKey, lang, dataDir, name, files)
+			fetchSubsForFiles(ctx, apiKey, lang, dataDir, name, files)
 		}()
 	}
 }
@@ -379,7 +391,7 @@ func (a *Anacrolix) checkSubsCompletion() {
 // DisplayPath(), matching how Detail() builds them.
 // Failures are logged and never affect torrent state — subtitles never block
 // or fail a download.
-func fetchSubsForFiles(apiKey, lang, dataDir, name string, files []*torrent.File) {
+func fetchSubsForFiles(ctx context.Context, apiKey, lang, dataDir, name string, files []*torrent.File) {
 	statusPath := filepath.Join(dataDir, name)
 	details := make([]FileDetail, len(files))
 	for i, f := range files {
@@ -390,7 +402,7 @@ func fetchSubsForFiles(apiKey, lang, dataDir, name string, files []*torrent.File
 		}
 	}
 	for _, fd := range details {
-		fetchSubsForFile(apiKey, lang, statusPath, details, fd)
+		fetchSubsForFile(ctx, apiKey, lang, statusPath, details, fd)
 	}
 }
 
@@ -398,7 +410,7 @@ func fetchSubsForFiles(apiKey, lang, dataDir, name string, files []*torrent.File
 // subtitle if it qualifies — the per-file body of fetchSubsForFiles, split
 // out so the traversal-safety skip is unit-testable without a live torrent
 // client.
-func fetchSubsForFile(apiKey, lang, statusPath string, all []FileDetail, f FileDetail) {
+func fetchSubsForFile(ctx context.Context, apiKey, lang, statusPath string, all []FileDetail, f FileDetail) {
 	if !f.Selected || !IsSubsCandidate(f.Path, f.Length) {
 		return
 	}
@@ -415,7 +427,7 @@ func fetchSubsForFile(apiKey, lang, statusPath string, all []FileDetail, f FileD
 	if _, err := os.Stat(subtitles.SrtPath(path, lang)); err == nil {
 		return
 	}
-	if _, err := subsFetch(apiKey, path, lang); err != nil {
+	if _, err := subsFetch(ctx, apiKey, path, lang); err != nil {
 		slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
 	}
 }
@@ -988,6 +1000,7 @@ func (a *Anacrolix) Close() error {
 	// call plus a test Cleanup) can't double-close the client.
 	a.closeOnce.Do(func() {
 		close(a.done) // stop the loops + signal restore/track/fetch goroutines
+		a.cancel()    // abort any in-flight subtitle fetch instead of outlasting its HTTP timeout
 		a.wg.Wait()   // no store writes, fetches, or torrent access may outlive Close
 		a.client.Close()
 	})

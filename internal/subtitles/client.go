@@ -2,6 +2,7 @@ package subtitles
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,8 +82,8 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (c *Client) do(method, endpoint string, body io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(method, endpoint, body)
+func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func (c *Client) do(method, endpoint string, body io.Reader) (*http.Response, er
 // Search looks up subtitles by moviehash, free-text query, or both, filtered
 // to lang. Empty parameters are omitted from the request. Entries with no
 // files are skipped.
-func (c *Client) Search(hash, query, lang string) ([]Result, error) {
+func (c *Client) Search(ctx context.Context, hash, query, lang string) ([]Result, error) {
 	v := url.Values{}
 	if hash != "" {
 		v.Set("moviehash", hash)
@@ -132,7 +133,7 @@ func (c *Client) Search(hash, query, lang string) ([]Result, error) {
 	if query != "" {
 		v.Set("query", query)
 	}
-	resp, err := c.do(http.MethodGet, c.baseURL+"/subtitles?"+v.Encode(), nil)
+	resp, err := c.do(ctx, http.MethodGet, c.baseURL+"/subtitles?"+v.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,14 +174,14 @@ func (c *Client) Search(hash, query, lang string) ([]Result, error) {
 // Download fetches the subtitle file identified by fileID: it posts the
 // file_id, then follows the returned link (an unauthenticated download URL)
 // and returns the file's raw bytes.
-func (c *Client) Download(fileID int64) ([]byte, error) {
+func (c *Client) Download(ctx context.Context, fileID int64) ([]byte, error) {
 	body, err := json.Marshal(struct {
 		FileID int64 `json:"file_id"`
 	}{FileID: fileID})
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.do(http.MethodPost, c.baseURL+"/download", bytes.NewReader(body))
+	resp, err := c.do(ctx, http.MethodPost, c.baseURL+"/download", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +231,11 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 			return validateLinkURL(req.URL)
 		}
 	}
-	fileResp, err := lc.Get(link.String())
+	fileReq, err := http.NewRequestWithContext(ctx, http.MethodGet, link.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	fileResp, err := lc.Do(fileReq)
 	if err != nil {
 		return nil, err
 	}

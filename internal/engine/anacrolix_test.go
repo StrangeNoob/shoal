@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -995,7 +996,7 @@ func waitAllSelected(t *testing.T, eng *Anacrolix, infoHash string) {
 func swapSubsFetch(t *testing.T, calls chan<- struct{ apiKey, path, lang string }) {
 	t.Helper()
 	orig := subsFetch
-	subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+	subsFetch = func(ctx context.Context, apiKey, videoPath, lang string) (string, error) {
 		calls <- struct{ apiKey, path, lang string }{apiKey, videoPath, lang}
 		return "", nil
 	}
@@ -1196,12 +1197,64 @@ func TestFetchSubsForFileSkipsEscapingPath(t *testing.T) {
 		{Path: "../../evil.mkv", Length: 200 << 20, Selected: true},
 		{Path: "ok.mkv", Length: 200 << 20, Selected: true}, // keeps len(all) > 1 so the single-file shortcut can't apply
 	}
-	fetchSubsForFile("test-key", "en", filepath.Join("/data", "My Show"), all, all[0])
+	fetchSubsForFile(context.Background(), "test-key", "en", filepath.Join("/data", "My Show"), all, all[0])
 
 	select {
 	case c := <-calls:
 		t.Fatalf("subsFetch called for an escaping path: %+v", c)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// Close must cancel any in-flight subtitle fetch rather than waiting out its
+// full HTTP timeout (issue #47): Anacrolix derives a context from a.done and
+// threads it through fetchSubsForFile down to the subsFetch seam, so a fetch
+// blocked on ctx.Done() unblocks the instant Close cancels it.
+func TestCloseCancelsInFlightSubsFetch(t *testing.T) {
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	orig := subsFetch
+	subsFetch = func(ctx context.Context, apiKey, videoPath, lang string) (string, error) {
+		close(started)
+		<-ctx.Done() // a real HTTP call would otherwise block up to its 30s timeout
+		close(canceled)
+		return "", ctx.Err()
+	}
+	t.Cleanup(func() { subsFetch = orig })
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir()})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+
+	all := []FileDetail{{Path: "movie.mkv", Length: SubsMinVideoBytes, Selected: true}}
+	eng.wg.Add(1)
+	go func() {
+		defer eng.wg.Done()
+		fetchSubsForFile(eng.ctx, "test-key", "en", filepath.Join("/data", "My Show"), all, all[0])
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subsFetch was never called")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		eng.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return promptly — the in-flight subsFetch wasn't canceled")
+	}
+	select {
+	case <-canceled:
+	default:
+		t.Fatal("subsFetch's context was never canceled by Close")
 	}
 }
 
