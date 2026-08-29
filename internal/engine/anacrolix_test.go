@@ -764,10 +764,6 @@ func TestDeselectDropsPiecePriorityToNone(t *testing.T) {
 	h := eng.Statuses()[0].InfoHash
 	waitAllSelected(t, eng, h) // both files selected before we deselect one
 
-	if err := eng.SetFiles(h, []string{"skip.mkv"}, false); err != nil {
-		t.Fatalf("SetFiles(deselect): %v", err)
-	}
-
 	tt, _, ok := eng.torrentByHash(h)
 	if !ok {
 		t.Fatal("torrent vanished")
@@ -785,11 +781,17 @@ func TestDeselectDropsPiecePriorityToNone(t *testing.T) {
 		t.Fatalf("expected files not found: %+v", tt.Files())
 	}
 
-	// Effective priority reads back None per-piece until that piece's storage
-	// completion is cached (async after add, and per-piece — same gotcha
-	// addSequentialTestTorrent waits out), so wait for every one of keep.mkv's
-	// pieces individually before asserting on them.
+	// Prime BOTH files' piece ranges to >= Normal before deselecting: effective
+	// priority reads back None per-piece until that piece's storage completion
+	// is cached (async after add), so without this the skip.mkv None-assertion
+	// below could pass vacuously — proving nothing about the deselection
+	// actually clearing a raised priority.
 	waitPieceRangeAtLeast(t, tt, keepFile.BeginPieceIndex(), keepFile.EndPieceIndex(), torrent.PiecePriorityNormal)
+	waitPieceRangeAtLeast(t, tt, skipFile.BeginPieceIndex(), skipFile.EndPieceIndex(), torrent.PiecePriorityNormal)
+
+	if err := eng.SetFiles(h, []string{"skip.mkv"}, false); err != nil {
+		t.Fatalf("SetFiles(deselect): %v", err)
+	}
 
 	for i := skipFile.BeginPieceIndex(); i < skipFile.EndPieceIndex(); i++ {
 		if p := tt.PieceState(i).Priority; p != torrent.PiecePriorityNone {
@@ -804,8 +806,9 @@ func TestDeselectDropsPiecePriorityToNone(t *testing.T) {
 }
 
 // waitPieceRangeAtLeast blocks until every piece in [begin, end) reads back at
-// least want, or the deadline passes (in which case the caller's own
-// assertions report exactly which pieces are still lagging).
+// least want, failing the test if the deadline passes — a caller that goes on
+// to assert priorities were CLEARED needs proof they were raised first, so a
+// silent timeout here would make those assertions vacuous.
 func waitPieceRangeAtLeast(t *testing.T, tt *torrent.Torrent, begin, end int, want torrent.PiecePriority) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -821,6 +824,11 @@ func waitPieceRangeAtLeast(t *testing.T, tt *torrent.Torrent, begin, end int, wa
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	for i := begin; i < end; i++ {
+		if p := tt.PieceState(i).Priority; p < want {
+			t.Fatalf("piece %d priority = %v, never reached %v before deadline", i, p, want)
+		}
 	}
 }
 
