@@ -632,7 +632,7 @@ func TestDownloadDetailScreen(t *testing.T) {
 	m, _ = update(m, cmd()) // deliver dlDetailMsg
 
 	view := m.View()
-	for _, want := range []string{"download details", "movie.mkv", "readme.txt", "TRACKERS", "tracker.example"} {
+	for _, want := range []string{"download details", "movie.mkv", "readme.txt", "TRACKERS", "tracker.example", "o open file"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("details view missing %q:\n%s", want, view)
 		}
@@ -1777,6 +1777,129 @@ func TestOpenFolderNotices(t *testing.T) {
 	_, cmd := update(m, key("o"))
 	if cmd == nil {
 		t.Error("o on an existing folder should return an open command")
+	}
+}
+
+// A crafted torrent can carry traversal paths in its metadata; the o key must
+// refuse to open a path AbsFilePath rejected, and must say something (not
+// silently no-op) when there's no file row to act on.
+func TestOpenFileDetailsGuards(t *testing.T) {
+	fe := &fakeEngine{
+		statuses: []engine.Status{{Name: "Evil", InfoHash: "a", Path: "/tmp/evil"}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "../../outside.mkv", Length: 1, Selected: true},
+			{Path: "ok.mkv", Length: 1, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionDownloads
+	m.statuses = fe.statuses
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	called := false
+	orig := openPath
+	openPath = func(string) error { called = true; return nil }
+	defer func() { openPath = orig }()
+
+	m, _ = update(m, key("o")) // cursor on the traversal row
+	if called {
+		t.Fatal("openPath must not be called for a traversal path")
+	}
+	if m.notice == "" {
+		t.Fatal("refusing a traversal path must set a notice")
+	}
+
+	// No file rows at all (details still loading) → an explanatory notice.
+	m.dlDetail = engine.Detail{}
+	m.dlFileCursor = 0
+	m.notice = ""
+	m, _ = update(m, key("o"))
+	if called {
+		t.Fatal("openPath must not be called with no file rows")
+	}
+	if m.notice == "" {
+		t.Fatal("o with no file rows must set a notice, not silently no-op")
+	}
+}
+
+func TestOpenSelectedFileFromDetails(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fe := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", Path: dir}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "movie.mkv", Length: 1, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionDownloads
+	m.statuses = fe.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	var gotPath string
+	orig := openPath
+	openPath = func(p string) error { gotPath = p; return nil }
+	defer func() { openPath = orig }()
+
+	// ready + selected → invokes the open seam with the joined path.
+	_, cmd = update(m, key("o"))
+	if cmd == nil {
+		t.Fatal("o on a ready, selected file should return an open command")
+	}
+	cmd()
+	if gotPath != filePath {
+		t.Errorf("open path = %q, want %q", gotPath, filePath)
+	}
+
+	// deselected → notice, no open.
+	m.dlDetail.Files[0].Selected = false
+	gotPath = ""
+	m2, cmd2 := update(m, key("o"))
+	if cmd2 != nil {
+		t.Error("o on a deselected file shouldn't return a command")
+	}
+	if !strings.Contains(m2.notice, "deselected") {
+		t.Errorf("notice = %q, want mention of deselected", m2.notice)
+	}
+	if gotPath != "" {
+		t.Error("deselected file must not invoke the open seam")
+	}
+	m.dlDetail.Files[0].Selected = true
+
+	// missing on disk → error notice, no open.
+	m.dlDetail.Files[0].Path = "missing.mkv"
+	m3, cmd3 := update(m, key("o"))
+	if cmd3 != nil {
+		t.Error("o on a missing file shouldn't return a command")
+	}
+	if !strings.Contains(m3.notice, "not found") || !m3.noticeErr {
+		t.Errorf("notice = %q err=%v, want 'not found' error", m3.notice, m3.noticeErr)
+	}
+	m.dlDetail.Files[0].Path = "movie.mkv"
+
+	// download not ready (no on-disk Path yet) → notice, no open.
+	fe2 := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", Path: ""}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "movie.mkv", Length: 1, Selected: true},
+		}},
+	}
+	m4 := ready(New(&fakeSource{}, fe2))
+	m4.section = sectionDownloads
+	m4.statuses = fe2.statuses
+	m4, cmd4 := update(m4, key("enter"))
+	m4, _ = update(m4, cmd4())
+	m5, cmd5 := update(m4, key("o"))
+	if cmd5 != nil {
+		t.Error("o with no on-disk path shouldn't return a command")
+	}
+	if !strings.Contains(m5.notice, "isn't ready") {
+		t.Errorf("notice = %q, want mention of not ready", m5.notice)
 	}
 }
 

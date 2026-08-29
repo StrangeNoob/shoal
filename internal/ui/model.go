@@ -542,6 +542,17 @@ func openFolderCmd(dir string) tea.Cmd {
 	return func() tea.Msg { return folderOpenedMsg{err: opener.Open(dir)} }
 }
 
+// openPath is opener.Open, indirected so tests can verify the exact path
+// passed to the OS opener without actually launching a file-open command.
+var openPath = opener.Open
+
+type fileOpenedMsg struct{ err error }
+
+// openFileCmd opens path (a single file) via the OS opener, off the UI goroutine.
+func openFileCmd(path string) tea.Cmd {
+	return func() tea.Msg { return fileOpenedMsg{err: openPath(path)} }
+}
+
 // openSelected opens the selected torrent's folder, or sets a notice when it
 // isn't ready or is missing. dir is Path if it's a directory, else its parent
 // (single-file torrents live directly in the save dir).
@@ -731,6 +742,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case folderOpenedMsg:
 		if msg.err != nil {
 			m.setError("couldn't open the folder")
+		}
+		return m, nil
+
+	case fileOpenedMsg:
+		if msg.err != nil {
+			m.setError("couldn't open the file")
 		}
 		return m, nil
 
@@ -929,6 +946,38 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.dlFileCursor < len(m.dlDetail.Files)-1 {
 				m.dlFileCursor++
 			}
+		case "o":
+			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
+				f := m.dlDetail.Files[i]
+				var s engine.Status
+				found := false
+				for _, st := range m.statuses {
+					if st.InfoHash == m.dlDetailHash {
+						s, found = st, true
+						break
+					}
+				}
+				if !found || s.Path == "" {
+					m.setNotice("file isn't ready yet")
+					return m, nil
+				}
+				if !f.Selected {
+					m.setNotice("file is deselected — press space to select it")
+					return m, nil
+				}
+				path := engine.AbsFilePath(s.Path, m.dlDetail.Files, f)
+				if path == "" { // metadata path escaped the torrent dir — never open it
+					m.setError("file path looks unsafe — not opening it")
+					return m, nil
+				}
+				if _, err := os.Stat(path); err != nil {
+					m.setError("file not found — it may not have downloaded yet")
+					return m, nil
+				}
+				return m, openFileCmd(path)
+			}
+			m.setNotice("select a file first") // no rows yet (details still loading)
+			return m, nil
 		case " ", "enter":
 			if m.dlDetailBusy {
 				return m, nil // a write is in flight — serialize toggles so they can't reorder
