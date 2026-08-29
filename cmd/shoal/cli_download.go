@@ -251,10 +251,12 @@ func awaitDone(eng interface {
 				continue
 			}
 		}
+		found := false
 		for _, s := range statuses {
 			if !strings.HasPrefix(strings.ToLower(s.InfoHash), handle) {
 				continue
 			}
+			found = true
 			if s.Done {
 				fmt.Fprint(os.Stderr, "\r\033[K") // clear the progress line
 				fmt.Fprintf(out, "done: %s\n", s.Name)
@@ -262,6 +264,14 @@ func awaitDone(eng interface {
 			}
 			fmt.Fprintf(os.Stderr, "\r\033[K%5.1f%%  %s/%s  %d peers",
 				s.Percent()*100, humanBytes(s.CompletedBytes), humanBytes(s.TotalBytes), s.Peers)
+		}
+		if !found {
+			// The target vanished from the status list — removed via the TUI or
+			// another client. Mirrors cli_stream.go's findStreamStatus check:
+			// without this, the loop would spin forever waiting on an id that will
+			// never reappear (issue #45).
+			fmt.Fprintln(os.Stderr, "\nshoal download: download disappeared — it may have been removed")
+			return 1
 		}
 		time.Sleep(waitPollInterval)
 	}
