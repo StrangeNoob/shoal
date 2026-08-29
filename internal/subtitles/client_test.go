@@ -191,6 +191,41 @@ func TestDownloadRejectsNonHTTPSNonLoopbackLink(t *testing.T) {
 	}
 }
 
+// A real (https) download link must never reach a private, loopback, or
+// otherwise non-public address — the check runs on the actual dial target
+// (post-DNS), so a rebinding hostname can't dodge it either.
+func TestRejectNonPublicAddr(t *testing.T) {
+	bad := []string{
+		"127.0.0.1:443", "[::1]:443", "10.0.0.8:443", "192.168.1.5:443",
+		"172.16.3.2:443", "169.254.1.1:443", "[fe80::1]:443", "0.0.0.0:443",
+		"224.0.0.1:443",
+	}
+	for _, a := range bad {
+		if rejectNonPublicAddr("tcp", a, nil) == nil {
+			t.Errorf("rejectNonPublicAddr(%q) = nil, want error", a)
+		}
+	}
+	good := []string{"93.184.216.34:443", "[2606:2800:220:1:248:1893:25c8:1946]:443"}
+	for _, a := range good {
+		if err := rejectNonPublicAddr("tcp", a, nil); err != nil {
+			t.Errorf("rejectNonPublicAddr(%q) = %v, want nil", a, err)
+		}
+	}
+}
+
+func TestDownloadRejectsPrivateHTTPSTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"link":"https://127.0.0.1:1/x.srt"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	_, err := c.Download(123)
+	if err == nil || !strings.Contains(err.Error(), "non-public") {
+		t.Fatalf("err = %v, want a non-public-address policy error", err)
+	}
+}
+
 // The link policy must also hold across redirects: a validated loopback/https
 // link that redirects to an unsafe target must be rejected before the
 // redirected request is sent.

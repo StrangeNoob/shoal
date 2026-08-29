@@ -183,6 +183,10 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 	}
 	go a.queueLoop(3 * time.Second) // also drives periodic sequential-mode re-planning
 	if c.SubsAuto && c.OpenSubsAPIKey != "" {
+		// wg-tracked: subsLoop spawns wg-tracked fetch workers, and WaitGroup's
+		// contract requires those Adds to happen while the counter is held —
+		// tracking the loop itself guarantees Close's Wait can't pass first.
+		a.wg.Add(1)
 		go a.subsLoop(5 * time.Second)
 	}
 	return a, nil
@@ -316,6 +320,7 @@ func (a *Anacrolix) enforceSeedRatio() {
 // subsLoop periodically checks for newly-completed torrents to auto-fetch
 // subtitles for, until Close signals done.
 func (a *Anacrolix) subsLoop(interval time.Duration) {
+	defer a.wg.Done()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

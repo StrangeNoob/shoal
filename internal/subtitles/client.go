@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -201,10 +203,28 @@ func (c *Client) Download(fileID int64) ([]byte, error) {
 	// The same policy must hold for every redirect target — http.Client
 	// follows redirects automatically, and a validated link could otherwise
 	// bounce to an http or internal address. The client copy keeps the
-	// caller's Transport/Timeout while adding the redirect check.
+	// caller's Timeout while adding the redirect check.
 	lc := *c.httpClient()
-	lc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return validateLinkURL(req.URL)
+	if link.Scheme == "https" {
+		// Real-world mode: redirects must stay https, and every ACTUAL dial
+		// target (checked post-DNS, so a rebinding hostname can't dodge it)
+		// must be a public address — an API-controlled link must not reach
+		// loopback, LAN, or link-local services from the daemon's position.
+		lc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" || req.URL.Host == "" {
+				return fmt.Errorf("subtitles: redirect target is not an absolute https URL: %q", req.URL)
+			}
+			return nil
+		}
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.DialContext = (&net.Dialer{Timeout: 30 * time.Second, Control: rejectNonPublicAddr}).DialContext
+		lc.Transport = tr
+	} else {
+		// Loopback-http mode exists only for httptest-backed tests; redirects
+		// may only go to other loopback/https targets.
+		lc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return validateLinkURL(req.URL)
+		}
 	}
 	fileResp, err := lc.Get(link.String())
 	if err != nil {
@@ -233,8 +253,28 @@ const maxDownloadBytes = 10 << 20
 // validateLinkURL enforces the download-link policy (absolute https, or
 // loopback http for tests) on the initial link and on every redirect target.
 func validateLinkURL(u *url.URL) error {
-	if u == nil || u.Host == "" || !(u.Scheme == "https" || (u.Scheme == "http" && isLoopbackHost(u.Hostname()))) {
-		return fmt.Errorf("subtitles: download link target is not an absolute https URL: %q", u)
+	switch {
+	case u == nil || u.Host == "":
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme == "http" && isLoopbackHost(u.Hostname()):
+		return nil
+	}
+	return fmt.Errorf("subtitles: download link target is not an absolute https URL: %q", u)
+}
+
+// rejectNonPublicAddr is a net.Dialer Control hook that refuses connections to
+// any non-public address (loopback, RFC-1918 private, link-local, unspecified,
+// multicast). It sees the literal address being dialed — after DNS resolution —
+// so it holds for redirects and DNS-rebinding tricks alike.
+func rejectNonPublicAddr(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("subtitles: bad dial address %q: %w", address, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return fmt.Errorf("subtitles: download link resolves to a non-public address %q", host)
 	}
 	return nil
 }
