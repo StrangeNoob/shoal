@@ -615,7 +615,7 @@ func (m Model) renderSettings(w, h int) string {
 		"",
 		st.SectionHead.Render("ABOUT"),
 		"  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"),
-		"  " + st.Meta.Render("engine settings (port, peers, save-to, seed) apply when the daemon restarts"),
+		"  " + st.Meta.Render("engine settings (port, peers, save-to, seed, auto subs) apply when the daemon restarts"),
 	}
 
 	// Window the navigable rows around the cursor so the selection is always
@@ -690,7 +690,24 @@ func (m Model) renderSettingValue(it setItem) string {
 	if it.label == "Save to" {
 		style = st.Accent
 	}
-	return style.Render(it.get(&m))
+	val := it.get(&m)
+	if it.label == "OS API key" {
+		val = maskAPIKey(val)
+	}
+	return style.Render(val)
+}
+
+// maskAPIKey renders a secret for display: all but the last 4 characters
+// become •, so the settings pane never shows the full key. Empty renders as
+// "unset"; keys of 4 chars or fewer are masked entirely (no safe suffix to reveal).
+func maskAPIKey(key string) string {
+	if key == "" {
+		return "unset"
+	}
+	if len(key) <= 4 {
+		return strings.Repeat("•", len(key))
+	}
+	return strings.Repeat("•", len(key)-4) + key[len(key)-4:]
 }
 
 // --- footer & help ---------------------------------------------------------

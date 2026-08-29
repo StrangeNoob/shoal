@@ -107,7 +107,9 @@ downloads** (`0` = unlimited), **notify on done**, and auto-update. `↑ ↓` mo
 change an option, `enter` edits a text field.
 A **SOURCES** group lists every provider with an on/off toggle (`← →` to change);
 turning one off removes it from searches immediately, and the change is shared with
-the `shoal sources` CLI. Engine settings (speed limits, max peers, listen port, save-to,
+the `shoal sources` CLI. A **SUBTITLES** group holds the OpenSubtitles API key
+(masked), subtitle language, and auto-fetch toggle — see [Subtitles](#subtitles).
+Engine settings (speed limits, max peers, listen port, save-to,
 seed) take effect when the daemon next restarts.
 
 The whole TUI is mouse-aware: the scroll wheel moves the selection in any pane.
@@ -138,6 +140,7 @@ shoal files <id> --only '<glob>'     # select files matching a glob (deselect th
 shoal files <id> --json              # list files for scripting
 shoal sequential <id> on|off         # toggle streaming piece priority on an existing download
 shoal stream <id|magnet>             # wait until playable, print the file path (add --files <glob>)
+shoal subs <id> [--lang <code>] [--files '<glob>']  # fetch subtitles from OpenSubtitles
 shoal status [id]                    # progress of background downloads (--json, --clear, --follow)
 shoal history [--json]               # list completed downloads
 shoal history rm <id> [--delete-files]    # remove a history entry
@@ -201,6 +204,12 @@ shoal completion bash|zsh|fish       # print a shell completion script
   when no file has a video extension; files being downloaded win over deselected ones), then prints its absolute path to
   **stdout** and exits — the download keeps going in the daemon. Progress goes to stderr, so the
   canonical use is `mpv "$(shoal stream <id>)"`.
+- **`subs`** fetches subtitles from [OpenSubtitles](https://www.opensubtitles.com) for a downloaded
+  torrent's video files, printing each written `.srt` path. Requires an OpenSubtitles API key
+  (Settings → OS API key, or `opensubs_api_key` in `config.json`) — see
+  [Subtitles](#subtitles) below for how to get one. `--lang <code>` overrides the configured
+  **Subs lang** for this run; `--files '<glob>'` picks specific files (comma-separated glob,
+  same matching rules as `download`/`files`) instead of the default rule (video files ≥100 MiB).
 - **`status`** reports each background download as `downloading | done | seeding | paused`;
   `--clear` prunes finished (done) torrents, keeping files. `--follow` redraws the table
   live until you press Ctrl+C.
@@ -236,6 +245,26 @@ resume. (To fully stop the daemon, close the TUI first, then `shoal daemon stop`
 The daemon also **auto-stops when it's been empty (no torrents) with no connected
 clients for `daemon_idle_minutes` (default 10; set `0` in `config.json` to
 disable)**. A torrent or any connected client keeps it running.
+
+## Subtitles
+
+shoal can fetch subtitles from [OpenSubtitles](https://www.opensubtitles.com) for
+downloaded video files, via the CLI (`shoal subs`) or automatically after a download
+completes. **You bring your own API key — shoal doesn't ship one.** Get a free key from
+your OpenSubtitles.com account under **API Consumers**, then set it in **Settings → OS
+API key**:
+
+- **OS API key** — your OpenSubtitles API key (masked in the settings pane; the last 4
+  characters stay visible so you can tell keys apart, empty shows `unset`). Stored in
+  `config.json` as `opensubs_api_key`.
+- **Subs lang** — the preferred subtitle language code (default `en`), `subs_lang` in
+  `config.json`. `shoal subs --lang <code>` overrides it for a single run.
+- **Auto subs** — when **on**, the daemon fetches subtitles automatically for
+  video files (≥100 MiB) once a download completes; `subs_auto` in `config.json`.
+
+Auto subs is an **engine setting**: like other engine settings, a change takes effect
+the next time the daemon restarts. `shoal subs` reads the key/language settings live, so
+CLI runs pick up changes immediately without a restart.
 
 ### Claude Code skill
 
@@ -359,6 +388,9 @@ Shipped:
   `shoal download --sequential`, `shoal sequential <id> on|off`) so a file becomes
   playable long before the torrent finishes, plus `shoal stream <id|magnet>` to wait
   for playability and print the file path (`mpv "$(shoal stream <id>)"`).
+- **Subtitles** — `shoal subs <id>` fetches matching `.srt` files from OpenSubtitles
+  (bring your own free API key), plus an opt-in **Auto subs** engine setting to fetch
+  automatically on download completion.
 
 Still planned — contributions welcome:
 - **More sources** behind the existing `source.Source` interface.

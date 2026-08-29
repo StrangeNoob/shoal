@@ -20,8 +20,15 @@ import (
 // temp file, entirely offline.
 func buildTorrentBytes(t *testing.T, content []byte) []byte {
 	t.Helper()
+	return buildTorrentBytesNamed(t, "blob.bin", content)
+}
+
+// buildTorrentBytesNamed is buildTorrentBytes for a caller-chosen single file
+// name (so the resulting torrent's file has a specific extension).
+func buildTorrentBytesNamed(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "blob.bin")
+	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, content, 0o644); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
@@ -800,5 +807,382 @@ func TestExportedRemoveUnderDirRefusesEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(sub); !os.IsNotExist(err) {
 		t.Fatal("RemoveUnderDir should have deleted the in-dir path")
+	}
+}
+
+// A plain add with persistence off (QueuePath: "") must still establish every
+// file's priority: Detail reports each file Selected. The queue store only
+// supplies the deselect list; when it's absent (or the entry hasn't been
+// upserted yet) files must not be left at the zero-value PiecePriorityNone,
+// which silently reads as "deselected" everywhere (Detail, subs auto-fetch).
+func TestPlainAddSelectsEveryFileWithoutStore(t *testing.T) {
+	src := t.TempDir()
+	root := filepath.Join(src, "Pack")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.mkv", "b.mkv"} {
+		if err := os.WriteFile(filepath.Join(root, name), bytes.Repeat([]byte("x"), 2000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := buildTorrentBytesDir(t, root)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir()}) // no QueuePath → no store
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "Pack"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, eng)
+
+	var det Detail
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		det, err = eng.Detail(eng.Statuses()[0].InfoHash)
+		if err == nil && len(det.Files) == 2 && det.Files[0].Selected && det.Files[1].Selected {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("files never became selected: %+v (err %v)", det.Files, err)
+}
+
+// waitAllSelected blocks until every file of infoHash reads Selected — i.e.
+// the post-GotInfo applyFileSelection goroutine has run — so a test can act on
+// a settled selection instead of racing it.
+func waitAllSelected(t *testing.T, eng *Anacrolix, infoHash string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		det, err := eng.Detail(infoHash)
+		if err == nil && len(det.Files) > 0 {
+			all := true
+			for _, f := range det.Files {
+				all = all && f.Selected
+			}
+			if all {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("files never became selected")
+}
+
+// swapSubsFetch replaces the subsFetch seam with a recorder for the duration
+// of the test, so tests never do HTTP.
+func swapSubsFetch(t *testing.T, calls chan<- struct{ apiKey, path, lang string }) {
+	t.Helper()
+	orig := subsFetch
+	subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+		calls <- struct{ apiKey, path, lang string }{apiKey, videoPath, lang}
+		return "", nil
+	}
+	t.Cleanup(func() { subsFetch = orig })
+}
+
+func TestSubsAutoCompletionOffMakesNoCalls(t *testing.T) {
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir(), OpenSubsAPIKey: "key", SubsAuto: false})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	eng.checkSubsCompletion()
+	select {
+	case <-calls:
+		t.Fatal("subsFetch called though SubsAuto is off")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestSubsAutoCompletionNoKeyMakesNoCalls(t *testing.T) {
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: t.TempDir(), OpenSubsAPIKey: "", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	eng.checkSubsCompletion()
+	select {
+	case <-calls:
+		t.Fatal("subsFetch called though no API key is configured")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// A completed torrent with one qualifying video file (right extension, at
+// least SubsMinVideoBytes) triggers exactly one subsFetch call with the file's
+// absolute on-disk path and the configured language. A second completion
+// signal for the same torrent must not fetch again.
+func TestSubsAutoCompletionFetchesQualifyingFileOnce(t *testing.T) {
+	// Shrink the size threshold instead of hashing a real 100 MiB fixture —
+	// keeps the test fast and avoids CPU contention with the rest of the
+	// suite under -race.
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
+
+	dir := t.TempDir()
+	content := bytes.Repeat([]byte("shoal"), 400) // 2000 bytes, above the shrunk threshold
+	data := buildTorrentBytesNamed(t, "movie.mkv", content)
+
+	// Pre-write the full file at its final on-disk location so the torrent
+	// verifies complete immediately without needing peers (same trick as
+	// TestPartialProgressSurvivesRestart).
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dir, OpenSubsAPIKey: "test-key", SubsLang: "fr", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "movie"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	s := eng.Statuses()
+	if len(s) != 1 || !s[0].Done {
+		t.Fatalf("torrent never completed: %+v", s)
+	}
+
+	// fetchSubsForFiles skips deselected (never-downloaded) files by checking
+	// File.Priority(), the same convention Detail() uses for Selected — so
+	// wait for the add path's own applyFileSelection to have selected the file.
+	waitAllSelected(t, eng, s[0].InfoHash)
+
+	eng.checkSubsCompletion()
+
+	var got struct{ apiKey, path, lang string }
+	select {
+	case got = <-calls:
+	case <-time.After(3 * time.Second):
+		t.Fatal("subsFetch was never called")
+	}
+	if got.apiKey != "test-key" {
+		t.Errorf("apiKey = %q, want test-key", got.apiKey)
+	}
+	if got.lang != "fr" {
+		t.Errorf("lang = %q, want fr", got.lang)
+	}
+	wantPath := filepath.Join(dir, "movie.mkv")
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+
+	// A second completion signal for the same torrent must not fetch again.
+	eng.checkSubsCompletion()
+	select {
+	case c := <-calls:
+		t.Fatalf("unexpected second subsFetch call: %+v", c)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// A completed torrent whose subtitle file is already on disk must not be
+// fetched again: subsFetched is memory-only, so after a daemon restart every
+// restored complete torrent looks "newly done" — refetching would overwrite
+// the .srt and burn the user's OpenSubtitles quota. The written file is the record.
+func TestSubsAutoSkipsFileWithExistingSrt(t *testing.T) {
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
+
+	dir := t.TempDir()
+	content := bytes.Repeat([]byte("shoal"), 400)
+	data := buildTorrentBytesNamed(t, "movie.mkv", content)
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The subtitle from a previous run.
+	if err := os.WriteFile(filepath.Join(dir, "movie.en.srt"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dir, OpenSubsAPIKey: "test-key", SubsLang: "en", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "movie"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	s := eng.Statuses()
+	if len(s) != 1 || !s[0].Done {
+		t.Fatalf("torrent never completed: %+v", s)
+	}
+	waitAllSelected(t, eng, s[0].InfoHash)
+
+	eng.checkSubsCompletion()
+	select {
+	case c := <-calls:
+		t.Fatalf("subsFetch called though the .srt already exists: %+v", c)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "movie.en.srt")); err != nil || string(b) != "1\n" {
+		t.Fatalf("existing .srt = %q (err %v), want it left untouched", b, err)
+	}
+}
+
+// buildTorrentBytesDir builds a real, self-contained multi-file .torrent from
+// an existing directory (root's basename becomes the torrent's Info.Name),
+// the multi-file counterpart to buildTorrentBytesNamed.
+func buildTorrentBytesDir(t *testing.T, root string) []byte {
+	t.Helper()
+	info := atmetainfo.Info{PieceLength: 16384}
+	if err := info.BuildFromFilePath(root); err != nil {
+		t.Fatalf("BuildFromFilePath: %v", err)
+	}
+	ib, err := atbencode.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal info: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := (&atmetainfo.MetaInfo{InfoBytes: ib}).Write(&buf); err != nil {
+		t.Fatalf("write metainfo: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// A completed multi-file torrent with one deselected qualifying video file
+// must not fetch subs for it — it was never downloaded, so a fetch would
+// write an orphaned .srt next to nothing.
+func TestSubsAutoCompletionSkipsDeselectedFile(t *testing.T) {
+	origMin := SubsMinVideoBytes
+	SubsMinVideoBytes = 1024
+	t.Cleanup(func() { SubsMinVideoBytes = origMin })
+
+	keep := bytes.Repeat([]byte("shoal"), 400) // 2000 bytes, above the shrunk threshold
+	skip := bytes.Repeat([]byte("nope!"), 400)
+
+	src := t.TempDir()
+	root := filepath.Join(src, "My Show")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.mkv"), keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.mkv"), skip, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := buildTorrentBytesDir(t, root)
+
+	// Pre-write the files at their final on-disk location so the torrent
+	// verifies complete immediately without needing peers (same trick as
+	// TestSubsAutoCompletionFetchesQualifyingFileOnce).
+	dataDir := t.TempDir()
+	finalDir := filepath.Join(dataDir, "My Show")
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "keep.mkv"), keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(finalDir, "skip.mkv"), skip, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	eng, err := NewAnacrolix(Config{DataDir: dataDir, OpenSubsAPIKey: "test-key", SubsLang: "en", SubsAuto: true})
+	if err != nil {
+		t.Skipf("cannot start torrent client: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "My Show"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := eng.Statuses(); len(s) == 1 && s[0].Done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	statuses := eng.Statuses()
+	if len(statuses) != 1 || !statuses[0].Done {
+		t.Fatalf("torrent never completed: %+v", statuses)
+	}
+
+	// The add path selects every file; deselect one on top of that (as a user
+	// would), after waiting so the deselect can't be clobbered by it.
+	waitAllSelected(t, eng, statuses[0].InfoHash)
+	if err := eng.SetFiles(statuses[0].InfoHash, []string{"skip.mkv"}, false); err != nil {
+		t.Fatalf("SetFiles(deselect skip.mkv): %v", err)
+	}
+
+	eng.checkSubsCompletion()
+
+	var got struct{ apiKey, path, lang string }
+	select {
+	case got = <-calls:
+	case <-time.After(3 * time.Second):
+		t.Fatal("subsFetch was never called for the selected file")
+	}
+	wantPath := filepath.Join(finalDir, "keep.mkv")
+	if got.path != wantPath {
+		t.Errorf("path = %q, want %q", got.path, wantPath)
+	}
+
+	select {
+	case c := <-calls:
+		t.Fatalf("subsFetch should not be called for the deselected file: %+v", c)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

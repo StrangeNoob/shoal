@@ -38,13 +38,13 @@ const bashCompletion = `# bash completion for shoal
 _shoal() {
     local cur cmds ids
     cur="${COMP_WORDS[COMP_CWORD]}"
-    cmds="sources search download files sequential stream status history pause resume remove open daemon skill update version help completion"
+    cmds="sources search download files sequential stream status history pause resume remove subs open daemon skill update version help completion"
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
         return
     fi
     case "${COMP_WORDS[1]}" in
-        status|pause|resume|remove|open|download|files|sequential|stream)
+        status|pause|resume|remove|open|download|files|sequential|stream|subs)
             ids=$( { shoal status 2>/dev/null | awk 'NR>1{print $1}'; shoal history 2>/dev/null | awk 'NR>1{print $1}'; } | sort -u )
             COMPREPLY=( $(compgen -W "$ids" -- "$cur") )
             ;;
@@ -62,13 +62,13 @@ complete -o bashdefault -o default -F _shoal shoal
 const zshCompletion = `#compdef shoal
 _shoal() {
     local -a cmds ids
-    cmds=(sources search download files sequential stream status history pause resume remove open daemon skill update version help completion)
+    cmds=(sources search download files sequential stream status history pause resume remove subs open daemon skill update version help completion)
     if (( CURRENT == 2 )); then
         compadd -- $cmds
         return
     fi
     case $words[2] in
-        status|pause|resume|remove|open|download|files|sequential|stream)
+        status|pause|resume|remove|open|download|files|sequential|stream|subs)
             ids=(${(f)"$( { shoal status 2>/dev/null | awk 'NR>1{print $1}'; shoal history 2>/dev/null | awk 'NR>1{print $1}'; } | sort -u )"})
             compadd -- $ids
             # download also accepts a path to a local .torrent file
@@ -82,8 +82,8 @@ compdef _shoal shoal
 `
 
 const fishCompletion = `# fish completion for shoal
-complete -c shoal -f -n __fish_use_subcommand -a 'sources search download files sequential stream status history pause resume remove open daemon skill update version help completion'
-complete -c shoal -f -n '__fish_seen_subcommand_from status pause resume remove open files sequential stream' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
+complete -c shoal -f -n __fish_use_subcommand -a 'sources search download files sequential stream status history pause resume remove subs open daemon skill update version help completion'
+complete -c shoal -f -n '__fish_seen_subcommand_from status pause resume remove open files sequential stream subs' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
 # download also accepts a local .torrent path, so leave file completion on (no -f)
 complete -c shoal -n '__fish_seen_subcommand_from download' -a '(begin; shoal status 2>/dev/null | awk \'NR>1{print $1}\'; shoal history 2>/dev/null | awk \'NR>1{print $1}\'; end | sort -u)'
 complete -c shoal -f -n '__fish_seen_subcommand_from history' -a 'rm clear'

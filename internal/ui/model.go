@@ -1572,6 +1572,11 @@ func (m *Model) activate() tea.Cmd {
 			return nil
 		}
 		// Text setting: open the inline editor seeded with the current value.
+		// The API key stays hidden while typing (the pane masks it when idle).
+		m.setInput.EchoMode = textinput.EchoNormal
+		if it.label == "OS API key" {
+			m.setInput.EchoMode = textinput.EchoPassword
+		}
 		m.editingSetting = true
 		m.setInput.SetValue(it.get(m))
 		m.setInput.CursorEnd()
@@ -1683,6 +1688,24 @@ func settingItems() []setItem {
 				return "off"
 			},
 			set: func(m *Model, v string) { m.cfg.AutoUpdate = v == "on" }},
+		{group: "SUBTITLES", label: "OS API key", kind: kindText,
+			get: func(m *Model) string { return m.cfg.OpenSubsAPIKey },
+			set: func(m *Model, v string) { m.cfg.OpenSubsAPIKey = v }},
+		{group: "SUBTITLES", label: "Subs lang", kind: kindText,
+			get: func(m *Model) string { return m.cfg.SubsLang },
+			set: func(m *Model, v string) {
+				if v != "" {
+					m.cfg.SubsLang = v
+				}
+			}},
+		{group: "SUBTITLES", label: "Auto subs", kind: kindEnum, options: []string{"on", "off"},
+			get: func(m *Model) string {
+				if m.cfg.SubsAuto {
+					return "on"
+				}
+				return "off"
+			},
+			set: func(m *Model, v string) { m.cfg.SubsAuto = v == "on" }},
 	}
 	for _, s := range source.DefaultSources() {
 		name := s.Name() // capture per iteration (avoid the loop-variable closure bug)

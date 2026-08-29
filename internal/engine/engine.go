@@ -103,6 +103,10 @@ type Config struct {
 	// MaxActive caps concurrently-downloading torrents; extras are queued and
 	// promoted (FIFO by add time) as slots free. 0 = unlimited.
 	MaxActive int
+
+	OpenSubsAPIKey string // OpenSubtitles.com API key; "" disables auto-fetch
+	SubsLang       string // subtitle language code to auto-fetch
+	SubsAuto       bool   // auto-fetch subtitles for qualifying video files on download completion
 }
 
 // Engine adds torrents and reports their live status.

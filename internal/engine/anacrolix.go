@@ -23,7 +23,35 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"github.com/StrangeNoob/shoal/internal/queue"
+	"github.com/StrangeNoob/shoal/internal/subtitles"
 )
+
+// SubsMinVideoBytes is the minimum file size the default subtitle rule treats
+// as a real video — filters out samples, extras, and thumbnails that share a
+// video extension. Exported so cmd/shoal's `subs` CLI command shares this one
+// rule instead of duplicating it; a var (not const) so tests — here and in
+// cmd/shoal — can shrink it instead of hashing a real 100 MiB fixture file.
+var SubsMinVideoBytes = int64(100) << 20
+
+// subsVideoExts are the file extensions the default subtitle rule considers a
+// video file.
+var subsVideoExts = map[string]bool{
+	".mkv": true, ".mp4": true, ".avi": true, ".webm": true, ".mov": true, ".m4v": true,
+}
+
+// IsSubsCandidate reports whether path qualifies for the default subtitle
+// fetch rule: a known video extension and at least SubsMinVideoBytes. Shared
+// by the daemon's on-completion auto-fetch hook (fetchSubsForFiles below) and
+// the `shoal subs` CLI command's default file-selection rule.
+func IsSubsCandidate(path string, size int64) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return subsVideoExts[ext] && size >= SubsMinVideoBytes
+}
+
+// subsFetch is a seam over subtitles.Fetch so tests never do HTTP.
+var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+	return subtitles.Fetch(subtitles.NewDefaultClient(apiKey), videoPath, lang)
+}
 
 // Anacrolix implements Engine on top of anacrolix/torrent — a mature, full
 // BitTorrent stack (DHT, magnet/BEP-9 metadata, UDP trackers, web seeds,
@@ -55,6 +83,11 @@ type Anacrolix struct {
 	maxConns   int
 	maxActive  int
 	store      *queue.Store
+
+	openSubsAPIKey string
+	subsLang       string
+	subsAuto       bool
+	subsFetched    map[metainfo.Hash]bool // guards at-most-once auto-fetch per torrent per daemon run
 }
 
 // rateLimiter builds a token-bucket limiter for bytesPerSec (> 0). The burst is
@@ -135,6 +168,11 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		queued:     map[metainfo.Hash]bool{},
 		maxConns:   maxConnsFor(c.MaxPeers),
 		maxActive:  c.MaxActive,
+
+		openSubsAPIKey: c.OpenSubsAPIKey,
+		subsLang:       c.SubsLang,
+		subsAuto:       c.SubsAuto,
+		subsFetched:    map[metainfo.Hash]bool{},
 	}
 	if c.QueuePath != "" {
 		a.store = queue.LoadFrom(c.QueuePath)
@@ -144,6 +182,13 @@ func NewAnacrolix(c Config) (*Anacrolix, error) {
 		go a.seedRatioLoop(10 * time.Second)
 	}
 	go a.queueLoop(3 * time.Second) // also drives periodic sequential-mode re-planning
+	if c.SubsAuto && c.OpenSubsAPIKey != "" {
+		// wg-tracked: subsLoop spawns wg-tracked fetch workers, and WaitGroup's
+		// contract requires those Adds to happen while the counter is held —
+		// tracking the loop itself guarantees Close's Wait can't pass first.
+		a.wg.Add(1)
+		go a.subsLoop(5 * time.Second)
+	}
 	return a, nil
 }
 
@@ -268,6 +313,84 @@ func (a *Anacrolix) enforceSeedRatio() {
 		if reachedRatio(uploaded, info.TotalLength(), a.seedRatio) {
 			// Drop peers so it stops uploading; idempotent to call repeatedly.
 			t.SetMaxEstablishedConns(0)
+		}
+	}
+}
+
+// subsLoop periodically checks for newly-completed torrents to auto-fetch
+// subtitles for, until Close signals done.
+func (a *Anacrolix) subsLoop(interval time.Duration) {
+	defer a.wg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.done:
+			return
+		case <-ticker.C:
+			a.checkSubsCompletion()
+		}
+	}
+}
+
+// checkSubsCompletion fetches subtitles for every newly-completed torrent's
+// qualifying video files, at most once per torrent per daemon run
+// (subsFetched guards it). One goroutine is spawned per newly-completed
+// torrent so a slow fetch never blocks the caller; files within it are
+// fetched serially.
+func (a *Anacrolix) checkSubsCompletion() {
+	if !a.subsAuto || a.openSubsAPIKey == "" {
+		return
+	}
+	a.mu.Lock()
+	var newlyDone []*torrent.Torrent
+	for _, t := range a.client.Torrents() {
+		h := t.InfoHash()
+		if a.subsFetched[h] || !t.Complete().Bool() {
+			continue
+		}
+		a.subsFetched[h] = true
+		newlyDone = append(newlyDone, t)
+	}
+	apiKey, lang, dataDir := a.openSubsAPIKey, a.subsLang, a.dataDir
+	a.mu.Unlock()
+
+	for _, t := range newlyDone {
+		// wg-tracked so Close waits for in-flight fetches: no fetch outlives the
+		// engine, and tests can restore swapped seams safely after Close.
+		files := t.Files()
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			fetchSubsForFiles(apiKey, lang, dataDir, files)
+		}()
+	}
+}
+
+// fetchSubsForFiles fetches subtitles for each qualifying, selected video
+// file (right extension, at least SubsMinVideoBytes) serially, skipping files
+// whose .srt is already on disk. Deselected files (PiecePriorityNone) are
+// skipped — they were never downloaded, so fetching a subtitle for one would
+// write an orphaned .srt next to nothing.
+// Failures are logged and never affect torrent state — subtitles never block
+// or fail a download.
+func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
+	for _, f := range files {
+		if f.Priority() == torrent.PiecePriorityNone {
+			continue
+		}
+		if !IsSubsCandidate(f.DisplayPath(), f.Length()) {
+			continue
+		}
+		path := filepath.Join(dataDir, filepath.FromSlash(f.Path()))
+		// The written .srt is the record of a past fetch — subsFetched is
+		// memory-only, so without this every restored complete torrent would
+		// refetch on restart, overwriting subtitles and burning API quota.
+		if _, err := os.Stat(subtitles.SrtPath(path, lang)); err == nil {
+			continue
+		}
+		if _, err := subsFetch(apiKey, path, lang); err != nil {
+			slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
 		}
 	}
 }
@@ -532,25 +655,27 @@ func (a *Anacrolix) SetFileGlobs(infoHash string, globs []string) error {
 
 // applyFileSelection deselects files per the torrent's persisted FileGlobs
 // (resolved once, then cleared) or its persisted Deselected set (restart path).
+// Only that deselect list depends on the store: the per-file priority loop
+// always runs, because DownloadAll raises piece priorities without touching
+// each File's own priority — which stays at the zero value PiecePriorityNone
+// until something calls Download(). Skipping the loop (no store, or an entry
+// not upserted yet) would leave every file reading "deselected".
 func (a *Anacrolix) applyFileSelection(t *torrent.Torrent) {
-	if a.store == nil {
-		return
-	}
-	hash := t.InfoHash().HexString()
-	entry, ok := a.store.Get(hash)
-	if !ok {
-		return
-	}
 	var deselect []string
-	if len(entry.FileGlobs) > 0 {
-		var paths []string
-		for _, f := range t.Files() {
-			paths = append(paths, f.DisplayPath())
+	if a.store != nil {
+		hash := t.InfoHash().HexString()
+		if entry, ok := a.store.Get(hash); ok {
+			if len(entry.FileGlobs) > 0 {
+				var paths []string
+				for _, f := range t.Files() {
+					paths = append(paths, f.DisplayPath())
+				}
+				deselect = resolveDeselected(paths, entry.FileGlobs)
+				a.store.SetFileGlobs(hash, nil) // resolved once
+			} else {
+				deselect = entry.Deselected
+			}
 		}
-		deselect = resolveDeselected(paths, entry.FileGlobs)
-		a.store.SetFileGlobs(hash, nil) // resolved once
-	} else {
-		deselect = entry.Deselected
 	}
 	off := make(map[string]bool, len(deselect))
 	for _, p := range deselect {
@@ -831,8 +956,12 @@ func removeUnderDir(dir, name string) error {
 }
 
 func (a *Anacrolix) Close() error {
-	a.closeOnce.Do(func() { close(a.done) }) // stop the loops + signal restore/track goroutines; safe if called twice
-	a.wg.Wait()                              // no store writes or torrent access may outlive Close
-	a.client.Close()
+	// The whole teardown is once-guarded so a second Close (e.g. an explicit
+	// call plus a test Cleanup) can't double-close the client.
+	a.closeOnce.Do(func() {
+		close(a.done) // stop the loops + signal restore/track/fetch goroutines
+		a.wg.Wait()   // no store writes, fetches, or torrent access may outlive Close
+		a.client.Close()
+	})
 	return nil
 }
