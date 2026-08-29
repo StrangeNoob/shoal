@@ -130,6 +130,10 @@ func TestDownloadFlow(t *testing.T) {
 			if got := r.Header.Get("Content-Type"); got != "application/json" {
 				t.Errorf("Content-Type = %q, want application/json", got)
 			}
+			// The live gateway 503s requests without an Accept header.
+			if got := r.Header.Get("Accept"); got != "application/json" {
+				t.Errorf("Accept = %q, want application/json", got)
+			}
 			var reqBody struct {
 				FileID int64 `json:"file_id"`
 			}
