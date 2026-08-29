@@ -606,7 +606,7 @@ func TestSetSequentialUnknownHashErrors(t *testing.T) {
 
 // addSequentialTestTorrent adds a real multi-piece torrent and returns the
 // engine, its hex infohash and the live *torrent.Torrent once its files are
-// selected (DownloadAll runs asynchronously on GotInfo).
+// selected (applyFileSelection runs asynchronously on GotInfo).
 func addSequentialTestTorrent(t *testing.T) (*Anacrolix, string, *torrent.Torrent) {
 	t.Helper()
 	dir := t.TempDir()
@@ -716,6 +716,111 @@ func TestSetFilesDeselectClearsPieceBumps(t *testing.T) {
 	}
 	if got := maxPiecePriority(tt); got > torrent.PiecePriorityNone {
 		t.Fatalf("max piece priority after deselecting the only file = %v, want None", got)
+	}
+}
+
+// Deselecting a file must drop its pieces' effective priority to None even
+// outside sequential mode (#44): track() used to call t.DownloadAll(), which
+// raises every piece's priority to Normal regardless of file selection —
+// since effective priority is max(file, piece), that floor could outlive a
+// deselected file's own None if nothing ever lowered it back down. Files are
+// sized as exact multiples of the piece length so no piece is shared between
+// them — an unambiguous per-file read of t.PieceState(i).Priority (effective
+// priority: max of file, piece, and reader priority, per anacrolix's
+// Piece.purePriority).
+func TestDeselectDropsPiecePriorityToNone(t *testing.T) {
+	pieceLen := 16384
+	keep := bytes.Repeat([]byte{'A'}, pieceLen*4)
+	skip := bytes.Repeat([]byte{'B'}, pieceLen*4)
+
+	src := t.TempDir()
+	root := filepath.Join(src, "Movie")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.mkv"), keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.mkv"), skip, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := buildTorrentBytesDir(t, root)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	eng, err := NewAnacrolix(Config{DataDir: dir, QueuePath: filepath.Join(dir, "queue.json")})
+	if err != nil {
+		t.Skipf("cannot start torrent client in this environment: %v", err)
+	}
+	t.Cleanup(func() { eng.Close() })
+
+	if err := eng.AddTorrentURL(srv.URL, "Movie"); err != nil {
+		t.Fatalf("AddTorrentURL: %v", err)
+	}
+	waitMeta(t, eng)
+	h := eng.Statuses()[0].InfoHash
+	waitAllSelected(t, eng, h) // both files selected before we deselect one
+
+	if err := eng.SetFiles(h, []string{"skip.mkv"}, false); err != nil {
+		t.Fatalf("SetFiles(deselect): %v", err)
+	}
+
+	tt, _, ok := eng.torrentByHash(h)
+	if !ok {
+		t.Fatal("torrent vanished")
+	}
+	var keepFile, skipFile *torrent.File
+	for _, f := range tt.Files() {
+		switch f.DisplayPath() {
+		case "keep.mkv":
+			keepFile = f
+		case "skip.mkv":
+			skipFile = f
+		}
+	}
+	if keepFile == nil || skipFile == nil {
+		t.Fatalf("expected files not found: %+v", tt.Files())
+	}
+
+	// Effective priority reads back None per-piece until that piece's storage
+	// completion is cached (async after add, and per-piece — same gotcha
+	// addSequentialTestTorrent waits out), so wait for every one of keep.mkv's
+	// pieces individually before asserting on them.
+	waitPieceRangeAtLeast(t, tt, keepFile.BeginPieceIndex(), keepFile.EndPieceIndex(), torrent.PiecePriorityNormal)
+
+	for i := skipFile.BeginPieceIndex(); i < skipFile.EndPieceIndex(); i++ {
+		if p := tt.PieceState(i).Priority; p != torrent.PiecePriorityNone {
+			t.Errorf("deselected file piece %d priority = %v, want None", i, p)
+		}
+	}
+	for i := keepFile.BeginPieceIndex(); i < keepFile.EndPieceIndex(); i++ {
+		if p := tt.PieceState(i).Priority; p < torrent.PiecePriorityNormal {
+			t.Errorf("selected sibling file piece %d priority = %v, want >= Normal", i, p)
+		}
+	}
+}
+
+// waitPieceRangeAtLeast blocks until every piece in [begin, end) reads back at
+// least want, or the deadline passes (in which case the caller's own
+// assertions report exactly which pieces are still lagging).
+func waitPieceRangeAtLeast(t *testing.T, tt *torrent.Torrent, begin, end int, want torrent.PiecePriority) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		allReady := true
+		for i := begin; i < end; i++ {
+			if tt.PieceState(i).Priority < want {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
