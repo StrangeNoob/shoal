@@ -137,7 +137,14 @@ func runStream(args []string, out io.Writer) int {
 		}
 	}
 	fmt.Fprint(os.Stderr, "\r\033[K")
-	fmt.Fprintln(out, filePathFor(st, det.Files, target))
+	path := engine.AbsFilePath(st.Path, det.Files, target)
+	if path == "" {
+		// target.Path is raw torrent metadata (DisplayPath does no
+		// sanitizing) — a crafted "../" entry must never reach a player.
+		fmt.Fprintln(os.Stderr, "shoal stream: unsafe path (escapes torrent directory):", target.Path)
+		return 1
+	}
+	fmt.Fprintln(out, path)
 	return 0
 }
 
@@ -253,29 +260,4 @@ func findStreamStatus(statuses []engine.Status, infoHash string) (engine.Status,
 		}
 	}
 	return engine.Status{}, false
-}
-
-// filePathFor resolves the absolute on-disk path of file f within the torrent
-// described by st.
-//
-// Ground truth (anacrolix/torrent storage/file-client.go, NewFileOpts'
-// default FilePathMaker): every file's real path is
-// filepath.Join(dataDir, info.BestName(), file.BestPath()...). For a
-// multi-file torrent, file.BestPath() is the file's path *within* the
-// torrent, and info.BestName() is the torrent's directory — exactly
-// Status.Path (built the same way in anacrolix.go) — so joining Status.Path
-// with FileDetail.Path (multi-file DisplayPath == strings.Join(BestPath, "/"))
-// reproduces it. For a single-file torrent there is no subdirectory:
-// file.BestPath() is empty, so the real path is just dataDir/info.BestName()
-// == Status.Path — but FileDetail.Path there is DisplayPath's single-file
-// case, which returns info.BestName() itself (the same string, not empty).
-// Joining Status.Path with that would duplicate the trailing component, so
-// detect single-file torrents (exactly one file, whose path equals the
-// basename of Status.Path — an identity guaranteed by both being
-// info.BestName(), not a coincidence) and use Status.Path as-is.
-func filePathFor(st engine.Status, files []engine.FileDetail, f engine.FileDetail) string {
-	if len(files) == 1 && filepath.FromSlash(f.Path) == filepath.Base(st.Path) {
-		return st.Path
-	}
-	return filepath.Join(st.Path, filepath.FromSlash(f.Path))
 }

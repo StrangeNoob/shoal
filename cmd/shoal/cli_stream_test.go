@@ -231,6 +231,25 @@ func TestStreamAbsolutePathMultiFileTorrent(t *testing.T) {
 	}
 }
 
+// A crafted "../" FileDetail.Path (raw torrent metadata) must not be printed
+// to stdout — engine.AbsFilePath returns "" for it, and runStream must error
+// out instead of handing players an escaped path.
+func TestStreamAbsolutePathEscapeErrors(t *testing.T) {
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: streamIH, Path: "/data/MyShow"}},
+		detail:   engine.Detail{Files: []engine.FileDetail{readyFile("../../evil.mkv", 10)}},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	if code := runStream([]string{streamIH}, &buf); code == 0 {
+		t.Fatalf("exit = 0, want non-zero: target path escapes the torrent directory")
+	}
+	if buf.String() != "" {
+		t.Fatalf("stdout = %q, want empty on an unsafe path", buf.String())
+	}
+}
+
 // TestStreamWaitsForMagnetMetadata covers a freshly-added magnet: the engine
 // fetches metadata in the background, so the first several Detail calls have
 // no files yet. `stream` must poll until files show up rather than

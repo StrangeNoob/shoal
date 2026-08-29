@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/StrangeNoob/shoal/internal/config"
 	"github.com/StrangeNoob/shoal/internal/daemon"
@@ -58,7 +57,13 @@ func runSubs(args []string, out io.Writer) int {
 		}
 		ok := 0
 		for _, f := range targets {
-			path := subsFilePath(s.Path, det.Files, f)
+			path := engine.AbsFilePath(s.Path, det.Files, f)
+			if path == "" {
+				// FileDetail.Path is raw torrent metadata (DisplayPath does no
+				// sanitizing) — a crafted "../" entry must never be fetched.
+				fmt.Fprintf(os.Stderr, "shoal subs: %s: unsafe path (escapes torrent directory)\n", f.Path)
+				continue
+			}
 			srt, err := subsFetch(cfg.OpenSubsAPIKey, path, useLang)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "shoal subs: %s: %v\n", f.Path, err)
@@ -101,23 +106,4 @@ func subsTargetFiles(files []engine.FileDetail, globs []string) []engine.FileDet
 		}
 	}
 	return out
-}
-
-// subsFilePath resolves a file's absolute on-disk path from Status.Path
-// (<data dir>/<torrent name>) and a FileDetail.Path from Detail(), which
-// comes from anacrolix's File.DisplayPath(). DisplayPath is documented as
-// "the relative file path for a multi-file torrent, and the torrent name for
-// a single-file torrent" — so for a true single-file torrent, FileDetail.Path
-// duplicates the torrent name already baked into Status.Path (they're the
-// same string), and the file's absolute path is Status.Path itself. A
-// directory-mode torrent that happens to contain exactly one file looks
-// similar (len(allFiles)==1) but its one file's DisplayPath is relative to
-// the directory, not equal to the directory's own name — so the single-file
-// shortcut only applies when that equality actually holds; otherwise this
-// falls through to the multi-file join.
-func subsFilePath(statusPath string, allFiles []engine.FileDetail, f engine.FileDetail) string {
-	if len(allFiles) == 1 && f.Path == filepath.Base(statusPath) {
-		return statusPath
-	}
-	return filepath.Join(statusPath, filepath.FromSlash(f.Path))
 }
