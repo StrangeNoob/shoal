@@ -418,6 +418,10 @@ func clickAt(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: y}
 }
 
+func rightClickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress, X: x, Y: y}
+}
+
 // lineOf returns the 0-based screen row of the first rendered line containing s.
 func lineOf(view, s string) int {
 	for i, ln := range strings.Split(view, "\n") {
@@ -604,6 +608,153 @@ func TestClickSelectsSeedingRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.seedCursor != 1 {
 		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
+// --- context menu ------------------------------------------------------------
+
+func TestRightClickOpensResultMenu(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a result row should open the menu")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("right-click should also select the row, cursor=%d, want 1", m.cursor)
+	}
+	wantLabels := []string{"Download", "Details", "Copy magnet"}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+	view := m.View()
+	for _, want := range []string{"Download", "Details", "Copy magnet"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("menu overlay should show %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRightClickEmptySpaceInert(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{})) // home screen, no results yet
+	m, _ = update(m, rightClickAt(sidebarWidth+3, 10))
+	if m.menuOpen {
+		t.Fatal("right-click on empty space should not open the menu")
+	}
+}
+
+func TestMenuArrowsAndEnterRunsDownload(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha", TorrentURL: "u1"}}}
+	eng := &fakeEngine{}
+	m := ready(New(src, eng))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	if m.menuCursor != 0 {
+		t.Fatalf("menuCursor = %d, want 0 (Download)", m.menuCursor)
+	}
+	// down then up should be a no-op round trip, still on Download.
+	m, _ = update(m, key("down"))
+	if m.menuCursor != 1 {
+		t.Fatalf("menuCursor after down = %d, want 1", m.menuCursor)
+	}
+	m, _ = update(m, key("up"))
+	if m.menuCursor != 0 {
+		t.Fatalf("menuCursor after up = %d, want 0", m.menuCursor)
+	}
+
+	m, cmd = update(m, key("enter"))
+	if m.menuOpen {
+		t.Fatal("enter should run the item and close the menu")
+	}
+	if cmd == nil {
+		t.Fatal("running Download should return a command")
+	}
+	cmd()
+	if eng.addedURL != "u1" {
+		t.Errorf("engine addedURL = %q, want u1 (Download menu item didn't call addCmd)", eng.addedURL)
+	}
+}
+
+func TestMenuEscCloses(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	m, _ = update(m, key("esc"))
+	if m.menuOpen {
+		t.Fatal("esc should close the menu")
+	}
+}
+
+func TestMenuClickOutsideCloses(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	// Well outside the overlay: top-left corner, inside the sidebar column.
+	m, _ = update(m, clickAt(1, 1))
+	if m.menuOpen {
+		t.Fatal("a left-click outside the menu should close it")
+	}
+}
+
+func TestMenuSuspendsPaneKeys(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	m, _ = update(m, key("/"))
+	if m.editing {
+		t.Fatal("'/' should be suspended while the menu is open")
+	}
+	if !m.menuOpen {
+		t.Fatal("menu should still be open — '/' must not close it either")
 	}
 }
 

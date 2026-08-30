@@ -38,7 +38,7 @@ func (m Model) View() string {
 	body := m.renderBody(bodyH)
 	footer := m.renderFooter()
 
-	return strings.Join([]string{header, rule, body, rule, footer}, "\n")
+	return m.spliceMenu(strings.Join([]string{header, rule, body, rule, footer}, "\n"))
 }
 
 func (m Model) renderBody(h int) string {

@@ -559,6 +559,15 @@ func TestViewFitsHeight(t *testing.T) {
 			m.statuses = downloadsFixture(2)
 			return m
 		}},
+		{"search, context menu open", 21, func(m Model) Model {
+			m.section = sectionSearch
+			m.hasSearched = true
+			m.results = []source.Result{{Title: "Alpha"}}
+			m.menuOpen = true
+			m.menuItems = searchRowMenuItems()
+			m.menuRow, m.menuCol = 10, 25
+			return m
+		}},
 	}
 
 	for _, tc := range cases {

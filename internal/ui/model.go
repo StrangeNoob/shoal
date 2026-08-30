@@ -80,6 +80,15 @@ type Model struct {
 	lastClickX, lastClickY int
 	lastClickAt            time.Time
 
+	// Context menu (right-click on a Search result row — see menu.go).
+	// menuRow/menuCol anchor the overlay at the click that (re-)opened it;
+	// menuGeometry clamps them to the frame so the box never runs off-screen.
+	menuOpen   bool
+	menuItems  []menuItem
+	menuCursor int
+	menuRow    int
+	menuCol    int
+
 	showDlDetail bool          // Downloads pane: the active-download details screen
 	dlDetail     engine.Detail // fetched per-file progress + trackers
 	dlDetailName string        // display name of the torrent the detail is for
@@ -947,6 +956,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.menuOpen {
+		return m.handleMenuKey(msg)
+	}
+
 	if m.showHelp {
 		switch msg.String() {
 		case "?", "esc", "q":
@@ -1026,11 +1039,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showDetail = false
 			return m, addCmd(m.eng, m.detail)
 		case "y":
-			if err := copyToClipboard(m.detail.Magnet); err != nil {
-				m.setError("Copy failed: " + err.Error())
-			} else {
-				m.setNotice("Magnet copied.")
-			}
+			m.copyMagnet(m.detail.Magnet)
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
@@ -1112,10 +1121,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "d":
 		if m.section == sectionSearch {
-			fr := m.filteredResults()
-			if len(fr) > 0 && m.cursor < len(fr) {
-				return m, addCmd(m.eng, fr[m.cursor])
-			}
+			return m, m.downloadSelected()
 		}
 		return m, nil
 	case "x":
@@ -1397,11 +1403,16 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.editing || m.editingSetting {
 		return m, nil
 	}
+	if m.menuOpen {
+		return m.handleMenuMouse(msg)
+	}
 	switch {
 	case msg.Button == tea.MouseButtonWheelUp:
 		m.moveUp()
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
+	case msg.Button == tea.MouseButtonRight && msg.Action == tea.MouseActionPress:
+		return m.openResultMenu(msg.X, msg.Y)
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		var cmd tea.Cmd
 		if m.showDlDetail {
@@ -1779,16 +1790,46 @@ func (m *Model) toggleSelectedFile() tea.Cmd {
 	}
 }
 
+// downloadSelected adds the currently selected Search result to the download
+// queue. This is the exact action the 'd' key runs in the Search pane — also
+// dispatched into by the result row's context-menu "Download" item.
+func (m *Model) downloadSelected() tea.Cmd {
+	fr := m.filteredResults()
+	if len(fr) > 0 && m.cursor < len(fr) {
+		return addCmd(m.eng, fr[m.cursor])
+	}
+	return nil
+}
+
+// openDetail opens the details overlay for the currently selected Search
+// result. This is the exact action 'enter' runs on a Search row (see
+// activate) — also dispatched into by the result row's context-menu
+// "Details" item.
+func (m *Model) openDetail() {
+	fr := m.filteredResults()
+	if len(fr) > 0 && m.cursor < len(fr) {
+		m.showDetail = true
+		m.detail = fr[m.cursor]
+	}
+}
+
+// copyMagnet copies magnet to the system clipboard, setting the same
+// notice/error the Search-detail 'y' key sets. Also dispatched into by the
+// result row's context-menu "Copy magnet" item.
+func (m *Model) copyMagnet(magnet string) {
+	if err := copyToClipboard(magnet); err != nil {
+		m.setError("Copy failed: " + err.Error())
+	} else {
+		m.setNotice("Magnet copied.")
+	}
+}
+
 // activate handles enter in command mode: download in Search, edit/cycle in
 // Settings.
 func (m *Model) activate() tea.Cmd {
 	switch m.section {
 	case sectionSearch:
-		fr := m.filteredResults()
-		if len(fr) > 0 && m.cursor < len(fr) {
-			m.showDetail = true
-			m.detail = fr[m.cursor]
-		}
+		m.openDetail()
 		return nil
 	case sectionDownloads:
 		ds := m.downloading()
