@@ -114,9 +114,9 @@ func TestTruncateLeft(t *testing.T) {
 		// Cell-aware: CJK runes are two terminal cells wide, so budgets are
 		// display width, not rune count — a wide-char path must never render
 		// wider than n cells (settings hit-testing depends on one-line rows).
-		{"日本語", 10, "日本語"},   // width 6 fits in 10
+		{"日本語", 10, "日本語"},     // width 6 fits in 10
 		{"日本語abc", 6, "…語abc"}, // "…"(1)+"語"(2)+"abc"(3) = 6 cells
-		{"日本語", 3, "…語"},      // ellipsis + one wide rune = 3 cells
+		{"日本語", 3, "…語"},       // ellipsis + one wide rune = 3 cells
 	}
 	for _, c := range cases {
 		got := truncateLeft(c.in, c.n)
