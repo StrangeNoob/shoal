@@ -5,6 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/StrangeNoob/shoal/internal/engine"
 )
 
 // menuItem is one row of the context menu: a label, the keyboard shortcut
@@ -33,6 +35,81 @@ func searchRowMenuItems() []menuItem {
 			if len(fr) > 0 && m.cursor < len(fr) {
 				m.copyMagnet(fr[m.cursor].Magnet)
 			}
+			return *m, nil
+		}},
+	}
+}
+
+// downloadsRowMenuItems is the context menu opened by right-clicking a
+// Downloads row. Every action re-reads the current selection from the model
+// at run time (dlCursor into downloading()) rather than closing over s, so it
+// can't act on a stale row if the list changes while the menu is open — s is
+// used only to label the state-dependent items as they stood at open time.
+func downloadsRowMenuItems(s engine.Status) []menuItem {
+	pauseLabel := "Pause"
+	if s.Paused {
+		pauseLabel = "Resume"
+	}
+	seqLabel := "Sequential on"
+	if s.Sequential {
+		seqLabel = "Sequential off"
+	}
+	return []menuItem{
+		{label: pauseLabel, key: "p", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.pauseSelected()
+		}},
+		{label: "Details", key: "enter", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.activate()
+		}},
+		{label: "Open folder", key: "o", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.openCurrentSelection()
+		}},
+		{label: seqLabel, key: "s", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.toggleSequential()
+		}},
+		{label: "Move up", key: "[", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.reorderSelected(-1)
+		}},
+		{label: "Move down", key: "]", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.reorderSelected(1)
+		}},
+		{label: "Cancel...", key: "x", do: func(m *Model) (tea.Model, tea.Cmd) {
+			m.openRemoveConfirm()
+			return *m, nil
+		}},
+	}
+}
+
+// seedingRowMenuItems is the context menu opened by right-clicking an active
+// Seeding row (a HISTORY row gets historyRowMenuItems instead).
+func seedingRowMenuItems(s engine.Status) []menuItem {
+	pauseLabel := "Pause"
+	if s.Paused {
+		pauseLabel = "Resume"
+	}
+	return []menuItem{
+		{label: pauseLabel, key: "p", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.pauseSelected()
+		}},
+		{label: "Open", key: "o", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.openCurrentSelection()
+		}},
+		{label: "Stop seeding...", key: "x", do: func(m *Model) (tea.Model, tea.Cmd) {
+			m.openRemoveConfirm()
+			return *m, nil
+		}},
+	}
+}
+
+// historyRowMenuItems is the context menu opened by right-clicking a
+// Seeding-pane HISTORY row.
+func historyRowMenuItems() []menuItem {
+	return []menuItem{
+		{label: "Open", key: "o", do: func(m *Model) (tea.Model, tea.Cmd) {
+			return *m, m.openCurrentSelection()
+		}},
+		{label: "Remove...", key: "x", do: func(m *Model) (tea.Model, tea.Cmd) {
+			m.openRemoveConfirm()
 			return *m, nil
 		}},
 	}
@@ -120,6 +197,58 @@ func (m Model) openResultMenu(x, y int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openDownloadsRowMenu opens (or re-anchors) the Downloads row menu at
+// (x, y): it shares clickSelect's row hit-testing, so a click target can't
+// drift from what's drawn, and selects the row the same way a left-click
+// would. A miss is inert — the menu, if already open, is left exactly as it
+// was.
+func (m Model) openDownloadsRowMenu(x, y int) (tea.Model, tea.Cmd) {
+	if m.section != sectionDownloads || !m.clickSelect(x, y) {
+		return m, nil
+	}
+	m.menuOpen = true
+	m.menuCursor = 0
+	m.menuRow, m.menuCol = y, x
+	m.menuItems = downloadsRowMenuItems(m.downloading()[m.dlCursor])
+	return m, nil
+}
+
+// openSeedingRowMenu opens (or re-anchors) the Seeding-pane row menu at
+// (x, y) — an active seeder gets seedingRowMenuItems, a HISTORY row gets
+// historyRowMenuItems. Shares clickSelect the same way openDownloadsRowMenu
+// does; a miss is inert.
+func (m Model) openSeedingRowMenu(x, y int) (tea.Model, tea.Cmd) {
+	if m.section != sectionSeeding || !m.clickSelect(x, y) {
+		return m, nil
+	}
+	ss := m.seeding()
+	if m.seedCursor < len(ss) {
+		m.menuItems = seedingRowMenuItems(ss[m.seedCursor])
+	} else {
+		m.menuItems = historyRowMenuItems()
+	}
+	m.menuOpen = true
+	m.menuCursor = 0
+	m.menuRow, m.menuCol = y, x
+	return m, nil
+}
+
+// openRowMenu opens (or re-anchors) the right-click context menu for
+// whichever pane is active — Search results, Downloads, or Seeding
+// (including its HISTORY rows). Any other pane, or a click that doesn't land
+// on a row, is inert.
+func (m Model) openRowMenu(x, y int) (tea.Model, tea.Cmd) {
+	switch m.section {
+	case sectionSearch:
+		return m.openResultMenu(x, y)
+	case sectionDownloads:
+		return m.openDownloadsRowMenu(x, y)
+	case sectionSeeding:
+		return m.openSeedingRowMenu(x, y)
+	}
+	return m, nil
+}
+
 // handleMenuKey handles input while the context menu is open: ↑/↓ move the
 // highlighted item, enter dispatches into it (closing the menu first), esc
 // closes without running anything. Every other key is suspended — the menu
@@ -146,13 +275,13 @@ func (m Model) handleMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleMenuMouse handles a mouse event while the context menu is open: a
 // left-click on an item dispatches into it, elsewhere closes the menu; a
-// right-click re-anchors the menu at whatever Search row (if any) it lands
-// on, sharing openResultMenu with the path that first opens it. Anything
-// else (wheel, motion) is inert.
+// right-click re-anchors the menu at whatever row (if any) it lands on,
+// sharing openRowMenu with the path that first opens it. Anything else
+// (wheel, motion) is inert.
 func (m Model) handleMenuMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Button == tea.MouseButtonRight && msg.Action == tea.MouseActionPress:
-		return m.openResultMenu(msg.X, msg.Y)
+		return m.openRowMenu(msg.X, msg.Y)
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		if i, ok := m.menuItemAt(msg.X, msg.Y); ok {
 			it := m.menuItems[i]

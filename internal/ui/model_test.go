@@ -758,6 +758,201 @@ func TestMenuSuspendsPaneKeys(t *testing.T) {
 	}
 }
 
+func TestRightClickOpensDownloadsRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	y := lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a download row should open the menu")
+	}
+	if m.dlCursor != 0 {
+		t.Fatalf("right-click should also select the row, dlCursor=%d, want 0", m.dlCursor)
+	}
+	wantLabels := []string{"Pause", "Details", "Open folder", "Sequential on", "Move up", "Move down", "Cancel..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+}
+
+func TestDownloadsRowMenuLabelsReflectState(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10, Paused: true, Sequential: true},
+	}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuItems[0].label != "Resume" {
+		t.Errorf("paused download's Pause item label = %q, want %q", m.menuItems[0].label, "Resume")
+	}
+	if m.menuItems[3].label != "Sequential off" {
+		t.Errorf("sequential-on download's Sequential item label = %q, want %q", m.menuItems[3].label, "Sequential off")
+	}
+}
+
+func TestDownloadsMenuPauseRunsPauseToggleCmd(t *testing.T) {
+	eng := &fakeEngine{}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "DownloadOne", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 10}}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+
+	m, cmd := update(m, key("enter")) // Pause is item 0
+	if m.menuOpen {
+		t.Fatal("enter should run the item and close the menu")
+	}
+	if cmd == nil {
+		t.Fatal("running Pause should return a command")
+	}
+	cmd()
+	if !eng.paused["abc"] {
+		t.Fatal("Pause menu item didn't call pauseToggleCmd's path")
+	}
+}
+
+func TestDownloadsMenuCancelOpensConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "DownloadOne", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 10}}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	m.menuCursor = len(m.menuItems) - 1 // "Cancel..."
+
+	m, cmd := update(m, key("enter"))
+	if cmd != nil {
+		t.Fatal("Cancel... should not return a command directly — it opens the existing confirm flow")
+	}
+	if !m.cancelConfirm || m.cancelTarget.InfoHash != "abc" {
+		t.Fatalf("Cancel... should open the cancel confirm on abc, got confirm=%v target=%+v", m.cancelConfirm, m.cancelTarget)
+	}
+}
+
+func TestDownloadsRowMenuAnchorsInScrolledWindow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 9 // window start = dlCursor - visible + 1 = 9-3+1 = 7
+
+	y := lineOf(m.View(), "D7") // first visible row once scrolled
+	if y < 0 {
+		t.Fatal("first visible download (D7) not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on the first visible row should open the menu")
+	}
+	if m.dlCursor != 7 {
+		t.Fatalf("right-clicking the first visible row targeted dlCursor=%d, want 7 (window start)", m.dlCursor)
+	}
+}
+
+func TestRightClickOpensSeedingRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+	}
+	y := lineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("seeding row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a seeding row should open the menu")
+	}
+	if m.seedCursor != 0 {
+		t.Fatalf("right-click should also select the row, seedCursor=%d, want 0", m.seedCursor)
+	}
+	wantLabels := []string{"Pause", "Open", "Stop seeding..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+}
+
+func TestSeedingMenuPauseRunsPauseToggleCmd(t *testing.T) {
+	eng := &fakeEngine{}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	y := lineOf(m.View(), "SeedOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+
+	m, cmd := update(m, key("enter")) // Pause is item 0
+	if cmd == nil {
+		t.Fatal("running Pause should return a command")
+	}
+	cmd()
+	if !eng.paused["sh1"] {
+		t.Fatal("Pause menu item didn't call pauseToggleCmd's path")
+	}
+}
+
+func TestSeedingMenuStopOpensConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	y := lineOf(m.View(), "SeedOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	m.menuCursor = len(m.menuItems) - 1 // "Stop seeding..."
+
+	m, cmd := update(m, key("enter"))
+	if cmd != nil {
+		t.Fatal("Stop seeding... should not return a command directly — it opens the existing confirm flow")
+	}
+	if !m.stopConfirm || m.stopTarget.InfoHash != "sh1" {
+		t.Fatalf("Stop seeding... should open the stop confirm on sh1, got confirm=%v target=%+v", m.stopConfirm, m.stopTarget)
+	}
+}
+
+func TestRightClickOpensHistoryRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.history.Entries = []history.Entry{{InfoHash: "hh1", Name: "OldMovie"}}
+
+	y := lineOf(m.View(), "OldMovie")
+	if y < 0 {
+		t.Fatal("history row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a history row should open the menu")
+	}
+	wantLabels := []string{"Open", "Remove..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+
+	m.menuCursor = 1 // "Remove..."
+	m, _ = update(m, key("enter"))
+	if !m.histConfirm || m.histTarget.InfoHash != "hh1" {
+		t.Fatalf("Remove... should open the history confirm on hh1, got confirm=%v target=%+v", m.histConfirm, m.histTarget)
+	}
+}
+
 // --- sidebar clicks ----------------------------------------------------------
 
 func TestClickSidebarSwitchesSection(t *testing.T) {

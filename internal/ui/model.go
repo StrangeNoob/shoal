@@ -627,6 +627,98 @@ func pauseToggleCmd(eng engine.Engine, s engine.Status) tea.Cmd {
 	}
 }
 
+// pauseSelected pauses or resumes whatever is selected in Downloads or
+// Seeding — the action behind the 'p' key and both panes' "Pause"/"Resume"
+// context-menu item.
+func (m *Model) pauseSelected() tea.Cmd {
+	switch m.section {
+	case sectionDownloads:
+		ds := m.downloading()
+		if len(ds) > 0 && m.dlCursor < len(ds) {
+			return pauseToggleCmd(m.eng, ds[m.dlCursor])
+		}
+	case sectionSeeding:
+		ss := m.seeding()
+		if len(ss) > 0 && m.seedCursor < len(ss) {
+			return pauseToggleCmd(m.eng, ss[m.seedCursor])
+		}
+	}
+	return nil
+}
+
+// reorderSelected moves the selected download in the promotion queue
+// (delta<0 = sooner) — the action behind '[' / ']' and the Downloads menu's
+// "Move up" / "Move down" items.
+func (m *Model) reorderSelected(delta int) tea.Cmd {
+	if m.section != sectionDownloads {
+		return nil
+	}
+	ds := m.downloading()
+	if len(ds) == 0 || m.dlCursor >= len(ds) {
+		return nil
+	}
+	return reorderCmd(m.eng, ds[m.dlCursor], delta)
+}
+
+// toggleSequential flips sequential (streaming) mode on the selected
+// download — optimistic flip + revert-on-error, guarded against a
+// still-in-flight toggle. The action behind the 's' key and the Downloads
+// menu's "Sequential on"/"Sequential off" item.
+func (m *Model) toggleSequential() tea.Cmd {
+	if m.section != sectionDownloads {
+		return nil
+	}
+	ds := m.downloading()
+	if len(ds) == 0 || m.dlCursor >= len(ds) {
+		return nil
+	}
+	hash := ds[m.dlCursor].InfoHash
+	if _, ok := m.eng.(sequencer); !ok {
+		m.setError("sequential not supported by this engine")
+		return nil
+	}
+	if m.seqPending[hash] {
+		return nil // wait for the in-flight toggle to report back
+	}
+	for i := range m.statuses {
+		if m.statuses[i].InfoHash == hash {
+			m.statuses[i].Sequential = !m.statuses[i].Sequential
+			if m.seqPending == nil {
+				m.seqPending = map[string]bool{}
+			}
+			m.seqPending[hash] = true
+			return setSequentialCmd(m.eng, hash, m.statuses[i].Sequential)
+		}
+	}
+	return nil
+}
+
+// openRemoveConfirm opens whichever confirm modal fits the current
+// selection: the Downloads cancel confirm, the Seeding stop-seeding confirm,
+// or (for a HISTORY row) the remove-from-history confirm. The action behind
+// the 'x' key and each pane's "Cancel…"/"Stop seeding…"/"Remove…" menu item.
+func (m *Model) openRemoveConfirm() {
+	switch m.section {
+	case sectionDownloads:
+		ds := m.downloading()
+		if len(ds) > 0 && m.dlCursor < len(ds) {
+			m.cancelConfirm = true
+			m.cancelTarget = ds[m.dlCursor]
+		}
+	case sectionSeeding:
+		ss := m.seeding()
+		if len(ss) > 0 && m.seedCursor < len(ss) {
+			m.stopConfirm = true
+			m.stopTarget = ss[m.seedCursor]
+		} else if hist := m.seedHistory(); len(hist) > 0 {
+			if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
+				m.histConfirm = true
+				m.histTarget = hist[hi]
+			}
+		}
+	}
+}
+
 func removeCmd(eng engine.Engine, infoHash, name string, deleteData bool) tea.Cmd {
 	return func() tea.Msg {
 		err := eng.Remove(infoHash, deleteData)
@@ -1076,17 +1168,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case "[", "]":
 		// Reorder the selected download in the promotion queue (earlier / later).
-		if m.section == sectionDownloads {
-			ds := m.downloading()
-			if len(ds) > 0 && m.dlCursor < len(ds) {
-				delta := -1
-				if msg.String() == "]" {
-					delta = 1
-				}
-				return m, reorderCmd(m.eng, ds[m.dlCursor], delta)
-			}
+		delta := -1
+		if msg.String() == "]" {
+			delta = 1
 		}
-		return m, nil
+		return m, m.reorderSelected(delta)
 	case "f":
 		if m.section == sectionSearch {
 			m.editingFilter = true
@@ -1125,69 +1211,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "x":
-		switch m.section {
-		case sectionDownloads:
-			ds := m.downloading()
-			if len(ds) > 0 && m.dlCursor < len(ds) {
-				m.cancelConfirm = true
-				m.cancelTarget = ds[m.dlCursor]
-			}
-		case sectionSeeding:
-			ss := m.seeding()
-			if len(ss) > 0 && m.seedCursor < len(ss) {
-				m.stopConfirm = true
-				m.stopTarget = ss[m.seedCursor]
-			} else if hist := m.seedHistory(); len(hist) > 0 {
-				if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
-					m.histConfirm = true
-					m.histTarget = hist[hi]
-				}
-			}
-		}
+		m.openRemoveConfirm()
 		return m, nil
 	case "p":
-		switch m.section {
-		case sectionDownloads:
-			ds := m.downloading()
-			if len(ds) > 0 && m.dlCursor < len(ds) {
-				return m, pauseToggleCmd(m.eng, ds[m.dlCursor])
-			}
-		case sectionSeeding:
-			ss := m.seeding()
-			if len(ss) > 0 && m.seedCursor < len(ss) {
-				return m, pauseToggleCmd(m.eng, ss[m.seedCursor])
-			}
-		}
-		return m, nil
+		return m, m.pauseSelected()
 	case "s":
 		// Toggle sequential (streaming) mode on the selected download, optimistic
 		// flip + revert-on-error like the file-selection toggle — but only once
 		// we know the write will actually happen: an engine without sequential
 		// support would drop it, and a second press would race the first.
-		if m.section == sectionDownloads {
-			ds := m.downloading()
-			if len(ds) > 0 && m.dlCursor < len(ds) {
-				hash := ds[m.dlCursor].InfoHash
-				if _, ok := m.eng.(sequencer); !ok {
-					m.setError("sequential not supported by this engine")
-					return m, nil
-				}
-				if m.seqPending[hash] {
-					return m, nil // wait for the in-flight toggle to report back
-				}
-				for i := range m.statuses {
-					if m.statuses[i].InfoHash == hash {
-						m.statuses[i].Sequential = !m.statuses[i].Sequential
-						if m.seqPending == nil {
-							m.seqPending = map[string]bool{}
-						}
-						m.seqPending[hash] = true
-						return m, setSequentialCmd(m.eng, hash, m.statuses[i].Sequential)
-					}
-				}
-			}
-		}
-		return m, nil
+		return m, m.toggleSequential()
 	case "o":
 		// Assign the command first: openCurrentSelection has a pointer receiver
 		// and sets the notice on m, so it must run before `return m` copies m.
@@ -1412,7 +1445,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
 	case msg.Button == tea.MouseButtonRight && msg.Action == tea.MouseActionPress:
-		return m.openResultMenu(msg.X, msg.Y)
+		return m.openRowMenu(msg.X, msg.Y)
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		var cmd tea.Cmd
 		if m.showDlDetail {
