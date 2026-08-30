@@ -159,6 +159,41 @@ func TestFetchNonexistentFileReturnsErrorWithoutHTTP(t *testing.T) {
 	}
 }
 
+// The API gateway canonicalizes to lowercase and 301s anything else, so Fetch
+// must normalize the language code — typed "PT-BR" and selector "pt-br" both
+// reach the wire (and the .srt filename) as "pt-br".
+func TestFetchNormalizesLangToLowercase(t *testing.T) {
+	dir := t.TempDir()
+	video := writeVideoFile(t, dir, "movie.mkv", 200*1024)
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/subtitles":
+			if got := r.URL.Query().Get("languages"); got != "pt-br" {
+				t.Errorf("languages = %q, want %q (normalized)", got, "pt-br")
+			}
+			w.Write([]byte(`{"data":[{"attributes":{"language":"pt-br","moviehash_match":true,"files":[{"file_id":1,"file_name":"x.srt"}]}}]}`))
+		case "/download":
+			w.Write([]byte(`{"link":"` + srv.URL + `/files/x.srt"}`))
+		case "/files/x.srt":
+			w.Write([]byte("ok"))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	got, err := Fetch(context.Background(), c, video, "PT-BR")
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if want := SrtPath(video, "pt-br"); got != want {
+		t.Fatalf("srt path = %q, want %q (lowercased lang)", got, want)
+	}
+}
+
 func TestFetchAllSeparatorFilenameOmitsQueryParam(t *testing.T) {
 	dir := t.TempDir()
 	video := writeVideoFile(t, dir, "____.mkv", 200*1024) // basename cleans to whitespace-only
