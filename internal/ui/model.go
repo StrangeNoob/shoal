@@ -76,9 +76,15 @@ type Model struct {
 
 	// lastClickX/Y and lastClickAt track the most recent left-press's position
 	// and time, so a second press on the same spot within doubleClickInterval
-	// is recognized as a double-click (see registerClick).
+	// is recognized as a double-click (see registerClick). lastClickSection and
+	// lastClickDetail record which pane/screen that press belonged to, so a
+	// position match alone can't pair clicks across a section change or a
+	// list/detail-screen transition — only a same-spot, same-context,
+	// same-window pair counts.
 	lastClickX, lastClickY int
 	lastClickAt            time.Time
+	lastClickSection       section
+	lastClickDetail        bool
 
 	// Context menu (right-click on a Search result row — see menu.go).
 	// menuRow/menuCol anchor the overlay at the click that (re-)opened it;
@@ -1458,20 +1464,26 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// registerClick tracks a left-press's position and time against the previous
-// one, and reports whether this press is a double-click: the same (x, y)
-// within doubleClickInterval of the last press. Detecting a double-click
-// resets the tracked state so a third press starts a fresh window — double
-// only, no triple-click chains.
+// registerClick tracks a left-press's position, time, and pane/screen context
+// against the previous one, and reports whether this press is a double-click:
+// the same (x, y) in the same section and detail-screen state, within
+// doubleClickInterval of the last press. Requiring the context to match too
+// keeps a stale click from a different pane — or from before/after a
+// list<->detail-screen transition — from pairing with an unrelated click that
+// happens to land on the same coordinates. Detecting a double-click resets
+// the tracked state so a third press starts a fresh window — double only, no
+// triple-click chains.
 func (m *Model) registerClick(x, y int) bool {
 	now := time.Now()
 	double := x == m.lastClickX && y == m.lastClickY &&
+		m.section == m.lastClickSection && m.showDlDetail == m.lastClickDetail &&
 		!m.lastClickAt.IsZero() && now.Sub(m.lastClickAt) <= doubleClickInterval
 	if double {
 		m.lastClickAt = time.Time{}
 		return true
 	}
 	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, now
+	m.lastClickSection, m.lastClickDetail = m.section, m.showDlDetail
 	return false
 }
 

@@ -1173,6 +1173,65 @@ func TestDoubleClickFarApartDoesNotOpenDetails(t *testing.T) {
 	}
 }
 
+func TestDoubleClickDoesNotSpanSectionChange(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	// Simulate a first click that landed in a different section (Search) at
+	// the same (x, y) shortly before — same spot, same timing window, but a
+	// different pane entirely.
+	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, time.Now()
+	m.lastClickSection = sectionSearch
+
+	m, cmd := update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a click following a same-position click from a different section must not count as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the activate command across a section change")
+	}
+	if m.dlCursor != 0 {
+		t.Fatalf("the click should still select, dlCursor = %d, want 0", m.dlCursor)
+	}
+}
+
+func TestDoubleClickDoesNotSpanDetailScreenTransition(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	// Simulate a first click that landed on the download-details screen (a
+	// different logical target) at the same (x, y) shortly before.
+	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, time.Now()
+	m.lastClickSection = sectionDownloads
+	m.lastClickDetail = true
+
+	m, cmd := update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a click following a same-position click from the detail screen must not count as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the detail-open command across a screen transition")
+	}
+}
+
 func TestDoubleClickOpensDownloadDetailScreen(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{
 		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
