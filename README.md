@@ -80,8 +80,14 @@ Results stream in live from all sources (`searching… N/M sources`) as a sortab
 (**Name · Size · Seed:Lch**). Press `enter` for a **details** screen (size, health, files,
 hash, magnet) where `d` downloads, `y` copies the magnet, and `esc` goes back. You can
 also paste a magnet link into the search box and press `enter` to add it directly.
-**Mouse:** click a row to select it (Search, Downloads, and Seeding), and the wheel
-scrolls the selection in any pane.
+**Mouse:** every pane is clickable. A single click selects a row (or, in
+Settings, an option); a double-click opens it — **Search** → the result's
+details screen, **Downloads** → the per-file details screen, **Seeding** →
+the file/folder (same as `o`), and a file row inside the Downloads details
+screen → toggles it (same as `space`). A right-click opens a context menu of
+that row's actions, each labeled with its keyboard shortcut — click an item,
+or `↑ ↓`/`enter`/`esc`. The **sidebar** is clickable to switch panes, and the
+scroll wheel moves the selection in any pane.
 
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,
 **download speed**, and an **ETA** (time remaining). Press `enter` for a **details**
@@ -115,7 +121,9 @@ the `shoal sources` CLI. A **SUBTITLES** group holds the OpenSubtitles API key
 Engine settings (speed limits, max peers, listen port, save-to,
 seed) take effect when the daemon next restarts.
 
-The whole TUI is mouse-aware: the scroll wheel moves the selection in any pane.
+Settings rows are clickable too: click a row to select it, click one of an
+enum row's `●` options to set it directly, or click the `‹ ›` arrows on a
+cycling value to change it — the same as `← →`.
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
 indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
@@ -377,8 +385,10 @@ Shipped:
 - **Speed limits** — global download/upload rate caps (Settings / `config.json`, KiB/s).
 - **ETA column** in the Downloads pane, and a **completion notification** (in-app notice
   + terminal bell / OSC 9 desktop notification, toggleable).
-- **Mouse support** — click a row to select it (Search / Downloads / Seeding); the wheel
-  scrolls the selection in every pane.
+- **Mouse support** — click a row (or Settings option) to select it, double-click to open
+  it (Search → details, Downloads → per-file details, Seeding → open), right-click for a
+  context menu of that row's actions with their keys; the sidebar and Settings are
+  clickable too, and the wheel scrolls the selection in every pane.
 - **Search quality-of-life** — a hide-0-seed toggle (`z`) and an in-results filter
   (`f`) that narrows loaded results without re-querying sources.
 - **Queue controls** — a max-concurrent-downloads limit (extras queue and promote as
