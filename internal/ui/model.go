@@ -1451,7 +1451,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
 	case msg.Button == tea.MouseButtonRight && msg.Action == tea.MouseActionPress:
-		if m.showHelp { // help overlay owns the screen; mirrors handleKey's gate
+		// Overlays and confirm prompts own the screen while active, same as
+		// handleKey's gates — a right-click during one must not reach the
+		// row layout underneath it.
+		if m.showHelp || m.showDlDetail || m.sortMode ||
+			m.cancelConfirm || m.stopConfirm || m.histConfirm {
 			return m, nil
 		}
 		return m.openRowMenu(msg.X, msg.Y)

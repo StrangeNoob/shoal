@@ -432,6 +432,18 @@ func lineOf(view, s string) int {
 	return -1
 }
 
+// lastLineOf is lineOf but returns the last matching line: useful when a
+// confirm banner quotes the same name that also appears on the row below it.
+func lastLineOf(view, s string) int {
+	found := -1
+	for i, ln := range strings.Split(view, "\n") {
+		if strings.Contains(ln, s) {
+			found = i
+		}
+	}
+	return found
+}
+
 func TestClickSelectsSearchRow(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}, {Title: "Charlie"}}}
 	m := ready(New(src, &fakeEngine{}))
@@ -697,6 +709,112 @@ func TestRightClickInertWhileHelpOpen(t *testing.T) {
 	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
 	if m.menuOpen {
 		t.Fatal("right-click should be inert while the help overlay is open")
+	}
+}
+
+func TestRightClickInertWhileDlDetailOpen(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	// Coordinates that would land on the DownloadOne row were the downloads
+	// list actually on screen.
+	y := lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m.showDlDetail = true
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the download details screen is open")
+	}
+}
+
+func TestRightClickInertWhileSortMode(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+	m, _ = update(m, key("S")) // enter sort mode
+	if !m.sortMode {
+		t.Fatal("S did not open sort mode")
+	}
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the sort-mode overlay is open")
+	}
+}
+
+func TestRightClickInertWhileCancelConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	m, _ = update(m, key("x")) // open the cancel confirm
+	if !m.cancelConfirm {
+		t.Fatal("x did not open the cancel confirm")
+	}
+
+	// The confirm banner itself quotes the download's name, so take the last
+	// "DownloadOne" match — the row underneath the banner, not the banner text.
+	y := lastLineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the cancel confirm is open")
+	}
+}
+
+func TestRightClickInertWhileStopConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	m, _ = update(m, key("x")) // open the stop confirm
+	if !m.stopConfirm {
+		t.Fatal("x did not open the stop confirm")
+	}
+
+	// As above: the banner quotes the name too, so take the last match.
+	y := lastLineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("seeding row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the stop confirm is open")
+	}
+}
+
+func TestRightClickInertWhileHistConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.width = 160 // wide enough that the confirm banner doesn't wrap onto the row's line
+	m.section = sectionSeeding
+	m.history.Entries = []history.Entry{{InfoHash: "hh1", Name: "OldMovie"}}
+	m, _ = update(m, key("x")) // open the history-delete confirm
+	if !m.histConfirm {
+		t.Fatal("x did not open the history confirm")
+	}
+
+	// As above: the banner quotes the name too, so take the last match.
+	y := lastLineOf(m.View(), "OldMovie")
+	if y < 0 {
+		t.Fatal("history row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the history confirm is open")
 	}
 }
 
