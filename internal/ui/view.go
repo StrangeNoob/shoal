@@ -290,10 +290,10 @@ func (m Model) dlDetailView() string {
 	default:
 		b.WriteString("  " + st.SectionHead.Render(fmt.Sprintf("FILES (%d)", len(m.dlDetail.Files))) + "\n")
 		nameW := max(10, m.width-38)
-		maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6)) // leave room for trackers + chrome
+		_, shown := m.dlDetailFileRows() // shared with clickDetailFile so hit-testing can't drift
 		for i, f := range m.dlDetail.Files {
-			if i >= maxFiles {
-				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more files", len(m.dlDetail.Files)-maxFiles)) + "\n")
+			if i >= shown {
+				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more files", len(m.dlDetail.Files)-shown)) + "\n")
 				break
 			}
 			pct := 0.0

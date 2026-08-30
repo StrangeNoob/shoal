@@ -606,6 +606,155 @@ func TestClickSelectsSeedingRow(t *testing.T) {
 	}
 }
 
+// --- double-click activation ------------------------------------------------
+
+func TestDoubleClickOpensSearchResultDetails(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click: select only
+	if m.showDetail {
+		t.Fatal("a single click must not open details")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor after first click = %d, want 1", m.cursor)
+	}
+
+	m, _ = update(m, clickAt(x, y)) // second click, same row, well within the interval
+	if !m.showDetail {
+		t.Fatal("a double-click on a search row should open its details")
+	}
+	if m.detail.Title != "Bravo" {
+		t.Fatalf("details opened for %q, want Bravo", m.detail.Title)
+	}
+}
+
+func TestDoubleClickFarApartDoesNotOpenDetails(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click
+	// Back-date the click so the second one falls outside doubleClickInterval —
+	// same position, but too late to count as a double-click.
+	m.lastClickAt = time.Now().Add(-doubleClickInterval - time.Millisecond)
+	m, _ = update(m, clickAt(x, y))
+	if m.showDetail {
+		t.Fatal("clicks farther apart than doubleClickInterval must not open details")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("the second click should still select, cursor = %d, want 1", m.cursor)
+	}
+}
+
+func TestDoubleClickOpensDownloadDetailScreen(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a single click on a download row must not open the details screen")
+	}
+
+	m, cmd := update(m, clickAt(x, y))
+	if !m.showDlDetail {
+		t.Fatal("a double-click on a download row should open the details screen")
+	}
+	if cmd == nil {
+		t.Fatal("the double-click should return the detail-fetch command")
+	}
+}
+
+func TestDoubleClickSeedingOpensFolder(t *testing.T) {
+	dir := t.TempDir() // exists → openable
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true, Path: dir},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionSeeding
+	m.statuses = fe.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("SeedOne row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y))
+	if m.seedCursor != 0 {
+		t.Fatalf("single click should select seedCursor=0, got %d", m.seedCursor)
+	}
+
+	m, cmd := update(m, clickAt(x, y))
+	if cmd == nil {
+		t.Fatal("a double-click on a seeding row should return an open-folder command (the 'o' path)")
+	}
+}
+
+func TestDetailScreenClickMovesCursorSingleTogglesDouble(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 10}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "a.mkv", Length: 100, Selected: true},
+			{Path: "b.mkv", Length: 100, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	y := lineOf(m.View(), "b.mkv")
+	if y < 0 {
+		t.Fatal("b.mkv row not rendered")
+	}
+
+	m, _ = update(m, clickAt(4, y)) // single click: moves the cursor only
+	if m.dlFileCursor != 1 {
+		t.Fatalf("dlFileCursor after single click = %d, want 1", m.dlFileCursor)
+	}
+	if eng.setFilesPath != "" {
+		t.Fatal("a single click must not toggle the file — SetFiles must not be called")
+	}
+
+	m, cmd = update(m, clickAt(4, y)) // double click: toggles
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "b.mkv" || eng.setFilesSelected {
+		t.Fatalf("double click toggled %q selected=%v, want b.mkv false", eng.setFilesPath, eng.setFilesSelected)
+	}
+	if m.dlDetail.Files[1].Selected {
+		t.Fatal("double click should optimistically deselect b.mkv")
+	}
+}
+
 func TestDownloadDetailScreen(t *testing.T) {
 	eng := &fakeEngine{
 		statuses: []engine.Status{{Name: "BigPack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 50}},

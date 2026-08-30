@@ -32,6 +32,10 @@ const sidebarWidth = 20
 // finished torrent (~14s at the tick interval; the daemon normally records within ~1s).
 const maxHistoryReloads = 20
 
+// doubleClickInterval is the longest gap between two left-presses on the same
+// spot for the second to count as a double-click (see registerClick).
+const doubleClickInterval = 400 * time.Millisecond
+
 // copyToClipboard is a package var so tests can stub the system clipboard.
 var copyToClipboard = clipboard.WriteAll
 
@@ -69,6 +73,12 @@ type Model struct {
 	showHelp       bool
 	showDetail     bool
 	detail         source.Result
+
+	// lastClickX/Y and lastClickAt track the most recent left-press's position
+	// and time, so a second press on the same spot within doubleClickInterval
+	// is recognized as a double-click (see registerClick).
+	lastClickX, lastClickY int
+	lastClickAt            time.Time
 
 	showDlDetail bool          // Downloads pane: the active-download details screen
 	dlDetail     engine.Detail // fetched per-file progress + trackers
@@ -573,6 +583,29 @@ func (m *Model) openSelected(s engine.Status) tea.Cmd {
 	return openFolderCmd(dir)
 }
 
+// openCurrentSelection opens the folder for whatever is selected in Downloads
+// or Seeding (an active seeder or a HISTORY entry) — the action behind the 'o'
+// key and a Seeding double-click.
+func (m *Model) openCurrentSelection() tea.Cmd {
+	switch m.section {
+	case sectionDownloads:
+		ds := m.downloading()
+		if len(ds) > 0 && m.dlCursor < len(ds) {
+			return m.openSelected(ds[m.dlCursor])
+		}
+	case sectionSeeding:
+		ss := m.seeding()
+		if m.seedCursor < len(ss) {
+			return m.openSelected(ss[m.seedCursor])
+		}
+		hist := m.seedHistory()
+		if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
+			return m.openHistory(hist[hi])
+		}
+	}
+	return nil
+}
+
 // pauseToggleCmd pauses a running torrent or resumes a paused one.
 func pauseToggleCmd(eng engine.Engine, s engine.Status) tea.Cmd {
 	return func() tea.Msg {
@@ -979,36 +1012,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setNotice("select a file first") // no rows yet (details still loading)
 			return m, nil
 		case " ", "enter":
-			if m.dlDetailBusy {
-				return m, nil // a write is in flight — serialize toggles so they can't reorder
-			}
-			if i := m.dlFileCursor; i >= 0 && i < len(m.dlDetail.Files) {
-				f := &m.dlDetail.Files[i]
-				f.Selected = !f.Selected // optimistic
-				m.dlDetailGen++
-				gen := m.dlDetailGen
-				sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
-				fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName}, gen)
-				// Mark busy only when a refetch will arrive to clear it (on success
-				// via dlDetailMsg, on failure via setFilesErrMsg); without a detailer
-				// there's no clearing message, so leave toggles unserialized.
-				m.dlDetailBusy = fc != nil
-				// Run sequentially (not tea.Batch): SetFiles must land at the
-				// engine before the refetch, or the refetched Detail can race
-				// ahead of the selection change. A SetFiles error is surfaced
-				// instead of the refetch, so it isn't silently dropped.
-				return m, func() tea.Msg {
-					if sc != nil {
-						if msg := sc(); msg != nil {
-							return msg
-						}
-					}
-					if fc != nil {
-						return fc()
-					}
-					return nil
-				}
-			}
+			cmd := m.toggleSelectedFile()
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -1178,28 +1183,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "o":
-		// Assign the command first: openSelected has a pointer receiver and sets
-		// the notice on m, so it must run before `return m` copies m.
-		switch m.section {
-		case sectionDownloads:
-			ds := m.downloading()
-			if len(ds) > 0 && m.dlCursor < len(ds) {
-				cmd := m.openSelected(ds[m.dlCursor])
-				return m, cmd
-			}
-		case sectionSeeding:
-			ss := m.seeding()
-			if m.seedCursor < len(ss) {
-				cmd := m.openSelected(ss[m.seedCursor])
-				return m, cmd
-			}
-			hist := m.seedHistory()
-			if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
-				cmd := m.openHistory(hist[hi])
-				return m, cmd
-			}
-		}
-		return m, nil
+		// Assign the command first: openCurrentSelection has a pointer receiver
+		// and sets the notice on m, so it must run before `return m` copies m.
+		cmd := m.openCurrentSelection()
+		return m, cmd
 	case "S":
 		if m.section == sectionSearch {
 			m.sortMode = true
@@ -1403,10 +1390,9 @@ func (m Model) handleSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleMouse maps the scroll wheel to selection movement in the current pane.
-// Text-entry modes and prompts (which the keyboard also skips) are left alone.
-// ponytail: wheel-scroll only; click-to-select needs per-row Y hit-testing
-// against the box layout — deferred until the layout math is factored out.
+// handleMouse maps the scroll wheel to selection movement in the current pane,
+// and a left-press to click-to-select / double-click-to-activate. Text-entry
+// modes and prompts (which the keyboard also skips) are left alone.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.editing || m.editingSetting {
 		return m, nil
@@ -1417,25 +1403,69 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
-		m.clickSelect(msg.X, msg.Y)
+		var cmd tea.Cmd
+		if m.showDlDetail {
+			cmd = m.clickDetailFile(msg.X, msg.Y)
+		} else {
+			cmd = m.handleClick(msg.X, msg.Y)
+		}
+		return m, cmd
 	}
 	return m, nil
 }
 
-// clickSelect moves the selection to a clicked row. Implemented for the two
-// list panes with clean, single-height-row geometry (Search results and
-// Downloads); Seeding's two-section mixed-height layout and Settings' group
-// headers are left to the keyboard/wheel.
+// registerClick tracks a left-press's position and time against the previous
+// one, and reports whether this press is a double-click: the same (x, y)
+// within doubleClickInterval of the last press. Detecting a double-click
+// resets the tracked state so a third press starts a fresh window — double
+// only, no triple-click chains.
+func (m *Model) registerClick(x, y int) bool {
+	now := time.Now()
+	double := x == m.lastClickX && y == m.lastClickY &&
+		!m.lastClickAt.IsZero() && now.Sub(m.lastClickAt) <= doubleClickInterval
+	if double {
+		m.lastClickAt = time.Time{}
+		return true
+	}
+	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, now
+	return false
+}
+
+// handleClick selects the clicked row (always — single-click is exactly
+// select-only) and, on a double-click that actually landed on a row, also
+// activates it: the same path 'enter' (Search, Downloads) or 'o' (Seeding)
+// uses today.
+func (m *Model) handleClick(x, y int) tea.Cmd {
+	double := m.registerClick(x, y)
+	hit := m.clickSelect(x, y)
+	if !double || !hit {
+		return nil
+	}
+	switch m.section {
+	case sectionSearch, sectionDownloads:
+		return m.activate()
+	case sectionSeeding:
+		return m.openCurrentSelection()
+	}
+	return nil
+}
+
+// clickSelect moves the selection to a clicked row and reports whether the
+// click actually landed on one. Implemented for the two list panes with clean,
+// single-height-row geometry (Search results and Downloads); Seeding's
+// two-section mixed-height layout and Settings' group headers are left to the
+// keyboard/wheel for movement (Seeding rows are still click-selectable via
+// seedingClickRows).
 // ponytail: mirrors the render layout in View/renderResults/renderDownloads —
 // the render-anchored tests catch any drift if that layout changes.
-func (m *Model) clickSelect(x, y int) {
+func (m *Model) clickSelect(x, y int) bool {
 	if x <= sidebarWidth { // sidebar or the 1-col gutter, not a main-pane row
-		return
+		return false
 	}
 	switch m.section {
 	case sectionSearch:
 		if !m.hasSearched && !m.searching && len(m.results) == 0 {
-			return // home screen has no rows
+			return false // home screen has no rows
 		}
 		start, end, pre := m.resultsWindow(max(1, m.bodyHeight()-4))
 		// body line 0 is at headerHeight()+1; results box sits 3 lines in
@@ -1443,10 +1473,11 @@ func (m *Model) clickSelect(x, y int) {
 		base := m.headerHeight() + 1 + 3 + 1 + pre
 		if i := start + (y - base); y >= base && i >= start && i < end {
 			m.cursor = i
+			return true
 		}
 	case sectionDownloads:
 		if len(m.downloading()) == 0 {
-			return
+			return false
 		}
 		cancelLines := 0
 		if m.cancelConfirm {
@@ -1457,19 +1488,21 @@ func (m *Model) clickSelect(x, y int) {
 		if line := y - base; line >= 0 && line%4 <= 2 { // name/bar/detail, not the blank
 			if i := start + line/4; i < end {
 				m.dlCursor = i
+				return true
 			}
 		}
 	case sectionSeeding:
 		for _, r := range m.seedingClickRows() {
 			if y >= r.y && y < r.y+r.span {
 				m.seedCursor = r.idx
-				return
+				return true
 			}
 		}
 		// Settings is intentionally excluded: its value column (e.g. a long "Save
 		// to" path) wraps, so rows have variable height and click hit-testing
 		// can't be reliable. Settings stays keyboard/wheel-navigable.
 	}
+	return false
 }
 
 // clickRow maps a clickable pane row to its selection index and how many screen
@@ -1509,6 +1542,34 @@ func (m Model) seedingClickRows() []clickRow {
 		y += c
 	}
 	return rows
+}
+
+// dlDetailFileRows returns the screen-Y of the first file row and how many
+// file rows are actually rendered (bounded by the "… N more files" cutoff),
+// in the download details screen. Shared by dlDetailView's render loop and
+// clickDetailFile so they can't drift apart.
+func (m Model) dlDetailFileRows() (baseY, shown int) {
+	maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6))
+	return 6, min(len(m.dlDetail.Files), maxFiles)
+}
+
+// clickDetailFile hit-tests a left-press against the download details
+// screen's file rows. A single click just moves dlFileCursor (select-only,
+// like everywhere else); a second click on the same row within
+// doubleClickInterval also toggles it via toggleSelectedFile — the same path
+// space/enter use there.
+func (m *Model) clickDetailFile(x, y int) tea.Cmd {
+	double := m.registerClick(x, y)
+	baseY, shown := m.dlDetailFileRows()
+	i := y - baseY
+	if i < 0 || i >= shown {
+		return nil
+	}
+	m.dlFileCursor = i
+	if !double {
+		return nil
+	}
+	return m.toggleSelectedFile()
 }
 
 // --- selection movement ----------------------------------------------------
@@ -1576,6 +1637,44 @@ func (m *Model) moveRight() {
 		}
 	case sectionSettings:
 		m.settingsChange(1)
+	}
+}
+
+// toggleSelectedFile flips the Selected flag of the file at dlFileCursor and
+// pushes the change to the engine — the action behind space/enter and a
+// double-click on a file row in the download details screen.
+func (m *Model) toggleSelectedFile() tea.Cmd {
+	if m.dlDetailBusy {
+		return nil // a write is in flight — serialize toggles so they can't reorder
+	}
+	i := m.dlFileCursor
+	if i < 0 || i >= len(m.dlDetail.Files) {
+		return nil
+	}
+	f := &m.dlDetail.Files[i]
+	f.Selected = !f.Selected // optimistic
+	m.dlDetailGen++
+	gen := m.dlDetailGen
+	sc := setFilesCmd(m.eng, m.dlDetailHash, f.Path, f.Selected)
+	fc := fetchDetailCmd(m.eng, engine.Status{InfoHash: m.dlDetailHash, Name: m.dlDetailName}, gen)
+	// Mark busy only when a refetch will arrive to clear it (on success via
+	// dlDetailMsg, on failure via setFilesErrMsg); without a detailer there's
+	// no clearing message, so leave toggles unserialized.
+	m.dlDetailBusy = fc != nil
+	// Run sequentially (not tea.Batch): SetFiles must land at the engine
+	// before the refetch, or the refetched Detail can race ahead of the
+	// selection change. A SetFiles error is surfaced instead of the refetch,
+	// so it isn't silently dropped.
+	return func() tea.Msg {
+		if sc != nil {
+			if msg := sc(); msg != nil {
+				return msg
+			}
+		}
+		if fc != nil {
+			return fc()
+		}
+		return nil
 	}
 }
 
