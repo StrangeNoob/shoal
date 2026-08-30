@@ -1642,6 +1642,12 @@ type setKind int
 const (
 	kindEnum setKind = iota
 	kindText
+	// kindChoice is a cycling selector (left/right steps through options like
+	// kindEnum) whose options list is too long/wide for the inline ● ○ enum
+	// render, so it displays only the current selection with cycle arrows.
+	// Unlike kindEnum, enter still opens the text editor (the escape hatch for
+	// a value outside the curated list) — see the Subs lang row.
+	kindChoice
 )
 
 type setItem struct {
@@ -1651,6 +1657,52 @@ type setItem struct {
 	options []string
 	get     func(m *Model) string
 	set     func(m *Model, v string)
+}
+
+// langOption is one entry in a curated kindChoice language list: the code
+// stored in config plus its display label.
+type langOption struct{ code, label string }
+
+// subsLangOptions is the curated OpenSubtitles language list for the "Subs
+// lang" row. Config always stores the code (subs_lang); the label is
+// display-only. Order matters: it's the cycle order, en first.
+var subsLangOptions = []langOption{
+	{"en", "English"},
+	{"es", "Spanish"},
+	{"fr", "French"},
+	{"de", "German"},
+	{"it", "Italian"},
+	{"pt-br", "Portuguese (Brazil)"},
+	{"pt-pt", "Portuguese"},
+	{"ru", "Russian"},
+	{"hi", "Hindi"},
+	{"ja", "Japanese"},
+	{"zh-cn", "Chinese (Simplified)"},
+	{"ko", "Korean"},
+	{"ar", "Arabic"},
+	{"tr", "Turkish"},
+	{"pl", "Polish"},
+	{"nl", "Dutch"},
+}
+
+// subsLangCodes is subsLangOptions' codes, in cycle order — the options list
+// for the "Subs lang" setItem.
+func subsLangCodes() []string {
+	codes := make([]string, len(subsLangOptions))
+	for i, o := range subsLangOptions {
+		codes[i] = o.code
+	}
+	return codes
+}
+
+// subsLangLabel looks up a curated code's display label.
+func subsLangLabel(code string) (string, bool) {
+	for _, o := range subsLangOptions {
+		if o.code == code {
+			return o.label, true
+		}
+	}
+	return "", false
 }
 
 // settingItems is the ordered, navigable list of Settings rows (group headers
@@ -1740,7 +1792,7 @@ func settingItems() []setItem {
 		{group: "SUBTITLES", label: "OS API key", kind: kindText,
 			get: func(m *Model) string { return m.cfg.OpenSubsAPIKey },
 			set: func(m *Model, v string) { m.cfg.OpenSubsAPIKey = v }},
-		{group: "SUBTITLES", label: "Subs lang", kind: kindText,
+		{group: "SUBTITLES", label: "Subs lang", kind: kindChoice, options: subsLangCodes(),
 			get: func(m *Model) string { return m.cfg.SubsLang },
 			set: func(m *Model, v string) {
 				if v != "" {
@@ -1778,18 +1830,25 @@ func (m *Model) settingsChange(dir int) {
 		return
 	}
 	it := items[m.setCursor]
-	if it.kind != kindEnum || len(it.options) == 0 {
+	if (it.kind != kindEnum && it.kind != kindChoice) || len(it.options) == 0 {
 		return
 	}
 	cur := it.get(m)
-	idx := 0
+	idx := -1
 	for i, o := range it.options {
 		if o == cur {
 			idx = i
 			break
 		}
 	}
-	idx = (idx + dir + len(it.options)) % len(it.options)
+	if idx == -1 {
+		// Current value isn't in the list (a kindChoice custom/hand-edited
+		// code): the first cycle in either direction lands at the start of
+		// the list rather than stepping relative to a phantom index 0.
+		idx = 0
+	} else {
+		idx = (idx + dir + len(it.options)) % len(it.options)
+	}
 	it.set(m, it.options[idx])
 	m.persist()
 }

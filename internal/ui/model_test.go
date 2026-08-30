@@ -988,6 +988,109 @@ func TestSettingsSubtitlesGroupRenders(t *testing.T) {
 	}
 }
 
+// Subs lang is a cycling choice, not free text: it renders the label alongside
+// the code, cycles with left/right through the curated list (wrapping at both
+// ends, persisting via the same save path enums use), falls back to a
+// "(custom)" render for a code outside the list without clobbering it until
+// the user actually cycles, and keeps enter-to-type-a-code working.
+
+func TestSettingsSubsLangRendersLabelNotBareCode(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "Subs lang")
+	if m.cfg.SubsLang != "en" {
+		t.Fatalf("default SubsLang = %q, want en", m.cfg.SubsLang)
+	}
+	v := m.View()
+	if !strings.Contains(v, "English (en)") {
+		t.Errorf("settings view should render %q, not the bare code:\n%s", "English (en)", v)
+	}
+}
+
+func TestSettingsSubsLangCyclesAndPersists(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "Subs lang")
+	m, _ = update(m, key("right"))
+	if m.cfg.SubsLang != "es" {
+		t.Errorf("after ->, SubsLang = %q, want es", m.cfg.SubsLang)
+	}
+	m, _ = update(m, key("left"))
+	if m.cfg.SubsLang != "en" {
+		t.Errorf("after <-, SubsLang = %q, want en", m.cfg.SubsLang)
+	}
+}
+
+func TestSettingsSubsLangWrapsAtBothEnds(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "Subs lang")
+
+	m, _ = update(m, key("left")) // wrap backward from the first entry (en)
+	if m.cfg.SubsLang != "nl" {
+		t.Errorf("after <- from en, SubsLang = %q, want nl (wrap to last)", m.cfg.SubsLang)
+	}
+	m, _ = update(m, key("right")) // wrap forward from the last entry (nl)
+	if m.cfg.SubsLang != "en" {
+		t.Errorf("after -> from nl, SubsLang = %q, want en (wrap to first)", m.cfg.SubsLang)
+	}
+}
+
+func TestSettingsSubsLangCustomCodePreservedUntilCycled(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.cfg.SubsLang = "he" // not in the curated list
+	m.setCursor = settingIndex(t, "Subs lang")
+
+	v := m.View()
+	if !strings.Contains(v, "he (custom)") {
+		t.Errorf("settings view should render %q for an unlisted code:\n%s", "he (custom)", v)
+	}
+	if m.cfg.SubsLang != "he" {
+		t.Fatalf("rendering must not clobber the custom code; SubsLang = %q", m.cfg.SubsLang)
+	}
+
+	m, _ = update(m, key("right"))
+	if m.cfg.SubsLang != "en" {
+		t.Errorf("first cycle off a custom code should land at the start of the list; SubsLang = %q, want en", m.cfg.SubsLang)
+	}
+}
+
+func TestSettingsSubsLangEnterStillTypesCustomCode(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.editing = false
+	for m.section != sectionSettings {
+		m, _ = update(m, key("tab"))
+	}
+	m.setCursor = settingIndex(t, "Subs lang")
+	m, _ = update(m, key("enter"))
+	if !m.editingSetting {
+		t.Fatal("enter on Subs lang should open the inline editor")
+	}
+	m.setInput.SetValue("he")
+	m, _ = update(m, key("enter"))
+	if m.editingSetting {
+		t.Error("enter should commit and close the editor")
+	}
+	if m.cfg.SubsLang != "he" {
+		t.Errorf("SubsLang = %q, want he (typed code should round-trip)", m.cfg.SubsLang)
+	}
+	// The typed code survives until the user cycles away from it.
+	v := m.View()
+	if !strings.Contains(v, "he (custom)") {
+		t.Errorf("settings view should preserve the typed custom code:\n%s", v)
+	}
+}
+
 func TestSettingsAPIKeyEditRoundTrip(t *testing.T) {
 	m := ready(New(&fakeSource{}, &fakeEngine{}))
 	m.editing = false

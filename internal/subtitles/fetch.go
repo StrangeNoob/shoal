@@ -38,6 +38,10 @@ func Fetch(ctx context.Context, c *Client, videoPath, lang string) (string, erro
 	if lang == "" {
 		lang = defaultLang
 	}
+	// The API gateway canonicalizes to lowercase (x-os-rule: canonical) and
+	// 301s anything else, so normalize typed/legacy codes like "PT-BR" here —
+	// the one spot every caller (TUI selector, CLI --lang, auto-fetch) routes through.
+	lang = strings.ToLower(lang)
 	ext := filepath.Ext(videoPath)
 	// Lowercased: the API's gateway 301s non-canonical requests (sorted params,
 	// lowercase query — it answers with x-os-rule: canonical), and skipping that
