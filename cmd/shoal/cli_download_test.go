@@ -214,6 +214,36 @@ func TestDownloadWaitBlocksUntilDone(t *testing.T) {
 	}
 }
 
+// If the target torrent vanishes from the status list mid-wait (removed via
+// the TUI or another client), --wait must report it and exit non-zero
+// instead of spinning forever (issue #45).
+func TestDownloadWaitTargetDisappearsAborts(t *testing.T) {
+	old := waitPollInterval
+	waitPollInterval = time.Millisecond
+	t.Cleanup(func() { waitPollInterval = old })
+
+	const ih = "0123456789abcdef0123456789abcdef01234567"
+	present := []engine.Status{{Name: "Movie", InfoHash: ih, TotalBytes: 100, CompletedBytes: 10}}
+	gone := []engine.Status{}
+	fake := &fakeEngine{statusSeq: [][]engine.Status{present, present, gone}}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- runDownload([]string{"--wait", "magnet:?xt=urn:btih:" + ih}, &buf) }()
+	select {
+	case code := <-done:
+		if code == 0 {
+			t.Fatalf("target disappearing mid-wait should exit non-zero, got 0: %s", buf.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("download --wait hung instead of aborting when the target disappeared")
+	}
+	if strings.Contains(buf.String(), "done:") {
+		t.Fatalf("must not report completion, got %q", buf.String())
+	}
+}
+
 func TestDownloadWaitURLBailsInsteadOfHanging(t *testing.T) {
 	// A URL --wait where no new torrent ever appears (already present, or the
 	// fake never adds one) must give up after waitResolveTries, not hang.
