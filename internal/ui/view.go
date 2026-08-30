@@ -700,6 +700,14 @@ func (m Model) renderSettingValue(it setItem) string {
 		}
 		return strings.Join(parts, "   ")
 	}
+	if it.kind == kindChoice {
+		cur := it.get(&m)
+		label := cur + " (custom)"
+		if lbl, ok := subsLangLabel(cur); ok {
+			label = lbl + " (" + cur + ")"
+		}
+		return st.Meta.Render(glyphChevL+" ") + st.SetValOn.Render(label) + st.Meta.Render(" "+glyphChevR)
+	}
 	style := st.SetVal
 	if it.label == "Save to" {
 		style = st.Accent

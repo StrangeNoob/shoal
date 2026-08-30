@@ -27,6 +27,8 @@ const (
 	glyphFill   = "\u2588" // █ progress fill
 	glyphTrack  = "\u2591" // ░ progress track
 	glyphMore   = "\u22ef" // ⋯ overflow / more
+	glyphChevL  = "\u2039" // ‹ cycling-choice: previous option
+	glyphChevR  = "\u203a" // › cycling-choice: next option
 )
 
 // Palette is a named colour set with truecolor hex + 256/16-colour fallbacks.

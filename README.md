@@ -260,8 +260,11 @@ API key**:
 - **OS API key** — your OpenSubtitles API key (masked in the settings pane; the last 4
   characters stay visible so you can tell keys apart, empty shows `unset`). Stored in
   `config.json` as `opensubs_api_key`.
-- **Subs lang** — the preferred subtitle language code (default `en`), `subs_lang` in
-  `config.json`. `shoal subs --lang <code>` overrides it for a single run.
+- **Subs lang** — a cycling selector over ~16 common languages (default `en` /
+  English); `←`/`→` step through them, `enter` types any other code by hand (for a
+  language outside the list, e.g. `he`, shown as `he (custom)`). Stored as
+  `subs_lang` in `config.json`. `shoal subs --lang <code>` overrides it for a single
+  run.
 - **Auto subs** — when **on**, the daemon fetches subtitles automatically for
   video files (≥100 MiB) once a download completes; `subs_auto` in `config.json`.
 
