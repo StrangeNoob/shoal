@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
@@ -417,6 +418,10 @@ func clickAt(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: y}
 }
 
+func rightClickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonRight, Action: tea.MouseActionPress, X: x, Y: y}
+}
+
 // lineOf returns the 0-based screen row of the first rendered line containing s.
 func lineOf(view, s string) int {
 	for i, ln := range strings.Split(view, "\n") {
@@ -425,6 +430,18 @@ func lineOf(view, s string) int {
 		}
 	}
 	return -1
+}
+
+// lastLineOf is lineOf but returns the last matching line: useful when a
+// confirm banner quotes the same name that also appears on the row below it.
+func lastLineOf(view, s string) int {
+	found := -1
+	for i, ln := range strings.Split(view, "\n") {
+		if strings.Contains(ln, s) {
+			found = i
+		}
+	}
+	return found
 }
 
 func TestClickSelectsSearchRow(t *testing.T) {
@@ -603,6 +620,993 @@ func TestClickSelectsSeedingRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.seedCursor != 1 {
 		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
+// --- context menu ------------------------------------------------------------
+
+func TestRightClickOpensResultMenu(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a result row should open the menu")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("right-click should also select the row, cursor=%d, want 1", m.cursor)
+	}
+	wantLabels := []string{"Download", "Details", "Copy magnet"}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+	view := m.View()
+	for _, want := range []string{"Download", "Details", "Copy magnet"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("menu overlay should show %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRightClickEmptySpaceInert(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{})) // home screen, no results yet
+	m, _ = update(m, rightClickAt(sidebarWidth+3, 10))
+	if m.menuOpen {
+		t.Fatal("right-click on empty space should not open the menu")
+	}
+}
+
+func TestRightClickInertWhileDetailOpen(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	// Coordinates that would land on the Bravo row were the results list
+	// actually on screen.
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m.showDetail = true
+	m.detail = source.Result{Title: "Alpha"}
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the Search detail screen is open")
+	}
+}
+
+func TestRightClickInertWhileHelpOpen(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m.showHelp = true
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the help overlay is open")
+	}
+}
+
+func TestRightClickInertWhileDlDetailOpen(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	// Coordinates that would land on the DownloadOne row were the downloads
+	// list actually on screen.
+	y := lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m.showDlDetail = true
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the download details screen is open")
+	}
+}
+
+func TestRightClickInertWhileSortMode(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+	m, _ = update(m, key("S")) // enter sort mode
+	if !m.sortMode {
+		t.Fatal("S did not open sort mode")
+	}
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the sort-mode overlay is open")
+	}
+}
+
+func TestRightClickInertWhileCancelConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	m, _ = update(m, key("x")) // open the cancel confirm
+	if !m.cancelConfirm {
+		t.Fatal("x did not open the cancel confirm")
+	}
+
+	// The confirm banner itself quotes the download's name, so take the last
+	// "DownloadOne" match — the row underneath the banner, not the banner text.
+	y := lastLineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the cancel confirm is open")
+	}
+}
+
+func TestRightClickInertWhileStopConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	m, _ = update(m, key("x")) // open the stop confirm
+	if !m.stopConfirm {
+		t.Fatal("x did not open the stop confirm")
+	}
+
+	// As above: the banner quotes the name too, so take the last match.
+	y := lastLineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("seeding row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the stop confirm is open")
+	}
+}
+
+func TestRightClickInertWhileHistConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.width = 160 // wide enough that the confirm banner doesn't wrap onto the row's line
+	m.section = sectionSeeding
+	m.history.Entries = []history.Entry{{InfoHash: "hh1", Name: "OldMovie"}}
+	m, _ = update(m, key("x")) // open the history-delete confirm
+	if !m.histConfirm {
+		t.Fatal("x did not open the history confirm")
+	}
+
+	// As above: the banner quotes the name too, so take the last match.
+	y := lastLineOf(m.View(), "OldMovie")
+	if y < 0 {
+		t.Fatal("history row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the history confirm is open")
+	}
+}
+
+func TestMenuArrowsAndEnterRunsDownload(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha", TorrentURL: "u1"}}}
+	eng := &fakeEngine{}
+	m := ready(New(src, eng))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	if m.menuCursor != 0 {
+		t.Fatalf("menuCursor = %d, want 0 (Download)", m.menuCursor)
+	}
+	// down then up should be a no-op round trip, still on Download.
+	m, _ = update(m, key("down"))
+	if m.menuCursor != 1 {
+		t.Fatalf("menuCursor after down = %d, want 1", m.menuCursor)
+	}
+	m, _ = update(m, key("up"))
+	if m.menuCursor != 0 {
+		t.Fatalf("menuCursor after up = %d, want 0", m.menuCursor)
+	}
+
+	m, cmd = update(m, key("enter"))
+	if m.menuOpen {
+		t.Fatal("enter should run the item and close the menu")
+	}
+	if cmd == nil {
+		t.Fatal("running Download should return a command")
+	}
+	cmd()
+	if eng.addedURL != "u1" {
+		t.Errorf("engine addedURL = %q, want u1 (Download menu item didn't call addCmd)", eng.addedURL)
+	}
+}
+
+func TestMenuEscCloses(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	m, _ = update(m, key("esc"))
+	if m.menuOpen {
+		t.Fatal("esc should close the menu")
+	}
+}
+
+func TestMenuClickOutsideCloses(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	// Well outside the overlay: top-left corner, inside the sidebar column.
+	m, _ = update(m, clickAt(1, 1))
+	if m.menuOpen {
+		t.Fatal("a left-click outside the menu should close it")
+	}
+}
+
+func TestMenuSuspendsPaneKeys(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Alpha")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("menu should be open")
+	}
+	m, _ = update(m, key("/"))
+	if m.editing {
+		t.Fatal("'/' should be suspended while the menu is open")
+	}
+	if !m.menuOpen {
+		t.Fatal("menu should still be open — '/' must not close it either")
+	}
+}
+
+func TestRightClickOpensDownloadsRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}
+	y := lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("download row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a download row should open the menu")
+	}
+	if m.dlCursor != 0 {
+		t.Fatalf("right-click should also select the row, dlCursor=%d, want 0", m.dlCursor)
+	}
+	wantLabels := []string{"Pause", "Details", "Open folder", "Sequential on", "Move up", "Move down", "Cancel..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+}
+
+func TestDownloadsRowMenuLabelsReflectState(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10, Paused: true, Sequential: true},
+	}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuItems[0].label != "Resume" {
+		t.Errorf("paused download's Pause item label = %q, want %q", m.menuItems[0].label, "Resume")
+	}
+	if m.menuItems[3].label != "Sequential off" {
+		t.Errorf("sequential-on download's Sequential item label = %q, want %q", m.menuItems[3].label, "Sequential off")
+	}
+}
+
+func TestDownloadsMenuPauseRunsPauseToggleCmd(t *testing.T) {
+	eng := &fakeEngine{}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "DownloadOne", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 10}}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+
+	m, cmd := update(m, key("enter")) // Pause is item 0
+	if m.menuOpen {
+		t.Fatal("enter should run the item and close the menu")
+	}
+	if cmd == nil {
+		t.Fatal("running Pause should return a command")
+	}
+	cmd()
+	if !eng.paused["abc"] {
+		t.Fatal("Pause menu item didn't call pauseToggleCmd's path")
+	}
+}
+
+func TestDownloadsMenuCancelOpensConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionDownloads
+	m.statuses = []engine.Status{{Name: "DownloadOne", InfoHash: "abc", TotalBytes: 100, CompletedBytes: 10}}
+	y := lineOf(m.View(), "DownloadOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	m.menuCursor = len(m.menuItems) - 1 // "Cancel..."
+
+	m, cmd := update(m, key("enter"))
+	if cmd != nil {
+		t.Fatal("Cancel... should not return a command directly — it opens the existing confirm flow")
+	}
+	if !m.cancelConfirm || m.cancelTarget.InfoHash != "abc" {
+		t.Fatalf("Cancel... should open the cancel confirm on abc, got confirm=%v target=%+v", m.cancelConfirm, m.cancelTarget)
+	}
+}
+
+func TestDownloadsRowMenuAnchorsInScrolledWindow(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.height = 21 // bodyHeight=12 → 3 rows visible, forces a scrolled window
+	m.section = sectionDownloads
+	m.statuses = downloadsFixture(10)
+	m.dlCursor = 9 // window start = dlCursor - visible + 1 = 9-3+1 = 7
+
+	y := lineOf(m.View(), "D7") // first visible row once scrolled
+	if y < 0 {
+		t.Fatal("first visible download (D7) not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on the first visible row should open the menu")
+	}
+	if m.dlCursor != 7 {
+		t.Fatalf("right-clicking the first visible row targeted dlCursor=%d, want 7 (window start)", m.dlCursor)
+	}
+}
+
+func TestRightClickOpensSeedingRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true},
+	}
+	y := lineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("seeding row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a seeding row should open the menu")
+	}
+	if m.seedCursor != 0 {
+		t.Fatalf("right-click should also select the row, seedCursor=%d, want 0", m.seedCursor)
+	}
+	wantLabels := []string{"Pause", "Open", "Stop seeding..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+}
+
+func TestSeedingMenuPauseRunsPauseToggleCmd(t *testing.T) {
+	eng := &fakeEngine{}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	y := lineOf(m.View(), "SeedOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+
+	m, cmd := update(m, key("enter")) // Pause is item 0
+	if cmd == nil {
+		t.Fatal("running Pause should return a command")
+	}
+	cmd()
+	if !eng.paused["sh1"] {
+		t.Fatal("Pause menu item didn't call pauseToggleCmd's path")
+	}
+}
+
+func TestSeedingMenuStopOpensConfirm(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.statuses = []engine.Status{{Name: "SeedOne", InfoHash: "sh1", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true}}
+	y := lineOf(m.View(), "SeedOne")
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	m.menuCursor = len(m.menuItems) - 1 // "Stop seeding..."
+
+	m, cmd := update(m, key("enter"))
+	if cmd != nil {
+		t.Fatal("Stop seeding... should not return a command directly — it opens the existing confirm flow")
+	}
+	if !m.stopConfirm || m.stopTarget.InfoHash != "sh1" {
+		t.Fatalf("Stop seeding... should open the stop confirm on sh1, got confirm=%v target=%+v", m.stopConfirm, m.stopTarget)
+	}
+}
+
+func TestRightClickOpensHistoryRowMenu(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSeeding
+	m.history.Entries = []history.Entry{{InfoHash: "hh1", Name: "OldMovie"}}
+
+	y := lineOf(m.View(), "OldMovie")
+	if y < 0 {
+		t.Fatal("history row not rendered")
+	}
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if !m.menuOpen {
+		t.Fatal("right-click on a history row should open the menu")
+	}
+	wantLabels := []string{"Open", "Remove..."}
+	if len(m.menuItems) != len(wantLabels) {
+		t.Fatalf("menu items = %d, want %d", len(m.menuItems), len(wantLabels))
+	}
+	for i, lbl := range wantLabels {
+		if m.menuItems[i].label != lbl {
+			t.Errorf("item %d label = %q, want %q", i, m.menuItems[i].label, lbl)
+		}
+	}
+
+	m.menuCursor = 1 // "Remove..."
+	m, _ = update(m, key("enter"))
+	if !m.histConfirm || m.histTarget.InfoHash != "hh1" {
+		t.Fatalf("Remove... should open the history confirm on hh1, got confirm=%v target=%+v", m.histConfirm, m.histTarget)
+	}
+}
+
+// --- sidebar clicks ----------------------------------------------------------
+
+func TestClickSidebarSwitchesSection(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	view := m.View()
+	ySearch := lineOf(view, "Search")
+	yDownloads := lineOf(view, "Downloads")
+	ySeeding := lineOf(view, "Seeding")
+	ySettings := lineOf(view, "Settings")
+	for name, y := range map[string]int{"Search": ySearch, "Downloads": yDownloads, "Seeding": ySeeding, "Settings": ySettings} {
+		if y < 0 {
+			t.Fatalf("sidebar item %q not rendered", name)
+		}
+	}
+
+	m.section = sectionSettings
+	m, _ = update(m, clickAt(2, ySearch))
+	if m.section != sectionSearch {
+		t.Errorf("clicking sidebar Search switched to %v, want sectionSearch", m.section)
+	}
+
+	m, _ = update(m, clickAt(2, yDownloads))
+	if m.section != sectionDownloads {
+		t.Errorf("clicking sidebar Downloads switched to %v, want sectionDownloads", m.section)
+	}
+
+	m, _ = update(m, clickAt(2, ySeeding))
+	if m.section != sectionSeeding {
+		t.Errorf("clicking sidebar Seeding switched to %v, want sectionSeeding", m.section)
+	}
+
+	m.section = sectionSearch
+	m, _ = update(m, clickAt(2, ySettings))
+	if m.section != sectionSettings {
+		t.Errorf("clicking sidebar Settings switched to %v, want sectionSettings", m.section)
+	}
+}
+
+func TestClickSidebarInertLineStaysPut(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	y := lineOf(m.View(), m.src.Name()) // the source-name line at the bottom: not an item
+	if y < 0 {
+		t.Fatal("source name line not rendered")
+	}
+	m, _ = update(m, clickAt(2, y))
+	if m.section != sectionSettings {
+		t.Errorf("clicking an inert sidebar line switched section to %v", m.section)
+	}
+}
+
+// --- settings clicks ----------------------------------------------------------
+
+func TestClickSettingsRowSelectsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = 0 // Theme
+
+	y := lineOf(m.View(), "Save to")
+	if y < 0 {
+		t.Fatal("Save to row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if want := settingIndex(t, "Save to"); m.setCursor != want {
+		t.Fatalf("clicking Save to row selected setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+func TestClickSettingsRowInWindowSelectsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	// Scrolls SUBTITLES into view (see TestSettingsSubtitlesGroupRenders).
+	m.setCursor = settingIndex(t, "OS API key")
+
+	y := lineOf(m.View(), "Auto subs")
+	if y < 0 {
+		t.Fatal("Auto subs row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if want := settingIndex(t, "Auto subs"); m.setCursor != want {
+		t.Fatalf("clicking Auto subs row (scrolled window) selected setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+// settingsRowLineNoAnsi returns the ANSI-stripped settings row at screen row y.
+func settingsRowLineNoAnsi(t *testing.T, m Model, y int) string {
+	t.Helper()
+	lines := strings.Split(m.View(), "\n")
+	if y < 0 || y >= len(lines) {
+		t.Fatalf("row %d out of range (view has %d lines)", y, len(lines))
+	}
+	return ansi.Strip(lines[y])
+}
+
+// colOfNoAnsi returns sub's 0-based display column within an ANSI-stripped
+// line (rune-indexed, since every glyph this pane draws is single-width).
+func colOfNoAnsi(t *testing.T, line, sub string) int {
+	t.Helper()
+	i := strings.Index(line, sub)
+	if i < 0 {
+		t.Fatalf("%q not found in settings row:\n%s", sub, line)
+	}
+	return len([]rune(line[:i]))
+}
+
+func TestClickSettingsEnumOptionSetsExactValue(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "Theme") // "● Twilight   ○ Tide"
+	if m.cfg.Theme != "Twilight" {
+		t.Fatalf("default theme = %q, want Twilight", m.cfg.Theme)
+	}
+
+	y := lineOf(m.View(), "Twilight")
+	if y < 0 {
+		t.Fatal("Theme row not rendered")
+	}
+	line := settingsRowLineNoAnsi(t, m, y)
+	// col is already an absolute screen column: settingsRowLineNoAnsi strips
+	// the full terminal row (sidebar + gutter + main), so the row's content
+	// naturally starts at column sidebarWidth+1, same as a real click's x.
+	x := colOfNoAnsi(t, line, "Tide")
+
+	m, _ = update(m, clickAt(x, y))
+	if m.cfg.Theme != "Tide" {
+		t.Fatalf("clicking the Tide option set Theme=%q, want Tide", m.cfg.Theme)
+	}
+	if want := settingIndex(t, "Theme"); m.setCursor != want {
+		t.Fatalf("clicking a Theme option should also select the Theme row, setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+func TestClickSettingsChoiceArrowCyclesLikeArrowKeys(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "Subs lang")
+	if m.cfg.SubsLang != "en" {
+		t.Fatalf("default SubsLang = %q, want en", m.cfg.SubsLang)
+	}
+
+	y := lineOf(m.View(), "English (en)")
+	if y < 0 {
+		t.Fatal("Subs lang row not rendered")
+	}
+
+	// '›' — same path settingsChange(1) takes on the → key: en -> es. The
+	// column found is already an absolute screen column (see
+	// TestClickSettingsEnumOptionSetsExactValue).
+	rCol := colOfNoAnsi(t, settingsRowLineNoAnsi(t, m, y), "›")
+	m, _ = update(m, clickAt(rCol, y))
+	if m.cfg.SubsLang != "es" {
+		t.Fatalf("clicking › set SubsLang=%q, want es (same as → key)", m.cfg.SubsLang)
+	}
+
+	// '‹' — same path settingsChange(-1) takes on the ← key: es -> en.
+	lCol := colOfNoAnsi(t, settingsRowLineNoAnsi(t, m, y), "‹")
+	m, _ = update(m, clickAt(lCol, y))
+	if m.cfg.SubsLang != "en" {
+		t.Fatalf("clicking ‹ set SubsLang=%q, want en (same as ← key)", m.cfg.SubsLang)
+	}
+}
+
+// --- double-click activation ------------------------------------------------
+
+func TestDoubleClickOpensSearchResultDetails(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click: select only
+	if m.showDetail {
+		t.Fatal("a single click must not open details")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor after first click = %d, want 1", m.cursor)
+	}
+
+	m, _ = update(m, clickAt(x, y)) // second click, same row, well within the interval
+	if !m.showDetail {
+		t.Fatal("a double-click on a search row should open its details")
+	}
+	if m.detail.Title != "Bravo" {
+		t.Fatalf("details opened for %q, want Bravo", m.detail.Title)
+	}
+}
+
+func TestDoubleClickFarApartDoesNotOpenDetails(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click
+	// Back-date the click so the second one falls outside doubleClickInterval —
+	// same position, but too late to count as a double-click.
+	m.lastClickAt = time.Now().Add(-doubleClickInterval - time.Millisecond)
+	m, _ = update(m, clickAt(x, y))
+	if m.showDetail {
+		t.Fatal("clicks farther apart than doubleClickInterval must not open details")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("the second click should still select, cursor = %d, want 1", m.cursor)
+	}
+}
+
+func TestDoubleClickDoesNotSpanSectionChange(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	// Simulate a first click that landed in a different section (Search) at
+	// the same (x, y) shortly before — same spot, same timing window, but a
+	// different pane entirely.
+	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, time.Now()
+	m.lastClickSection = sectionSearch
+
+	m, cmd := update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a click following a same-position click from a different section must not count as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the activate command across a section change")
+	}
+	if m.dlCursor != 0 {
+		t.Fatalf("the click should still select, dlCursor = %d, want 0", m.dlCursor)
+	}
+}
+
+func TestDoubleClickDoesNotSpanDetailScreenTransition(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	// Simulate a first click that landed on the download-details screen (a
+	// different logical target) at the same (x, y) shortly before.
+	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, time.Now()
+	m.lastClickSection = sectionDownloads
+	m.lastClickDetail = true
+
+	m, cmd := update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a click following a same-position click from the detail screen must not count as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the detail-open command across a screen transition")
+	}
+}
+
+func TestDoubleClickOpensDownloadDetailScreen(t *testing.T) {
+	eng := &fakeEngine{statuses: []engine.Status{
+		{Name: "DownloadOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 10},
+	}}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "DownloadOne")
+	if y < 0 {
+		t.Fatal("DownloadOne row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y))
+	if m.showDlDetail {
+		t.Fatal("a single click on a download row must not open the details screen")
+	}
+
+	m, cmd := update(m, clickAt(x, y))
+	if !m.showDlDetail {
+		t.Fatal("a double-click on a download row should open the details screen")
+	}
+	if cmd == nil {
+		t.Fatal("the double-click should return the detail-fetch command")
+	}
+}
+
+func TestDoubleClickSeedingOpensFolder(t *testing.T) {
+	dir := t.TempDir() // exists → openable
+	fe := &fakeEngine{statuses: []engine.Status{
+		{Name: "SeedOne", InfoHash: "a", TotalBytes: 100, CompletedBytes: 100, Done: true, Seeding: true, Path: dir},
+	}}
+	m := ready(New(&fakeSource{}, fe))
+	m.section = sectionSeeding
+	m.statuses = fe.statuses
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "SeedOne")
+	if y < 0 {
+		t.Fatal("SeedOne row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y))
+	if m.seedCursor != 0 {
+		t.Fatalf("single click should select seedCursor=0, got %d", m.seedCursor)
+	}
+
+	m, cmd := update(m, clickAt(x, y))
+	if cmd == nil {
+		t.Fatal("a double-click on a seeding row should return an open-folder command (the 'o' path)")
+	}
+}
+
+// TestDoubleClickDoesNotSpanSearchResultReflow covers issue #60: a live
+// re-sort between the first and second click (e.g. sourceUpdateMsg's
+// append+applySort as more source batches stream in) can leave a different
+// result sitting at the coordinates the first click landed on. The second
+// click must not be paired with that stale identity — it must be treated as
+// a fresh single click on whatever is now there, not a double-click-activate
+// on an item the user never actually double-clicked.
+func TestDoubleClickDoesNotSpanSearchResultReflow(t *testing.T) {
+	src := &fakeSource{results: []source.Result{
+		{Title: "Alpha", Popularity: 10, Magnet: "magnet:alpha"},
+		{Title: "Bravo", Popularity: 5, Magnet: "magnet:bravo"},
+	}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // populate + sort: [Alpha(10), Bravo(5)]
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click: selects Bravo (index 1)
+	if m.cursor != 1 {
+		t.Fatalf("cursor after first click = %d, want 1", m.cursor)
+	}
+
+	// A new batch streams in and reflows the list: Charlie's popularity slots
+	// it between Alpha and Bravo, so index 1 — the same row, same (x, y) — now
+	// holds Charlie instead of Bravo.
+	m, _ = update(m, sourceUpdateMsg{gen: m.searchGen, up: source.SourceUpdate{
+		Results: []source.Result{{Title: "Charlie", Popularity: 7, Magnet: "magnet:charlie"}},
+		Done:    1, Total: 1,
+	}})
+	if got := lineOf(m.View(), "Charlie"); got != y {
+		t.Fatalf("reflow setup: Charlie rendered at line %d, want %d (same row Bravo was on)", got, y)
+	}
+	if m.cursor != 1 {
+		t.Fatalf("reflow setup: cursor = %d, want 1 (unchanged, now pointing at Charlie)", m.cursor)
+	}
+
+	m, cmd = update(m, clickAt(x, y)) // second click, same coords, well within the interval
+	if m.showDetail {
+		t.Fatal("a click that lands on a different item after a reflow must not open details as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the activate command across a reflow that changed the clicked item")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("the second click should still select the row it landed on, cursor = %d, want 1", m.cursor)
+	}
+
+	// The reflowed click is now itself a valid "first click": an immediate
+	// third click on the same (now-stable) row must double-click-activate.
+	m, _ = update(m, clickAt(x, y))
+	if !m.showDetail {
+		t.Fatal("a genuine double-click following the reflow should still open details")
+	}
+	if m.detail.Title != "Charlie" {
+		t.Fatalf("details opened for %q, want Charlie", m.detail.Title)
+	}
+}
+
+func TestDetailScreenClickMovesCursorSingleTogglesDouble(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 10}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "a.mkv", Length: 100, Selected: true},
+			{Path: "b.mkv", Length: 100, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	y := lineOf(m.View(), "b.mkv")
+	if y < 0 {
+		t.Fatal("b.mkv row not rendered")
+	}
+
+	m, _ = update(m, clickAt(4, y)) // single click: moves the cursor only
+	if m.dlFileCursor != 1 {
+		t.Fatalf("dlFileCursor after single click = %d, want 1", m.dlFileCursor)
+	}
+	if eng.setFilesPath != "" {
+		t.Fatal("a single click must not toggle the file — SetFiles must not be called")
+	}
+
+	m, cmd = update(m, clickAt(4, y)) // double click: toggles
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "b.mkv" || eng.setFilesSelected {
+		t.Fatalf("double click toggled %q selected=%v, want b.mkv false", eng.setFilesPath, eng.setFilesSelected)
+	}
+	if m.dlDetail.Files[1].Selected {
+		t.Fatal("double click should optimistically deselect b.mkv")
+	}
+}
+
+// TestDoubleClickDetailFileDoesNotSpanFileListReflow covers issue #60 for the
+// download-details file list: the file at a row's coordinates can change
+// between two clicks (e.g. a file dropping out of the listing). The second
+// click must not toggle whatever file now sits there — it must be treated as
+// a fresh single click.
+func TestDoubleClickDetailFileDoesNotSpanFileListReflow(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 300, CompletedBytes: 10}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "a.mkv", Length: 100, Selected: true},
+			{Path: "b.mkv", Length: 100, Selected: true},
+			{Path: "c.mkv", Length: 100, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	y := lineOf(m.View(), "b.mkv")
+	if y < 0 {
+		t.Fatal("b.mkv row not rendered")
+	}
+
+	m, _ = update(m, clickAt(4, y)) // first click: selects b.mkv (index 1)
+	if m.dlFileCursor != 1 {
+		t.Fatalf("dlFileCursor after first click = %d, want 1", m.dlFileCursor)
+	}
+
+	// The file list reflows between clicks (e.g. a.mkv drops out): the same
+	// row index — same (x, y) — now holds c.mkv instead of b.mkv.
+	m.dlDetail.Files = []engine.FileDetail{
+		{Path: "b.mkv", Length: 100, Selected: true},
+		{Path: "c.mkv", Length: 100, Selected: true},
+	}
+	if got := lineOf(m.View(), "c.mkv"); got != y {
+		t.Fatalf("reflow setup: c.mkv rendered at line %d, want %d (same row b.mkv was on)", got, y)
+	}
+
+	m, cmd = update(m, clickAt(4, y)) // second click, same coords, well within the interval
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "" {
+		t.Fatal("a click that lands on a different file after a reflow must not toggle it")
+	}
+	if m.dlFileCursor != 1 {
+		t.Fatalf("the second click should still select the row it landed on, dlFileCursor = %d, want 1", m.dlFileCursor)
+	}
+
+	// The reflowed click is now itself a valid "first click": an immediate
+	// second click on the same (now-stable) row must toggle c.mkv.
+	m, cmd = update(m, clickAt(4, y))
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "c.mkv" || eng.setFilesSelected {
+		t.Fatalf("double click toggled %q selected=%v, want c.mkv false", eng.setFilesPath, eng.setFilesSelected)
 	}
 }
 
@@ -1512,6 +2516,24 @@ func TestStreamingUpdatesMergeAndCount(t *testing.T) {
 	m4, _ := mm.Update(searchClosedMsg{gen: 1})
 	if m4.(Model).searching {
 		t.Fatalf("searchClosedMsg should stop searching")
+	}
+}
+
+// A torrent-URL-only result has no magnet; "Copy magnet" must error instead of
+// copying an empty string and claiming success.
+func TestCopyMagnetEmptyErrorsInsteadOfCopying(t *testing.T) {
+	called := false
+	orig := copyToClipboard
+	copyToClipboard = func(string) error { called = true; return nil }
+	defer func() { copyToClipboard = orig }()
+
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.copyMagnet("")
+	if called {
+		t.Fatal("clipboard written for an empty magnet")
+	}
+	if m.notice == "" || !m.noticeErr {
+		t.Fatalf("want an error notice for an empty magnet, got notice=%q err=%v", m.notice, m.noticeErr)
 	}
 }
 

@@ -51,6 +51,34 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// truncateLeft shortens s to at most n terminal CELLS by dropping characters
+// from the front and prefixing an ellipsis — for a value like a save-to path,
+// where the trailing segments (the leaf directory) matter more than the root,
+// so a settings row never wraps onto a second line. Cells, not runes: wide
+// (e.g. CJK) characters occupy two columns, and settings click hit-testing
+// depends on rows rendering exactly one line.
+func truncateLeft(s string, n int) string {
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	reserve := 1 // the ellipsis cell
+	if n <= 1 {
+		reserve = 0
+	}
+	out := ""
+	for i := len(r) - 1; i >= 0; i-- {
+		if reserve+lipgloss.Width(string(r[i])+out) > n {
+			break
+		}
+		out = string(r[i]) + out
+	}
+	if reserve == 0 {
+		return out
+	}
+	return "…" + out
+}
+
 // formatBytes renders a byte count as a compact human string (e.g. "1.4 GiB").
 func formatBytes(n int64) string {
 	const unit = 1024

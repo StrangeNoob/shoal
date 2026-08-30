@@ -38,7 +38,7 @@ func (m Model) View() string {
 	body := m.renderBody(bodyH)
 	footer := m.renderFooter()
 
-	return strings.Join([]string{header, rule, body, rule, footer}, "\n")
+	return m.spliceMenu(strings.Join([]string{header, rule, body, rule, footer}, "\n"))
 }
 
 func (m Model) renderBody(h int) string {
@@ -47,33 +47,62 @@ func (m Model) renderBody(h int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", main)
 }
 
-func (m Model) renderSidebar() string {
-	var b strings.Builder
-	b.WriteString("\n")
+// sidebarRow is one clickable line of the sidebar column: its 0-indexed line
+// within renderSidebar's output, the section a click there selects, and how
+// to draw it.
+type sidebarRow struct {
+	line     int
+	sec      section
+	label    string
+	hasCount bool
+}
 
-	item := func(sec section, label string, count int, hasCount bool) string {
-		on := m.section == sec
+// sidebarRows is the sidebar's fixed item layout (8 lines total: blank,
+// Search, Downloads, Seeding, blank, Settings, blank, source name).
+// renderSidebar draws each item at its line, and sidebar click hit-testing
+// (clickSidebar) reads the same list back, so a click target can't drift from
+// what's drawn.
+func sidebarRows() []sidebarRow {
+	return []sidebarRow{
+		{1, sectionSearch, "Search", true},
+		{2, sectionDownloads, "Downloads", true},
+		{3, sectionSeeding, "Seeding", true},
+		{5, sectionSettings, "Settings", false},
+	}
+}
+
+// sidebarCount is the badge count shown next to a sidebar item, or 0 for a
+// section that doesn't carry one.
+func (m Model) sidebarCount(sec section) int {
+	switch sec {
+	case sectionSearch:
+		return len(m.filteredResults())
+	case sectionDownloads:
+		return len(m.downloading())
+	case sectionSeeding:
+		return len(m.seeding())
+	}
+	return 0
+}
+
+func (m Model) renderSidebar() string {
+	lines := make([]string, 8) // indices left blank ("") render as empty lines
+	for _, r := range sidebarRows() {
+		on := m.section == r.sec
 		nav, navStyle, labStyle := glyphNavOff, st.Faint, st.SideInactive
 		if on {
 			nav, navStyle, labStyle = glyphNavOn, st.SideActive, st.SideActive
 		}
-		line := navStyle.Render(nav) + " " + labStyle.Render(label)
-		if hasCount && count > 0 {
-			line += "  " + st.Count.Render(fmt.Sprintf("%d", count))
+		line := navStyle.Render(nav) + " " + labStyle.Render(r.label)
+		if r.hasCount {
+			if n := m.sidebarCount(r.sec); n > 0 {
+				line += "  " + st.Count.Render(fmt.Sprintf("%d", n))
+			}
 		}
-		return line
+		lines[r.line] = line
 	}
-
-	b.WriteString(item(sectionSearch, "Search", len(m.filteredResults()), true))
-	b.WriteString("\n")
-	b.WriteString(item(sectionDownloads, "Downloads", len(m.downloading()), true))
-	b.WriteString("\n")
-	b.WriteString(item(sectionSeeding, "Seeding", len(m.seeding()), true))
-	b.WriteString("\n\n")
-	b.WriteString(item(sectionSettings, "Settings", 0, false))
-	b.WriteString("\n\n")
-	b.WriteString(st.Faint.Render(m.src.Name()))
-	return b.String()
+	lines[7] = st.Faint.Render(m.src.Name())
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderMain(w, h int) string {
@@ -290,10 +319,10 @@ func (m Model) dlDetailView() string {
 	default:
 		b.WriteString("  " + st.SectionHead.Render(fmt.Sprintf("FILES (%d)", len(m.dlDetail.Files))) + "\n")
 		nameW := max(10, m.width-38)
-		maxFiles := max(1, m.height-12-min(len(m.dlDetail.Trackers), 6)) // leave room for trackers + chrome
+		_, shown := m.dlDetailFileRows() // shared with clickDetailFile so hit-testing can't drift
 		for i, f := range m.dlDetail.Files {
-			if i >= maxFiles {
-				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more files", len(m.dlDetail.Files)-maxFiles)) + "\n")
+			if i >= shown {
+				b.WriteString("  " + st.Faint.Render(fmt.Sprintf("… %d more files", len(m.dlDetail.Files)-shown)) + "\n")
 				break
 			}
 			pct := 0.0
@@ -591,13 +620,24 @@ func (m Model) seedingRowCounts() []int {
 
 // --- Settings --------------------------------------------------------------
 
+// setLabelWidth is the fixed display-column width settings rows pad/trim
+// their label into. setValueColOffset is where a row's value then starts:
+// cursor(2) + label + sep(2). Both renderSettings/renderSettingValue (drawing
+// the row) and settingsClickValue (translating a click's x into the value
+// column) measure from this same offset, so they can't drift apart.
+const (
+	setLabelWidth     = 13
+	setValueColOffset = 2 + setLabelWidth + 2
+)
+
 func (m Model) renderSettings(w, h int) string {
 	items := settingItems()
+	counts := settingsRowCounts(items)
 
 	// Render each row into its own block of lines (a group header, preceded by a
-	// blank separator, leads the first row of each group).
+	// blank separator, leads the first row of each group) — counts mirrors this
+	// structure exactly (settingsRowCounts is the same group-boundary logic).
 	blocks := make([][]string, len(items))
-	counts := make([]int, len(items))
 	lastGroup := ""
 	for i, it := range items {
 		var ls []string
@@ -613,24 +653,18 @@ func (m Model) renderSettings(w, h int) string {
 		if sel {
 			cursor, labStyle = st.Accent.Render(glyphCursor+" "), st.SetLabelSel
 		}
-		label := labStyle.Render(padOrTrim(it.label, 13))
+		label := labStyle.Render(padOrTrim(it.label, setLabelWidth))
 		var val string
 		if sel && m.editingSetting {
 			val = m.setInput.View()
 		} else {
-			val = m.renderSettingValue(it)
+			val = m.renderSettingValue(it, w)
 		}
 		ls = append(ls, cursor+label+"  "+val)
-		blocks[i], counts[i] = ls, len(ls)
+		blocks[i] = ls
 	}
 
-	// ABOUT is informational, not navigable — always pinned at the bottom.
-	about := []string{
-		"",
-		st.SectionHead.Render("ABOUT"),
-		"  " + st.SetLabel.Render(padOrTrim("shoal", 13)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"),
-		"  " + st.Meta.Render("engine settings (port, peers, save-to, seed, auto subs) apply when the daemon restarts"),
-	}
+	about := m.settingsAboutBlock()
 
 	// Window the navigable rows around the cursor so the selection is always
 	// visible even when the list is taller than the pane (e.g. many SOURCES rows).
@@ -650,6 +684,43 @@ func (m Model) renderSettings(w, h int) string {
 		b.WriteString(ln + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// settingsRowCounts returns each setting row's rendered line count: 1 for a
+// row within its group, plus a group-header line (and a leading blank,
+// except before the very first group) when the row starts a new group. This
+// depends only on the items' group sequence — every row's own line is always
+// exactly one line (renderSettingValue guarantees a kindText value never
+// wraps) — so it's derivable once, shared by renderSettings (via
+// settingsWindow) and settingsClickRows, and can't drift from either.
+func settingsRowCounts(items []setItem) []int {
+	counts := make([]int, len(items))
+	lastGroup := ""
+	for i, it := range items {
+		n := 1
+		if it.group != lastGroup {
+			n++ // group header line
+			if lastGroup != "" {
+				n++ // blank separator before a new group
+			}
+			lastGroup = it.group
+		}
+		counts[i] = n
+	}
+	return counts
+}
+
+// settingsAboutBlock is the pinned, non-navigable info block at the bottom of
+// the Settings pane. Shared by renderSettings (draws it) and
+// settingsClickRows (reserves its height from the navigable window), so the
+// two can't drift.
+func (m Model) settingsAboutBlock() []string {
+	return []string{
+		"",
+		st.SectionHead.Render("ABOUT"),
+		"  " + st.SetLabel.Render(padOrTrim("shoal", setLabelWidth)) + "  " + st.Meta.Render(upd.DisplayVersion(m.version)+"  ·  anacrolix engine"),
+		"  " + st.Meta.Render("engine settings (port, peers, save-to, seed, auto subs) apply when the daemon restarts"),
+	}
 }
 
 // settingsWindow returns the [start,end) range of setting rows to render so that
@@ -687,25 +758,55 @@ func settingsWindow(counts []int, cursor, avail int) (start, end int) {
 	return start, end
 }
 
-func (m Model) renderSettingValue(it setItem) string {
+// enumOptionLabels returns each option's plain "glyph option" text for a
+// kindEnum row (● for the current value, ○ otherwise) — the exact spans
+// renderSettingValue styles and joins with "   ", and what a click on a
+// specific option (settingsClickValue) measures x-ranges against, so the two
+// can't drift.
+func enumOptionLabels(cur string, options []string) []string {
+	labels := make([]string, len(options))
+	for i, o := range options {
+		g := glyphNavOff
+		if o == cur {
+			g = glyphNavOn
+		}
+		labels[i] = g + " " + o
+	}
+	return labels
+}
+
+// choiceLabel is the display label for a kindChoice row's current value (the
+// curated label + code, or "<code> (custom)" for an uncurated one) — what
+// renderSettingValue wraps in ‹ › and what a ‹/› arrow click
+// (settingsClickValue) measures its zones against.
+func choiceLabel(cur string) string {
+	label := cur + " (custom)"
+	if lbl, ok := subsLangLabel(cur); ok {
+		label = lbl + " (" + cur + ")"
+	}
+	return label
+}
+
+// renderSettingValue draws a setting item's value column. w is the pane width
+// the row is rendered into: a kindText value (e.g. a long "Save to" path) is
+// truncated to fit within it — so a settings row is always exactly one line,
+// which is what lets settingsClickRows hit-test rows reliably.
+func (m Model) renderSettingValue(it setItem, w int) string {
 	if it.kind == kindEnum {
 		cur := it.get(&m)
-		parts := make([]string, 0, len(it.options))
-		for _, o := range it.options {
-			if o == cur {
-				parts = append(parts, st.SetValOn.Render(glyphNavOn+" "+o))
+		labels := enumOptionLabels(cur, it.options)
+		parts := make([]string, len(labels))
+		for i, lbl := range labels {
+			if it.options[i] == cur {
+				parts[i] = st.SetValOn.Render(lbl)
 			} else {
-				parts = append(parts, st.Meta.Render(glyphNavOff+" "+o))
+				parts[i] = st.Meta.Render(lbl)
 			}
 		}
 		return strings.Join(parts, "   ")
 	}
 	if it.kind == kindChoice {
-		cur := it.get(&m)
-		label := cur + " (custom)"
-		if lbl, ok := subsLangLabel(cur); ok {
-			label = lbl + " (" + cur + ")"
-		}
+		label := choiceLabel(it.get(&m))
 		return st.Meta.Render(glyphChevL+" ") + st.SetValOn.Render(label) + st.Meta.Render(" "+glyphChevR)
 	}
 	style := st.SetVal
@@ -716,6 +817,7 @@ func (m Model) renderSettingValue(it setItem) string {
 	if it.label == "OS API key" {
 		val = maskAPIKey(val)
 	}
+	val = truncateLeft(val, max(1, w-setValueColOffset))
 	return style.Render(val)
 }
 
