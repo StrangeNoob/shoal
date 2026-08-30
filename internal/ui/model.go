@@ -1927,6 +1927,10 @@ func (m *Model) openDetail() {
 // notice/error the Search-detail 'y' key sets. Also dispatched into by the
 // result row's context-menu "Copy magnet" item.
 func (m *Model) copyMagnet(magnet string) {
+	if magnet == "" { // torrent-URL-only results carry no magnet — don't copy "" and claim success
+		m.setError("this result has no magnet link")
+		return
+	}
 	if err := copyToClipboard(magnet); err != nil {
 		m.setError("Copy failed: " + err.Error())
 	} else {

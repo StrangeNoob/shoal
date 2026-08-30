@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
@@ -124,7 +125,8 @@ const menuGap = 2
 func menuContentWidth(items []menuItem) int {
 	w := 0
 	for _, it := range items {
-		if s := len(it.label) + menuGap + len(it.key); s > w {
+		// Display cells, not bytes — a non-ASCII label must not overstate the width.
+		if s := lipgloss.Width(it.label) + menuGap + lipgloss.Width(it.key); s > w {
 			w = s
 		}
 	}
@@ -159,7 +161,7 @@ func (m Model) renderMenu() string {
 		if i == m.menuCursor {
 			labelStyle = st.RowSel
 		}
-		gap := contentW - len(it.label) - len(it.key)
+		gap := contentW - lipgloss.Width(it.label) - lipgloss.Width(it.key)
 		line := " " + labelStyle.Render(it.label) + strings.Repeat(" ", gap) + st.Faint.Render(it.key) + " "
 		b.WriteString(line)
 		if i < len(m.menuItems)-1 {

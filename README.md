@@ -86,7 +86,7 @@ details screen, **Downloads** → the per-file details screen, **Seeding** →
 the file/folder (same as `o`), and a file row inside the Downloads details
 screen → toggles it (same as `space`). A right-click opens a context menu of
 that row's actions, each labeled with its keyboard shortcut — click an item,
-or `↑ ↓`/`enter`/`esc`. The **sidebar** is clickable to switch panes, and the
+or `↑ ↓`/`enter`/`esc`; clicking anywhere outside the menu dismisses it. The **sidebar** is clickable to switch panes, and the
 scroll wheel moves the selection in any pane.
 
 **Downloads** — each row shows the name, live progress bar, transferred / total, peers,

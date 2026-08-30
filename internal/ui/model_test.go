@@ -2519,6 +2519,24 @@ func TestStreamingUpdatesMergeAndCount(t *testing.T) {
 	}
 }
 
+// A torrent-URL-only result has no magnet; "Copy magnet" must error instead of
+// copying an empty string and claiming success.
+func TestCopyMagnetEmptyErrorsInsteadOfCopying(t *testing.T) {
+	called := false
+	orig := copyToClipboard
+	copyToClipboard = func(string) error { called = true; return nil }
+	defer func() { copyToClipboard = orig }()
+
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.copyMagnet("")
+	if called {
+		t.Fatal("clipboard written for an empty magnet")
+	}
+	if m.notice == "" || !m.noticeErr {
+		t.Fatalf("want an error notice for an empty magnet, got notice=%q err=%v", m.notice, m.noticeErr)
+	}
+}
+
 func TestDetailOpenCopyAndBack(t *testing.T) {
 	orig := copyToClipboard
 	defer func() { copyToClipboard = orig }()
