@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,8 +17,8 @@ import (
 )
 
 // subsFetch is a seam over subtitles.Fetch so CLI tests use a recorder, not HTTP.
-var subsFetch = func(apiKey, videoPath, lang string) (string, error) {
-	return subtitles.Fetch(subtitles.NewDefaultClient(apiKey), videoPath, lang)
+var subsFetch = func(ctx context.Context, apiKey, videoPath, lang string) (string, error) {
+	return subtitles.Fetch(ctx, subtitles.NewDefaultClient(apiKey), videoPath, lang)
 }
 
 // runSubs implements `shoal subs <id> [--lang <code>] [--files <glob>]`:
@@ -64,7 +65,10 @@ func runSubs(args []string, out io.Writer) int {
 				fmt.Fprintf(os.Stderr, "shoal subs: %s: unsafe path (escapes torrent directory)\n", f.Path)
 				continue
 			}
-			srt, err := subsFetch(cfg.OpenSubsAPIKey, path, useLang)
+			// context.Background(): the CLI has no signal-context/cancellation
+			// pattern today (each invocation runs one command and exits), unlike
+			// the daemon's engine which derives ctx from its own Close.
+			srt, err := subsFetch(context.Background(), cfg.OpenSubsAPIKey, path, useLang)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "shoal subs: %s: %v\n", f.Path, err)
 				// A rate limit or a rejected key will fail every remaining

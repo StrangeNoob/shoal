@@ -2,12 +2,15 @@ package subtitles
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // NewDefaultClient is the single place the production base URL, request
@@ -75,7 +78,7 @@ func TestSearchRequestAndParsing(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	got, err := c.Search("abc123", "my movie", "en")
+	got, err := c.Search(context.Background(), "abc123", "my movie", "en")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestSearchHashOnlyOmitsQueryParam(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Search("abc123", "", "en"); err != nil {
+	if _, err := c.Search(context.Background(), "abc123", "", "en"); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 }
@@ -153,7 +156,7 @@ func TestDownloadFlow(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	got, err := c.Download(123)
+	got, err := c.Download(context.Background(), 123)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -174,7 +177,7 @@ func TestDownloadRejectsEmptyLink(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Download(123); err == nil {
+	if _, err := c.Download(context.Background(), 123); err == nil {
 		t.Fatal("err = nil, want error for an empty download link")
 	}
 }
@@ -186,7 +189,7 @@ func TestDownloadRejectsNonHTTPSNonLoopbackLink(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := c.Download(123)
+	_, err := c.Download(context.Background(), 123)
 	if err == nil {
 		t.Fatal("err = nil, want error for a non-https, non-loopback download link")
 	}
@@ -224,7 +227,7 @@ func TestDownloadRejectsPrivateHTTPSTarget(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := c.Download(123)
+	_, err := c.Download(context.Background(), 123)
 	if err == nil || !strings.Contains(err.Error(), "non-public") {
 		t.Fatalf("err = %v, want a non-public-address policy error", err)
 	}
@@ -248,7 +251,7 @@ func TestDownloadRejectsUnsafeRedirect(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := c.Download(123)
+	_, err := c.Download(context.Background(), 123)
 	if err == nil {
 		t.Fatal("err = nil, want error for a redirect to a non-https, non-loopback target")
 	}
@@ -275,7 +278,7 @@ func TestDownloadFollowsSafeRedirect(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	got, err := c.Download(123)
+	got, err := c.Download(context.Background(), 123)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -302,7 +305,7 @@ func TestDownloadRejectsOversizedBody(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Download(123); err == nil || !strings.Contains(err.Error(), "exceeds") {
+	if _, err := c.Download(context.Background(), 123); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("err = %v, want an exceeds-limit error", err)
 	}
 }
@@ -318,7 +321,7 @@ func TestSearchOtherStatusErrorIncludesBody(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := c.Search("abc123", "", "en")
+	_, err := c.Search(context.Background(), "abc123", "", "en")
 	if err == nil {
 		t.Fatal("err = nil, want error")
 	}
@@ -334,7 +337,7 @@ func TestSearchRateLimited(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Search("abc123", "", "en"); err != ErrRateLimited {
+	if _, err := c.Search(context.Background(), "abc123", "", "en"); err != ErrRateLimited {
 		t.Fatalf("err = %v, want ErrRateLimited", err)
 	}
 }
@@ -346,7 +349,7 @@ func TestDownloadRateLimited(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Download(123); err != ErrRateLimited {
+	if _, err := c.Download(context.Background(), 123); err != ErrRateLimited {
 		t.Fatalf("err = %v, want ErrRateLimited", err)
 	}
 }
@@ -358,7 +361,7 @@ func TestSearchBadKey(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Search("abc123", "", "en"); err != ErrBadKey {
+	if _, err := c.Search(context.Background(), "abc123", "", "en"); err != ErrBadKey {
 		t.Fatalf("err = %v, want ErrBadKey", err)
 	}
 }
@@ -370,7 +373,7 @@ func TestDownloadBadKeyForbidden(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Download(123); err != ErrBadKey {
+	if _, err := c.Download(context.Background(), 123); err != ErrBadKey {
 		t.Fatalf("err = %v, want ErrBadKey", err)
 	}
 }
@@ -382,7 +385,7 @@ func TestSearchOtherStatusError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	_, err := c.Search("abc123", "", "en")
+	_, err := c.Search(context.Background(), "abc123", "", "en")
 	if err == nil {
 		t.Fatal("err = nil, want error containing status")
 	}
@@ -398,7 +401,7 @@ func TestSearchMalformedJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "test-key", testUA)
-	if _, err := c.Search("abc123", "", "en"); err == nil {
+	if _, err := c.Search(context.Background(), "abc123", "", "en"); err == nil {
 		t.Fatal("err = nil, want a decode error for malformed JSON")
 	}
 }
@@ -424,10 +427,84 @@ func TestClientHTTPOverrideIsUsed(t *testing.T) {
 	ct := &countingTransport{rt: http.DefaultTransport}
 	c := NewClient(srv.URL, "test-key", testUA)
 	c.HTTP = &http.Client{Transport: ct}
-	if _, err := c.Search("abc123", "", "en"); err != nil {
+	if _, err := c.Search(context.Background(), "abc123", "", "en"); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if ct.calls != 1 {
 		t.Fatalf("override transport calls = %d, want 1", ct.calls)
+	}
+}
+
+// Search must build its request with the caller's context (issue #47): an
+// already-canceled context aborts before the request ever reaches the wire,
+// so the server sees zero requests.
+func TestSearchAbortsOnCanceledContext(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = io.WriteString(w, `{"data":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := NewClient(srv.URL, "test-key", testUA)
+	if _, err := c.Search(ctx, "abc123", "", "en"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if called {
+		t.Error("server was called though the context was already canceled")
+	}
+}
+
+// Download's second hop — following the CDN link the API hands back — must
+// also honor the caller's context, not just the initial POST /download. A
+// client that dropped ctx on that hop would hang until the CDN responds
+// (potentially the full 30s HTTP timeout) instead of aborting immediately,
+// which is exactly what issue #47 needs for daemon shutdown.
+func TestDownloadCDNLinkRespectsContextCancellation(t *testing.T) {
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/files/slow.srt"}`))
+		case "/files/slow.srt":
+			close(started) // signal that the CDN request has actually arrived
+			<-unblock      // hangs until the test releases it or the request is canceled first
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(func() {
+		close(unblock)
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c := NewClient(srv.URL, "test-key", testUA)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Download(ctx, 123)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CDN request never arrived")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Download did not return after context cancellation — the CDN hop isn't using ctx")
 	}
 }

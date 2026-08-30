@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ const defaultLang = "en"
 // search on any hash error (e.g. the file is under the 128 KiB minimum).
 // Among results, a moviehash match is preferred; otherwise the first result
 // is used.
-func Fetch(c *Client, videoPath, lang string) (string, error) {
+func Fetch(ctx context.Context, c *Client, videoPath, lang string) (string, error) {
 	if lang == "" {
 		lang = defaultLang
 	}
@@ -54,7 +55,7 @@ func Fetch(c *Client, videoPath, lang string) (string, error) {
 		return "", err
 	}
 
-	results, err := c.Search(hash, query, lang)
+	results, err := c.Search(ctx, hash, query, lang)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +70,7 @@ func Fetch(c *Client, videoPath, lang string) (string, error) {
 		}
 	}
 
-	data, err := c.Download(best.FileID)
+	data, err := c.Download(ctx, best.FileID)
 	if err != nil {
 		return "", err
 	}

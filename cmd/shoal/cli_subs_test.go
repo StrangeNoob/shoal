@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -65,7 +66,7 @@ func swapSubsFetch(t *testing.T, fn func(apiKey, videoPath, lang string) (string
 	t.Helper()
 	calls := &[]subsFetchCall{}
 	orig := subsFetch
-	subsFetch = func(apiKey, videoPath, lang string) (string, error) {
+	subsFetch = func(ctx context.Context, apiKey, videoPath, lang string) (string, error) {
 		*calls = append(*calls, subsFetchCall{apiKey, videoPath, lang})
 		return fn(apiKey, videoPath, lang)
 	}
