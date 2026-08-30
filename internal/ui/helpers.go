@@ -51,6 +51,21 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// truncateLeft shortens s to at most n runes by dropping characters from the
+// front and prefixing an ellipsis — for a value like a save-to path, where the
+// trailing segments (the leaf directory) matter more than the root, so a
+// settings row never wraps onto a second line.
+func truncateLeft(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return string(r[max(0, len(r)-n):])
+	}
+	return "…" + string(r[len(r)-(n-1):])
+}
+
 // formatBytes renders a byte count as a compact human string (e.g. "1.4 GiB").
 func formatBytes(n int64) string {
 	const unit = 1024

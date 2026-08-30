@@ -99,6 +99,26 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+func TestTruncateLeft(t *testing.T) {
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"hello", 10, "hello"},
+		{"hello", 5, "hello"},
+		{"hello", 4, "…llo"},
+		{"hello", 1, "o"},
+		{"hello", 0, ""},
+		{"héllo", 3, "…lo"}, // rune-aware
+	}
+	for _, c := range cases {
+		if got := truncateLeft(c.in, c.n); got != c.want {
+			t.Errorf("truncateLeft(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
+	}
+}
+
 func TestFormatBytes(t *testing.T) {
 	cases := map[int64]string{
 		0:          "0 B",

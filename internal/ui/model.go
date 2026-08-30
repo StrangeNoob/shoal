@@ -1431,11 +1431,17 @@ func (m *Model) registerClick(x, y int) bool {
 	return false
 }
 
-// handleClick selects the clicked row (always — single-click is exactly
-// select-only) and, on a double-click that actually landed on a row, also
-// activates it: the same path 'enter' (Search, Downloads) or 'o' (Seeding)
-// uses today.
+// handleClick handles a left-press. A click in the sidebar column just
+// switches the active pane — it's not part of the row-select/double-click-
+// activate flow below, so it doesn't touch the double-click tracker. Otherwise
+// it selects the clicked row (always — single-click is exactly select-only)
+// and, on a double-click that actually landed on a row, also activates it:
+// the same path 'enter' (Search, Downloads) or 'o' (Seeding) uses today.
 func (m *Model) handleClick(x, y int) tea.Cmd {
+	if x <= sidebarWidth { // sidebar or the 1-col gutter
+		m.clickSidebar(y)
+		return nil
+	}
 	double := m.registerClick(x, y)
 	hit := m.clickSelect(x, y)
 	if !double || !hit {
@@ -1450,12 +1456,25 @@ func (m *Model) handleClick(x, y int) tea.Cmd {
 	return nil
 }
 
+// clickSidebar switches m.section when a left-click lands on one of the
+// sidebar's item lines. sidebarRows is the same table renderSidebar draws
+// from, so a click target can't drift from what's drawn; clicks on the
+// sidebar's blank or source-name lines are inert.
+func (m *Model) clickSidebar(y int) bool {
+	base := m.headerHeight() + 1
+	for _, r := range sidebarRows() {
+		if y == base+r.line {
+			m.section = r.sec
+			return true
+		}
+	}
+	return false
+}
+
 // clickSelect moves the selection to a clicked row and reports whether the
-// click actually landed on one. Implemented for the two list panes with clean,
-// single-height-row geometry (Search results and Downloads); Seeding's
-// two-section mixed-height layout and Settings' group headers are left to the
-// keyboard/wheel for movement (Seeding rows are still click-selectable via
-// seedingClickRows).
+// click actually landed on one. Implemented for all four panes, each sharing
+// its row geometry with the corresponding render function (via a *Window or
+// *ClickRows helper) so a click target can't drift from what's drawn.
 // ponytail: mirrors the render layout in View/renderResults/renderDownloads —
 // the render-anchored tests catch any drift if that layout changes.
 func (m *Model) clickSelect(x, y int) bool {
@@ -1498,9 +1517,20 @@ func (m *Model) clickSelect(x, y int) bool {
 				return true
 			}
 		}
-		// Settings is intentionally excluded: its value column (e.g. a long "Save
-		// to" path) wraps, so rows have variable height and click hit-testing
-		// can't be reliable. Settings stays keyboard/wheel-navigable.
+	case sectionSettings:
+		// Settings rows used to be excluded here: a long "Save to" path could
+		// wrap its value onto a second line, so rows had variable height and
+		// hit-testing couldn't be reliable. renderSettingValue now truncates a
+		// kindText value to one line by construction, so every row is exactly
+		// its settingsRowCounts height and settingsClickRows can hit-test it.
+		for _, r := range m.settingsClickRows() {
+			if y != r.y {
+				continue
+			}
+			m.setCursor = r.idx
+			m.settingsClickValue(r.idx, x-sidebarWidth-1-setValueColOffset)
+			return true
+		}
 	}
 	return false
 }
@@ -1542,6 +1572,77 @@ func (m Model) seedingClickRows() []clickRow {
 		y += c
 	}
 	return rows
+}
+
+// settingsClickRows returns the screen-Y and item index of each visible
+// settings row's clickable line — the label+value line at the end of its
+// block, built from the same settingsRowCounts + settingsWindow layout
+// renderSettings uses (with the pinned ABOUT block's height reserved the same
+// way), so a click lands on the right row even when the window has scrolled.
+// Group headers and ABOUT itself aren't included — inert to clicks.
+func (m Model) settingsClickRows() []clickRow {
+	items := settingItems()
+	counts := settingsRowCounts(items)
+	avail := max(1, m.bodyHeight()-len(m.settingsAboutBlock()))
+	start, end := settingsWindow(counts, m.setCursor, avail)
+
+	base := m.headerHeight() + 1
+	rows := make([]clickRow, 0, end-start)
+	y := base
+	for i := start; i < end; i++ {
+		c := counts[i]
+		y += c
+		rows = append(rows, clickRow{y: y - 1, idx: i, span: 1}) // the label/value line, at the end of the block
+	}
+	return rows
+}
+
+// optionAt returns which label in a kindEnum row's "   "-joined ● ○ option
+// list contains column x (0-indexed from the start of the row's value),
+// given the same labels enumOptionLabels/renderSettingValue produce.
+func optionAt(labels []string, x int) (int, bool) {
+	pos := 0
+	for i, lbl := range labels {
+		w := len([]rune(lbl))
+		if x >= pos && x < pos+w {
+			return i, true
+		}
+		pos += w + 3 // the "   " separator
+	}
+	return -1, false
+}
+
+// settingsClickValue applies a click at column valX (0-indexed from the start
+// of item idx's rendered value — see setValueColOffset) to that item: a
+// kindEnum click on a specific "● option" span sets that option directly; a
+// kindChoice click on the ‹ or › zone cycles via settingsChange, the same
+// path ←/→ use. A click elsewhere in the value column (or on a kindText row,
+// which has no clickable zones) only selects the row — already done by the
+// caller before this runs.
+func (m *Model) settingsClickValue(idx, valX int) {
+	if valX < 0 {
+		return
+	}
+	items := settingItems()
+	if idx < 0 || idx >= len(items) {
+		return
+	}
+	it := items[idx]
+	switch it.kind {
+	case kindEnum:
+		labels := enumOptionLabels(it.get(m), it.options)
+		if i, ok := optionAt(labels, valX); ok {
+			m.applySettingOption(it, i)
+		}
+	case kindChoice:
+		total := len([]rune(choiceLabel(it.get(m)))) + 4 // "‹ " + label + " ›"
+		switch {
+		case valX < 2:
+			m.settingsChange(-1)
+		case valX >= total-2:
+			m.settingsChange(1)
+		}
+	}
 }
 
 // dlDetailFileRows returns the screen-Y of the first file row and how many
@@ -1948,6 +2049,13 @@ func (m *Model) settingsChange(dir int) {
 	} else {
 		idx = (idx + dir + len(it.options)) % len(it.options)
 	}
+	m.applySettingOption(it, idx)
+}
+
+// applySettingOption sets a setting item's value to options[idx] and
+// persists — shared by settingsChange (←/→ cycling) and a direct
+// enum-option click (settingsClickValue).
+func (m *Model) applySettingOption(it setItem, idx int) {
 	it.set(m, it.options[idx])
 	m.persist()
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/StrangeNoob/shoal/internal/engine"
 	"github.com/StrangeNoob/shoal/internal/history"
@@ -603,6 +604,168 @@ func TestClickSelectsSeedingRow(t *testing.T) {
 	m, _ = update(m, clickAt(sidebarWidth+3, y))
 	if m.seedCursor != 1 {
 		t.Fatalf("clicking SeedTwo selected seedCursor=%d, want 1", m.seedCursor)
+	}
+}
+
+// --- sidebar clicks ----------------------------------------------------------
+
+func TestClickSidebarSwitchesSection(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	view := m.View()
+	ySearch := lineOf(view, "Search")
+	yDownloads := lineOf(view, "Downloads")
+	ySeeding := lineOf(view, "Seeding")
+	ySettings := lineOf(view, "Settings")
+	for name, y := range map[string]int{"Search": ySearch, "Downloads": yDownloads, "Seeding": ySeeding, "Settings": ySettings} {
+		if y < 0 {
+			t.Fatalf("sidebar item %q not rendered", name)
+		}
+	}
+
+	m.section = sectionSettings
+	m, _ = update(m, clickAt(2, ySearch))
+	if m.section != sectionSearch {
+		t.Errorf("clicking sidebar Search switched to %v, want sectionSearch", m.section)
+	}
+
+	m, _ = update(m, clickAt(2, yDownloads))
+	if m.section != sectionDownloads {
+		t.Errorf("clicking sidebar Downloads switched to %v, want sectionDownloads", m.section)
+	}
+
+	m, _ = update(m, clickAt(2, ySeeding))
+	if m.section != sectionSeeding {
+		t.Errorf("clicking sidebar Seeding switched to %v, want sectionSeeding", m.section)
+	}
+
+	m.section = sectionSearch
+	m, _ = update(m, clickAt(2, ySettings))
+	if m.section != sectionSettings {
+		t.Errorf("clicking sidebar Settings switched to %v, want sectionSettings", m.section)
+	}
+}
+
+func TestClickSidebarInertLineStaysPut(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	y := lineOf(m.View(), m.src.Name()) // the source-name line at the bottom: not an item
+	if y < 0 {
+		t.Fatal("source name line not rendered")
+	}
+	m, _ = update(m, clickAt(2, y))
+	if m.section != sectionSettings {
+		t.Errorf("clicking an inert sidebar line switched section to %v", m.section)
+	}
+}
+
+// --- settings clicks ----------------------------------------------------------
+
+func TestClickSettingsRowSelectsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = 0 // Theme
+
+	y := lineOf(m.View(), "Save to")
+	if y < 0 {
+		t.Fatal("Save to row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if want := settingIndex(t, "Save to"); m.setCursor != want {
+		t.Fatalf("clicking Save to row selected setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+func TestClickSettingsRowInWindowSelectsCursor(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	// Scrolls SUBTITLES into view (see TestSettingsSubtitlesGroupRenders).
+	m.setCursor = settingIndex(t, "OS API key")
+
+	y := lineOf(m.View(), "Auto subs")
+	if y < 0 {
+		t.Fatal("Auto subs row not rendered")
+	}
+	m, _ = update(m, clickAt(sidebarWidth+3, y))
+	if want := settingIndex(t, "Auto subs"); m.setCursor != want {
+		t.Fatalf("clicking Auto subs row (scrolled window) selected setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+// settingsRowLineNoAnsi returns the ANSI-stripped settings row at screen row y.
+func settingsRowLineNoAnsi(t *testing.T, m Model, y int) string {
+	t.Helper()
+	lines := strings.Split(m.View(), "\n")
+	if y < 0 || y >= len(lines) {
+		t.Fatalf("row %d out of range (view has %d lines)", y, len(lines))
+	}
+	return ansi.Strip(lines[y])
+}
+
+// colOfNoAnsi returns sub's 0-based display column within an ANSI-stripped
+// line (rune-indexed, since every glyph this pane draws is single-width).
+func colOfNoAnsi(t *testing.T, line, sub string) int {
+	t.Helper()
+	i := strings.Index(line, sub)
+	if i < 0 {
+		t.Fatalf("%q not found in settings row:\n%s", sub, line)
+	}
+	return len([]rune(line[:i]))
+}
+
+func TestClickSettingsEnumOptionSetsExactValue(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "Theme") // "● Twilight   ○ Tide"
+	if m.cfg.Theme != "Twilight" {
+		t.Fatalf("default theme = %q, want Twilight", m.cfg.Theme)
+	}
+
+	y := lineOf(m.View(), "Twilight")
+	if y < 0 {
+		t.Fatal("Theme row not rendered")
+	}
+	line := settingsRowLineNoAnsi(t, m, y)
+	// col is already an absolute screen column: settingsRowLineNoAnsi strips
+	// the full terminal row (sidebar + gutter + main), so the row's content
+	// naturally starts at column sidebarWidth+1, same as a real click's x.
+	x := colOfNoAnsi(t, line, "Tide")
+
+	m, _ = update(m, clickAt(x, y))
+	if m.cfg.Theme != "Tide" {
+		t.Fatalf("clicking the Tide option set Theme=%q, want Tide", m.cfg.Theme)
+	}
+	if want := settingIndex(t, "Theme"); m.setCursor != want {
+		t.Fatalf("clicking a Theme option should also select the Theme row, setCursor=%d, want %d", m.setCursor, want)
+	}
+}
+
+func TestClickSettingsChoiceArrowCyclesLikeArrowKeys(t *testing.T) {
+	m := ready(New(&fakeSource{}, &fakeEngine{}))
+	m.section = sectionSettings
+	m.setCursor = settingIndex(t, "Subs lang")
+	if m.cfg.SubsLang != "en" {
+		t.Fatalf("default SubsLang = %q, want en", m.cfg.SubsLang)
+	}
+
+	y := lineOf(m.View(), "English (en)")
+	if y < 0 {
+		t.Fatal("Subs lang row not rendered")
+	}
+
+	// '›' — same path settingsChange(1) takes on the → key: en -> es. The
+	// column found is already an absolute screen column (see
+	// TestClickSettingsEnumOptionSetsExactValue).
+	rCol := colOfNoAnsi(t, settingsRowLineNoAnsi(t, m, y), "›")
+	m, _ = update(m, clickAt(rCol, y))
+	if m.cfg.SubsLang != "es" {
+		t.Fatalf("clicking › set SubsLang=%q, want es (same as → key)", m.cfg.SubsLang)
+	}
+
+	// '‹' — same path settingsChange(-1) takes on the ← key: es -> en.
+	lCol := colOfNoAnsi(t, settingsRowLineNoAnsi(t, m, y), "‹")
+	m, _ = update(m, clickAt(lCol, y))
+	if m.cfg.SubsLang != "en" {
+		t.Fatalf("clicking ‹ set SubsLang=%q, want en (same as ← key)", m.cfg.SubsLang)
 	}
 }
 

@@ -154,6 +154,35 @@ func TestRenderSettingsPane(t *testing.T) {
 	_ = edit.View() // exercises the sel&&editingSetting value branch
 }
 
+func TestSettingsSaveToLongPathRendersOneLineWithEllipsis(t *testing.T) {
+	short := ready(New(&fakeSource{}, &fakeEngine{}))
+	short.section = sectionSettings
+	short.cfg.DataDir = "/tmp"
+	shortLines := strings.Split(short.renderSettings(short.mainWidth(), short.bodyHeight()), "\n")
+
+	long := short
+	long.cfg.DataDir = strings.Repeat("/very-long-directory-segment", 10)
+	longLines := strings.Split(long.renderSettings(long.mainWidth(), long.bodyHeight()), "\n")
+
+	if len(longLines) != len(shortLines) {
+		t.Fatalf("a long Save-to path changed the settings pane's line count: got %d lines, want %d (it must not wrap)", len(longLines), len(shortLines))
+	}
+
+	y := -1
+	for i, ln := range longLines {
+		if strings.Contains(ln, "Save to") {
+			y = i
+			break
+		}
+	}
+	if y < 0 {
+		t.Fatal("Save to row not rendered")
+	}
+	if !strings.Contains(longLines[y], "…") {
+		t.Fatalf("a long Save-to path should render truncated with an ellipsis:\n%s", longLines[y])
+	}
+}
+
 func TestRenderSeedingShowsRatio(t *testing.T) {
 	eng := &fakeEngine{statuses: []engine.Status{
 		{Name: "Done", TotalBytes: 1000, CompletedBytes: 1000, Uploaded: 2000, Peers: 2, Done: true},
