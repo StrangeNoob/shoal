@@ -657,6 +657,49 @@ func TestRightClickEmptySpaceInert(t *testing.T) {
 	}
 }
 
+func TestRightClickInertWhileDetailOpen(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	// Coordinates that would land on the Bravo row were the results list
+	// actually on screen.
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m.showDetail = true
+	m.detail = source.Result{Title: "Alpha"}
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the Search detail screen is open")
+	}
+}
+
+func TestRightClickInertWhileHelpOpen(t *testing.T) {
+	src := &fakeSource{results: []source.Result{{Title: "Alpha"}, {Title: "Bravo"}}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd())
+
+	y := lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+	m.showHelp = true
+
+	m, _ = update(m, rightClickAt(sidebarWidth+3, y))
+	if m.menuOpen {
+		t.Fatal("right-click should be inert while the help overlay is open")
+	}
+}
+
 func TestMenuArrowsAndEnterRunsDownload(t *testing.T) {
 	src := &fakeSource{results: []source.Result{{Title: "Alpha", TorrentURL: "u1"}}}
 	eng := &fakeEngine{}

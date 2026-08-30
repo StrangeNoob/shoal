@@ -1451,6 +1451,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case msg.Button == tea.MouseButtonWheelDown:
 		m.moveDown()
 	case msg.Button == tea.MouseButtonRight && msg.Action == tea.MouseActionPress:
+		if m.showHelp { // help overlay owns the screen; mirrors handleKey's gate
+			return m, nil
+		}
 		return m.openRowMenu(msg.X, msg.Y)
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		var cmd tea.Cmd

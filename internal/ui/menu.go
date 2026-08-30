@@ -185,9 +185,11 @@ func (m Model) menuItemAt(x, y int) (int, bool) {
 // shares clickSelect's row hit-testing, so a click target can't drift from
 // what's drawn, and selects the row the same way a left-click would. A miss
 // (no row under the click) is inert — the menu, if already open, is left
-// exactly as it was.
+// exactly as it was. Also inert while the Search detail screen is showing:
+// clickSelect's row geometry is the results-list layout, which isn't what's
+// on screen once showDetail replaces it (mirrors handleKey's showDetail gate).
 func (m Model) openResultMenu(x, y int) (tea.Model, tea.Cmd) {
-	if m.section != sectionSearch || !m.clickSelect(x, y) {
+	if m.section != sectionSearch || m.showDetail || !m.clickSelect(x, y) {
 		return m, nil
 	}
 	m.menuOpen = true
