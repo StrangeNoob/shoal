@@ -4,12 +4,19 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/StrangeNoob/shoal/internal/source"
 	upd "github.com/StrangeNoob/shoal/internal/update"
 )
+
+// noPeersWarnAfter is how long an active download can sit at zero known
+// peers (Peers and TotalPeers both 0) before the Downloads pane flags it.
+// Source-site seed counts go stale for old torrents, so a fresh add is given
+// a grace period to announce before we call it out.
+const noPeersWarnAfter = 2 * time.Minute
 
 func (m Model) View() string {
 	if !m.ready {
@@ -426,6 +433,13 @@ func (m Model) renderDownloads(w, h int) string {
 		// the switch's single slot above.
 		if s.Sequential {
 			detail += "  ·  ▶ sequential"
+		}
+		// A stale source-site seed count can leave a download sitting at 0.0%
+		// forever with no explanation. Peers==0 && TotalPeers==0 means announce
+		// has found nobody at all (not just nobody connected yet), so once past
+		// the grace period this is worth flagging.
+		if !s.Paused && !s.Queued && s.Peers == 0 && s.TotalPeers == 0 && time.Since(s.AddedAt) > noPeersWarnAfter {
+			detail += "  ·  " + st.Bad.Render("⚠ no peers found")
 		}
 
 		b.WriteString("  " + bar + "  " + st.Row.Render(state) + "\n")
