@@ -464,6 +464,7 @@ func TestSearchAbortsOnCanceledContext(t *testing.T) {
 // (potentially the full 30s HTTP timeout) instead of aborting immediately,
 // which is exactly what issue #47 needs for daemon shutdown.
 func TestDownloadCDNLinkRespectsContextCancellation(t *testing.T) {
+	started := make(chan struct{})
 	unblock := make(chan struct{})
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -471,7 +472,8 @@ func TestDownloadCDNLinkRespectsContextCancellation(t *testing.T) {
 		case "/download":
 			_, _ = w.Write([]byte(`{"link":"` + srv.URL + `/files/slow.srt"}`))
 		case "/files/slow.srt":
-			<-unblock // hangs until the test releases it or the request is canceled first
+			close(started) // signal that the CDN request has actually arrived
+			<-unblock      // hangs until the test releases it or the request is canceled first
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -490,7 +492,11 @@ func TestDownloadCDNLinkRespectsContextCancellation(t *testing.T) {
 		errCh <- err
 	}()
 
-	time.Sleep(50 * time.Millisecond) // let the CDN request actually start
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CDN request never arrived")
+	}
 	cancel()
 
 	select {
