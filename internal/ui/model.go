@@ -80,11 +80,16 @@ type Model struct {
 	// lastClickDetail record which pane/screen that press belonged to, so a
 	// position match alone can't pair clicks across a section change or a
 	// list/detail-screen transition — only a same-spot, same-context,
-	// same-window pair counts.
+	// same-window pair counts. lastClickIdentity is the stable identity (magnet,
+	// infohash, or file path — see currentRowIdentity) of the row the first
+	// click actually landed on, so a list reflow between the two clicks (a
+	// re-sort, a row completing and dropping out) can't pair the second click
+	// with a different item that happens to now sit at the same coordinates.
 	lastClickX, lastClickY int
 	lastClickAt            time.Time
 	lastClickSection       section
 	lastClickDetail        bool
+	lastClickIdentity      string
 
 	// Context menu (right-click on a Search result row — see menu.go).
 	// menuRow/menuCol anchor the overlay at the click that (re-)opened it;
@@ -1471,19 +1476,23 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// registerClick tracks a left-press's position, time, and pane/screen context
-// against the previous one, and reports whether this press is a double-click:
-// the same (x, y) in the same section and detail-screen state, within
-// doubleClickInterval of the last press. Requiring the context to match too
-// keeps a stale click from a different pane — or from before/after a
-// list<->detail-screen transition — from pairing with an unrelated click that
-// happens to land on the same coordinates. Detecting a double-click resets
-// the tracked state so a third press starts a fresh window — double only, no
-// triple-click chains.
-func (m *Model) registerClick(x, y int) bool {
+// registerClick tracks a left-press's position, time, pane/screen context, and
+// clicked-row identity against the previous one, and reports whether this
+// press is a double-click: the same (x, y) in the same section and
+// detail-screen state, on the same item, within doubleClickInterval of the
+// last press. Requiring the context to match too keeps a stale click from a
+// different pane — or from before/after a list<->detail-screen transition —
+// from pairing with an unrelated click that happens to land on the same
+// coordinates; requiring identity to match too keeps a list reflow between
+// the two clicks (a re-sort, a row completing and dropping out) from pairing
+// the second click with a different item that now sits at those coordinates.
+// Detecting a double-click resets the tracked state so a third press starts a
+// fresh window — double only, no triple-click chains.
+func (m *Model) registerClick(x, y int, identity string) bool {
 	now := time.Now()
 	double := x == m.lastClickX && y == m.lastClickY &&
 		m.section == m.lastClickSection && m.showDlDetail == m.lastClickDetail &&
+		identity == m.lastClickIdentity &&
 		!m.lastClickAt.IsZero() && now.Sub(m.lastClickAt) <= doubleClickInterval
 	if double {
 		m.lastClickAt = time.Time{}
@@ -1491,6 +1500,7 @@ func (m *Model) registerClick(x, y int) bool {
 	}
 	m.lastClickX, m.lastClickY, m.lastClickAt = x, y, now
 	m.lastClickSection, m.lastClickDetail = m.section, m.showDlDetail
+	m.lastClickIdentity = identity
 	return false
 }
 
@@ -1505,8 +1515,12 @@ func (m *Model) handleClick(x, y int) tea.Cmd {
 		m.clickSidebar(y)
 		return nil
 	}
-	double := m.registerClick(x, y)
 	hit := m.clickSelect(x, y)
+	identity := ""
+	if hit {
+		identity = m.currentRowIdentity()
+	}
+	double := m.registerClick(x, y, identity)
 	if !double || !hit {
 		return nil
 	}
@@ -1596,6 +1610,46 @@ func (m *Model) clickSelect(x, y int) bool {
 		}
 	}
 	return false
+}
+
+// currentRowIdentity returns a stable identity for the row clickSelect just
+// resolved into the active section's cursor — used by registerClick to keep a
+// double-click paired to the same item across a list reflow between the two
+// clicks (see registerClick). Empty when the section has no per-row identity
+// (e.g. Settings, which handleClick never double-click-activates).
+func (m Model) currentRowIdentity() string {
+	switch m.section {
+	case sectionSearch:
+		fr := m.filteredResults()
+		if m.cursor >= 0 && m.cursor < len(fr) {
+			return resultIdentity(fr[m.cursor])
+		}
+	case sectionDownloads:
+		ds := m.downloading()
+		if m.dlCursor >= 0 && m.dlCursor < len(ds) {
+			return ds[m.dlCursor].InfoHash
+		}
+	case sectionSeeding:
+		ss := m.seeding()
+		if m.seedCursor >= 0 && m.seedCursor < len(ss) {
+			return ss[m.seedCursor].InfoHash
+		}
+		hist := m.seedHistory()
+		if hi := m.seedCursor - len(ss); hi >= 0 && hi < len(hist) {
+			return hist[hi].InfoHash
+		}
+	}
+	return ""
+}
+
+// resultIdentity returns a Search result's stable identity: its magnet link,
+// or its .torrent URL when magnet-less (curated results are normally one or
+// the other — see addCmd).
+func resultIdentity(r source.Result) string {
+	if r.Magnet != "" {
+		return r.Magnet
+	}
+	return r.TorrentURL
 }
 
 // clickRow maps a clickable pane row to its selection index and how many screen
@@ -1723,9 +1777,13 @@ func (m Model) dlDetailFileRows() (baseY, shown int) {
 // doubleClickInterval also toggles it via toggleSelectedFile — the same path
 // space/enter use there.
 func (m *Model) clickDetailFile(x, y int) tea.Cmd {
-	double := m.registerClick(x, y)
 	baseY, shown := m.dlDetailFileRows()
 	i := y - baseY
+	identity := ""
+	if i >= 0 && i < shown && i < len(m.dlDetail.Files) {
+		identity = m.dlDetail.Files[i].Path
+	}
+	double := m.registerClick(x, y, identity)
 	if i < 0 || i >= shown {
 		return nil
 	}

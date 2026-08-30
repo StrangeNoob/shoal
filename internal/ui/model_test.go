@@ -1445,6 +1445,70 @@ func TestDoubleClickSeedingOpensFolder(t *testing.T) {
 	}
 }
 
+// TestDoubleClickDoesNotSpanSearchResultReflow covers issue #60: a live
+// re-sort between the first and second click (e.g. sourceUpdateMsg's
+// append+applySort as more source batches stream in) can leave a different
+// result sitting at the coordinates the first click landed on. The second
+// click must not be paired with that stale identity — it must be treated as
+// a fresh single click on whatever is now there, not a double-click-activate
+// on an item the user never actually double-clicked.
+func TestDoubleClickDoesNotSpanSearchResultReflow(t *testing.T) {
+	src := &fakeSource{results: []source.Result{
+		{Title: "Alpha", Popularity: 10, Magnet: "magnet:alpha"},
+		{Title: "Bravo", Popularity: 5, Magnet: "magnet:bravo"},
+	}}
+	m := ready(New(src, &fakeEngine{}))
+	m, _ = update(m, key("/"))
+	m.input.SetValue("q")
+	m, cmd := update(m, key("enter"))
+	m, _ = update(m, cmd()) // populate + sort: [Alpha(10), Bravo(5)]
+
+	x, y := sidebarWidth+3, lineOf(m.View(), "Bravo")
+	if y < 0 {
+		t.Fatal("Bravo row not rendered")
+	}
+
+	m, _ = update(m, clickAt(x, y)) // first click: selects Bravo (index 1)
+	if m.cursor != 1 {
+		t.Fatalf("cursor after first click = %d, want 1", m.cursor)
+	}
+
+	// A new batch streams in and reflows the list: Charlie's popularity slots
+	// it between Alpha and Bravo, so index 1 — the same row, same (x, y) — now
+	// holds Charlie instead of Bravo.
+	m, _ = update(m, sourceUpdateMsg{gen: m.searchGen, up: source.SourceUpdate{
+		Results: []source.Result{{Title: "Charlie", Popularity: 7, Magnet: "magnet:charlie"}},
+		Done:    1, Total: 1,
+	}})
+	if got := lineOf(m.View(), "Charlie"); got != y {
+		t.Fatalf("reflow setup: Charlie rendered at line %d, want %d (same row Bravo was on)", got, y)
+	}
+	if m.cursor != 1 {
+		t.Fatalf("reflow setup: cursor = %d, want 1 (unchanged, now pointing at Charlie)", m.cursor)
+	}
+
+	m, cmd = update(m, clickAt(x, y)) // second click, same coords, well within the interval
+	if m.showDetail {
+		t.Fatal("a click that lands on a different item after a reflow must not open details as a double-click")
+	}
+	if cmd != nil {
+		t.Fatal("must not fire the activate command across a reflow that changed the clicked item")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("the second click should still select the row it landed on, cursor = %d, want 1", m.cursor)
+	}
+
+	// The reflowed click is now itself a valid "first click": an immediate
+	// third click on the same (now-stable) row must double-click-activate.
+	m, _ = update(m, clickAt(x, y))
+	if !m.showDetail {
+		t.Fatal("a genuine double-click following the reflow should still open details")
+	}
+	if m.detail.Title != "Charlie" {
+		t.Fatalf("details opened for %q, want Charlie", m.detail.Title)
+	}
+}
+
 func TestDetailScreenClickMovesCursorSingleTogglesDouble(t *testing.T) {
 	eng := &fakeEngine{
 		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 200, CompletedBytes: 10}},
@@ -1481,6 +1545,68 @@ func TestDetailScreenClickMovesCursorSingleTogglesDouble(t *testing.T) {
 	}
 	if m.dlDetail.Files[1].Selected {
 		t.Fatal("double click should optimistically deselect b.mkv")
+	}
+}
+
+// TestDoubleClickDetailFileDoesNotSpanFileListReflow covers issue #60 for the
+// download-details file list: the file at a row's coordinates can change
+// between two clicks (e.g. a file dropping out of the listing). The second
+// click must not toggle whatever file now sits there — it must be treated as
+// a fresh single click.
+func TestDoubleClickDetailFileDoesNotSpanFileListReflow(t *testing.T) {
+	eng := &fakeEngine{
+		statuses: []engine.Status{{Name: "Pack", InfoHash: "a", TotalBytes: 300, CompletedBytes: 10}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "a.mkv", Length: 100, Selected: true},
+			{Path: "b.mkv", Length: 100, Selected: true},
+			{Path: "c.mkv", Length: 100, Selected: true},
+		}},
+	}
+	m := ready(New(&fakeSource{}, eng))
+	m.section = sectionDownloads
+	m.statuses = eng.statuses
+	m, cmd := update(m, key("enter")) // open details
+	m, _ = update(m, cmd())           // deliver detail
+
+	y := lineOf(m.View(), "b.mkv")
+	if y < 0 {
+		t.Fatal("b.mkv row not rendered")
+	}
+
+	m, _ = update(m, clickAt(4, y)) // first click: selects b.mkv (index 1)
+	if m.dlFileCursor != 1 {
+		t.Fatalf("dlFileCursor after first click = %d, want 1", m.dlFileCursor)
+	}
+
+	// The file list reflows between clicks (e.g. a.mkv drops out): the same
+	// row index — same (x, y) — now holds c.mkv instead of b.mkv.
+	m.dlDetail.Files = []engine.FileDetail{
+		{Path: "b.mkv", Length: 100, Selected: true},
+		{Path: "c.mkv", Length: 100, Selected: true},
+	}
+	if got := lineOf(m.View(), "c.mkv"); got != y {
+		t.Fatalf("reflow setup: c.mkv rendered at line %d, want %d (same row b.mkv was on)", got, y)
+	}
+
+	m, cmd = update(m, clickAt(4, y)) // second click, same coords, well within the interval
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "" {
+		t.Fatal("a click that lands on a different file after a reflow must not toggle it")
+	}
+	if m.dlFileCursor != 1 {
+		t.Fatalf("the second click should still select the row it landed on, dlFileCursor = %d, want 1", m.dlFileCursor)
+	}
+
+	// The reflowed click is now itself a valid "first click": an immediate
+	// second click on the same (now-stable) row must toggle c.mkv.
+	m, cmd = update(m, clickAt(4, y))
+	if cmd != nil {
+		cmd()
+	}
+	if eng.setFilesPath != "c.mkv" || eng.setFilesSelected {
+		t.Fatalf("double click toggled %q selected=%v, want c.mkv false", eng.setFilesPath, eng.setFilesSelected)
 	}
 }
 
