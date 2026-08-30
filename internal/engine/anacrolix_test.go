@@ -1184,6 +1184,27 @@ func TestSubsAutoSkipsFileWithExistingSrt(t *testing.T) {
 	}
 }
 
+// fetchSubsForFile is the per-file body of fetchSubsForFiles, split out so
+// this traversal-safety skip is testable without a live torrent client.
+// FileDetail.Path comes straight from *torrent.File.DisplayPath(), which does
+// no sanitizing, so a crafted "../" entry must never reach subsFetch.
+func TestFetchSubsForFileSkipsEscapingPath(t *testing.T) {
+	calls := make(chan struct{ apiKey, path, lang string }, 4)
+	swapSubsFetch(t, calls)
+
+	all := []FileDetail{
+		{Path: "../../evil.mkv", Length: 200 << 20, Selected: true},
+		{Path: "ok.mkv", Length: 200 << 20, Selected: true}, // keeps len(all) > 1 so the single-file shortcut can't apply
+	}
+	fetchSubsForFile("test-key", "en", filepath.Join("/data", "My Show"), all, all[0])
+
+	select {
+	case c := <-calls:
+		t.Fatalf("subsFetch called for an escaping path: %+v", c)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // buildTorrentBytesDir builds a real, self-contained multi-file .torrent from
 // an existing directory (root's basename becomes the torrent's Info.Name),
 // the multi-file counterpart to buildTorrentBytesNamed.

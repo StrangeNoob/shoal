@@ -100,36 +100,46 @@ func TestSubsNoAPIKey(t *testing.T) {
 	}
 }
 
-// subsFilePath's join has two shapes: a single-file torrent's Status.Path is
-// already the file's own absolute path (DisplayPath == the torrent name), a
-// multi-file torrent's Status.Path is the shared top-level directory and
-// FileDetail.Path is relative to it.
-func TestSubsFilePathJoin(t *testing.T) {
-	single := []engine.FileDetail{{Path: "movie.mkv", Length: 200 << 20}}
-	if got, want := subsFilePath("/data/movie.mkv", single, single[0]), "/data/movie.mkv"; got != want {
-		t.Errorf("single-file join = %q, want %q", got, want)
-	}
+// runSubs' path join now routes through engine.AbsFilePath — its three-shape
+// join behavior (single-file, multi-file, folder-with-one-file) is covered
+// by internal/engine's own TestAbsFilePath. TestSubsEndToEndSingleFileDefaultRule
+// and TestSubsEndToEndMultiFileDefaultRule below pin the exact paths runSubs
+// resolves through that call site.
 
-	multi := []engine.FileDetail{
-		{Path: "Season 1/ep01.mkv", Length: 200 << 20},
-		{Path: "Season 1/ep01.nfo", Length: 100},
-	}
-	got := subsFilePath("/data/My Show", multi, multi[0])
-	want := filepath.Join("/data/My Show", "Season 1", "ep01.mkv")
-	if got != want {
-		t.Errorf("multi-file join = %q, want %q", got, want)
-	}
+// A crafted "../" FileDetail.Path (raw torrent metadata — DisplayPath does no
+// sanitizing) must be skipped rather than fetched: engine.AbsFilePath returns
+// "" for it, and runSubs reports the file on stderr instead of calling
+// subsFetch.
+func TestSubsEscapePathSkipsWithStderrMessage(t *testing.T) {
+	isolateConfig(t)
+	setSubsConfig(t, "test-key", "en")
+	swapSubsFetch(t, func(apiKey, videoPath, lang string) (string, error) {
+		t.Fatalf("subsFetch should not be called for an escaping path: %s", videoPath)
+		return "", nil
+	})
 
-	// Third shape: a directory-mode torrent that happens to contain exactly
-	// one file. len(allFiles)==1 alone must not be treated as single-file
-	// format — f.Path ("movie.mkv") differs from the torrent's own name
-	// (base(statusPath) == "ReleaseFolder"), so this must still Join.
-	folderOneFile := []engine.FileDetail{{Path: "movie.mkv", Length: 200 << 20}}
-	folderPath := filepath.Join("/data", "ReleaseFolder")
-	gotFolder := subsFilePath(folderPath, folderOneFile, folderOneFile[0])
-	wantFolder := filepath.Join(folderPath, "movie.mkv")
-	if gotFolder != wantFolder {
-		t.Errorf("folder-with-one-file join = %q, want %q", gotFolder, wantFolder)
+	dataDir := t.TempDir()
+	torrentDir := filepath.Join(dataDir, "My Show")
+	fake := &fakeEngine{
+		statuses: []engine.Status{{InfoHash: "abc" + strings.Repeat("0", 37), Name: "My Show", Path: torrentDir}},
+		detail: engine.Detail{Files: []engine.FileDetail{
+			{Path: "../../evil.mkv", Length: 200 << 20, Selected: true},
+			{Path: "ok.mkv", Length: 100, Selected: true}, // too small to qualify itself; keeps len(files) > 1
+		}},
+	}
+	serveFakeDaemon(t, fake)
+
+	var buf bytes.Buffer
+	var code int
+	stderr := captureStderr(t, func() { code = runSubs([]string{"abc"}, &buf) })
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero: the only qualifying file escapes the torrent directory")
+	}
+	if !strings.Contains(stderr, "evil.mkv") {
+		t.Errorf("stderr should name the escaping file, got %q", stderr)
+	}
+	if strings.TrimSpace(buf.String()) != "" {
+		t.Errorf("stdout = %q, want empty (nothing fetched)", buf.String())
 	}
 }
 

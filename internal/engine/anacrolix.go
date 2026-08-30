@@ -359,10 +359,11 @@ func (a *Anacrolix) checkSubsCompletion() {
 		// wg-tracked so Close waits for in-flight fetches: no fetch outlives the
 		// engine, and tests can restore swapped seams safely after Close.
 		files := t.Files()
+		name := t.Name() // metadata is present (t.Complete() required it), so this is info.BestName()
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			fetchSubsForFiles(apiKey, lang, dataDir, files)
+			fetchSubsForFiles(apiKey, lang, dataDir, name, files)
 		}()
 	}
 }
@@ -371,27 +372,51 @@ func (a *Anacrolix) checkSubsCompletion() {
 // file (right extension, at least SubsMinVideoBytes) serially, skipping files
 // whose .srt is already on disk. Deselected files (PiecePriorityNone) are
 // skipped — they were never downloaded, so fetching a subtitle for one would
-// write an orphaned .srt next to nothing.
+// write an orphaned .srt next to nothing. Each file's absolute path is
+// resolved through the shared, traversal-proof engine.AbsFilePath — the same
+// join cmd/shoal's `subs` and `stream` commands use — from statusPath (the
+// torrent's on-disk directory) and FileDetail values built from
+// DisplayPath(), matching how Detail() builds them.
 // Failures are logged and never affect torrent state — subtitles never block
 // or fail a download.
-func fetchSubsForFiles(apiKey, lang, dataDir string, files []*torrent.File) {
-	for _, f := range files {
-		if f.Priority() == torrent.PiecePriorityNone {
-			continue
+func fetchSubsForFiles(apiKey, lang, dataDir, name string, files []*torrent.File) {
+	statusPath := filepath.Join(dataDir, name)
+	details := make([]FileDetail, len(files))
+	for i, f := range files {
+		details[i] = FileDetail{
+			Path:     f.DisplayPath(),
+			Length:   f.Length(),
+			Selected: f.Priority() != torrent.PiecePriorityNone,
 		}
-		if !IsSubsCandidate(f.DisplayPath(), f.Length()) {
-			continue
-		}
-		path := filepath.Join(dataDir, filepath.FromSlash(f.Path()))
-		// The written .srt is the record of a past fetch — subsFetched is
-		// memory-only, so without this every restored complete torrent would
-		// refetch on restart, overwriting subtitles and burning API quota.
-		if _, err := os.Stat(subtitles.SrtPath(path, lang)); err == nil {
-			continue
-		}
-		if _, err := subsFetch(apiKey, path, lang); err != nil {
-			slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
-		}
+	}
+	for _, fd := range details {
+		fetchSubsForFile(apiKey, lang, statusPath, details, fd)
+	}
+}
+
+// fetchSubsForFile resolves one file's absolute path and fetches its
+// subtitle if it qualifies — the per-file body of fetchSubsForFiles, split
+// out so the traversal-safety skip is unit-testable without a live torrent
+// client.
+func fetchSubsForFile(apiKey, lang, statusPath string, all []FileDetail, f FileDetail) {
+	if !f.Selected || !IsSubsCandidate(f.Path, f.Length) {
+		return
+	}
+	path := AbsFilePath(statusPath, all, f)
+	if path == "" {
+		// FileDetail.Path is raw torrent metadata (DisplayPath does no
+		// sanitizing) — a crafted "../" entry must never be fetched.
+		slog.Error("subtitle auto-fetch skipped: path escapes torrent directory", "path", f.Path)
+		return
+	}
+	// The written .srt is the record of a past fetch — subsFetched is
+	// memory-only, so without this every restored complete torrent would
+	// refetch on restart, overwriting subtitles and burning API quota.
+	if _, err := os.Stat(subtitles.SrtPath(path, lang)); err == nil {
+		return
+	}
+	if _, err := subsFetch(apiKey, path, lang); err != nil {
+		slog.Error("subtitle auto-fetch failed", "path", path, "err", err)
 	}
 }
 
