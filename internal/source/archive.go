@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // Archive searches the Internet Archive (archive.org), a large library of
@@ -32,8 +34,12 @@ func (a *Archive) Name() string { return "Internet Archive" }
 // without a second request. Filtering is done client-side in the UI: the
 // Source interface stays a plain Search(query).
 func (a *Archive) Search(ctx context.Context, query string) ([]Result, error) {
+	tq := titleQuery(query)
+	if tq == "" {
+		return nil, nil
+	}
 	q := url.Values{}
-	q.Set("q", query)
+	q.Set("q", tq)
 	q.Add("fl[]", "identifier")
 	q.Add("fl[]", "title")
 	q.Add("fl[]", "item_size")
@@ -59,6 +65,7 @@ func (a *Archive) Search(ctx context.Context, query string) ([]Result, error) {
 	}
 
 	var payload struct {
+		Error    flexString `json:"error"` // query errors arrive as HTTP 200 with this set
 		Response struct {
 			Docs []struct {
 				Identifier string      `json:"identifier"`
@@ -71,6 +78,9 @@ func (a *Archive) Search(ctx context.Context, query string) ([]Result, error) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode archive.org response: %w", err)
+	}
+	if payload.Error != "" {
+		return nil, fmt.Errorf("archive.org search error: %s", payload.Error)
 	}
 
 	results := make([]Result, 0, len(payload.Response.Docs))
@@ -95,6 +105,25 @@ func (a *Archive) Search(ctx context.Context, query string) ([]Result, error) {
 		})
 	}
 	return results, nil
+}
+
+// titleQuery scopes an archive.org search to item titles. An unscoped query
+// matches every metadata field, including long descriptions, so "system design
+// course" returned CIA memos that only mention those words in passing.
+//
+// Lucene syntax characters become separators (archive.org rejects backslash
+// escapes), as do < and > (archive.org strips "<...>" as HTML before parsing,
+// which can leave an empty or unclosed quote). Each term is quoted: unquoted, a
+// leading apostrophe ("rock 'n' roll", "'round midnight") is a backend error,
+// and AND/OR/NOT would be operators. Returns "" when no searchable terms remain.
+func titleQuery(query string) string {
+	terms := strings.FieldsFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(`+-&|!(){}[]^"~*?:\/<>`, r)
+	})
+	if len(terms) == 0 {
+		return ""
+	}
+	return `title:("` + strings.Join(terms, `" "`) + `")`
 }
 
 // flexString tolerates an archive.org field that is sometimes a JSON string and

@@ -43,8 +43,8 @@ func TestArchiveSearchMapsDocs(t *testing.T) {
 		{"identifier":"","title":"skip me"}
 	]}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("q") != "linux" {
-			t.Errorf("query q = %q, want linux", r.URL.Query().Get("q"))
+		if want := `title:("linux")`; r.URL.Query().Get("q") != want {
+			t.Errorf("query q = %q, want %s", r.URL.Query().Get("q"), want)
 		}
 		w.Write([]byte(body))
 	}))
@@ -95,5 +95,51 @@ func TestArchiveSearchBadJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if _, err := archivePointedAt(srv).Search(context.Background(), "x"); err == nil {
 		t.Fatal("Search expected JSON decode error")
+	}
+}
+
+// Searches must match titles only: an unscoped archive.org query also matches
+// descriptions, which surfaced unrelated items ("system design course" returned
+// CIA Reading Room memos). Lucene syntax is stripped, not escaped, and every
+// term is quoted: archive.org fails on a bare leading apostrophe.
+func TestTitleQuery(t *testing.T) {
+	cases := map[string]string{
+		"system design course":   `title:("system" "design" "course")`,
+		"Spider-Man: Homecoming": `title:("Spider" "Man" "Homecoming")`,
+		`"AC/DC" (live)`:         `title:("AC" "DC" "live")`,
+		`"rock 'n' roll"`:        `title:("rock" "'n'" "roll")`,
+		"'round midnight":        `title:("'round" "midnight")`,
+		"tom AND jerry":          `title:("tom" "AND" "jerry")`,
+		"a<b <c>":                `title:("a" "b" "c")`,
+		"  ?? ** ":               "",
+	}
+	for in, want := range cases {
+		if got := titleQuery(in); got != want {
+			t.Errorf("titleQuery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// archive.org reports query errors as HTTP 200 with an "error" field and no
+// docs. That must surface as an error, not pass for an empty result list.
+func TestArchiveSearchErrorEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error":"[BACKEND_ERROR] Invalid or no response from Elasticsearch"}`))
+	}))
+	t.Cleanup(srv.Close)
+	if res, err := archivePointedAt(srv).Search(context.Background(), "x"); err == nil {
+		t.Fatalf("Search = %v, nil; want an error", res)
+	}
+}
+
+// A query with no searchable terms must not hit the network or error.
+func TestArchiveSearchSkipsEmptyTitleQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s", r.URL)
+	}))
+	t.Cleanup(srv.Close)
+	res, err := archivePointedAt(srv).Search(context.Background(), "???")
+	if err != nil || res != nil {
+		t.Fatalf("Search(???) = %v, %v; want nil, nil", res, err)
 	}
 }
