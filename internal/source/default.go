@@ -2,7 +2,8 @@ package source
 
 import "strings"
 
-// NewTorlinkSources returns the full source set ported from torlink.
+// NewTorlinkSources returns the public-index provider set (originally ported
+// from torlink, plus the meta-indexes added since).
 func NewTorlinkSources() []Source {
 	return []Source{
 		NewFitGirl(),
@@ -10,11 +11,12 @@ func NewTorlinkSources() []Source {
 		NewPirateBayMovies(),
 		New1337xMovies(),
 		NewEZTV(),
-		NewSolidTorrents(),
 		NewPirateBayTV(),
 		New1337xTV(),
 		NewNyaa(),
 		NewSubsPlease(),
+		NewKnaben(),
+		NewTorrentsCSV(),
 	}
 }
 

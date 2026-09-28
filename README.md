@@ -77,7 +77,8 @@ the current pane, and `?` opens the full list. `tab` cycles the four panes:
 | `tab` | next pane · `q` / `ctrl+c` quit |
 
 Results stream in live from all sources (`searching… N/M sources`) as a sortable table
-(**Name · Size · Seed:Lch**). Press `enter` for a **details** screen (size, health, files,
+(**Name · Size · Seed:Lch**). Rows from different indexes that share an infohash
+collapse into one, keeping the copy with the higher seeder count. Press `enter` for a **details** screen (size, health, files,
 hash, magnet) where `d` downloads, `y` copies the magnet, and `esc` goes back. You can
 also paste a magnet link into the search box and press `enter` to add it directly.
 **Mouse:** every pane is clickable. A single click selects a row (or, in
@@ -126,7 +127,9 @@ enum row's `●` options to set it directly, or click the `‹ ›` arrows on a
 cycling value to change it — the same as `← →`.
 
 Default sources: the Internet Archive, a small open-media catalogue, and public
-indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, SolidTorrents, Nyaa, and SubsPlease.
+indexes — FitGirl, YTS, The Pirate Bay, 1337x, EZTV, Nyaa, SubsPlease, Knaben, and
+Torrents-CSV. Knaben is a meta-index: one query reaches ~30 upstream sites, so it
+keeps results coming when a per-site provider is blocked or down.
 (EZTV has no keyword-search API, so it only appears in empty-query browse, not in a
 keyword search.)
 
