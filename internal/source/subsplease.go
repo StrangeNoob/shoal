@@ -1,7 +1,9 @@
 package source
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,13 +36,23 @@ func (s *SubsPlease) Search(ctx context.Context, query string) ([]Result, error)
 	} else {
 		params.Set("f", "latest")
 	}
+	// A hit-carrying response is a JSON object keyed by show, but a search with no
+	// match answers `[]`, which would fail to unmarshal into a map and take the
+	// whole source down with it.
+	var raw json.RawMessage
+	if err := fetchJSON(ctx, s.Client, s.Base+"?"+params.Encode(), &raw); err != nil {
+		return nil, err
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, nil
+	}
 	var payload map[string]struct {
 		Show        string               `json:"show"`
 		Episode     string               `json:"episode"`
 		ReleaseDate string               `json:"release_date"`
 		Downloads   []subsPleaseDownload `json:"downloads"`
 	}
-	if err := fetchJSON(ctx, s.Client, s.Base+"?"+params.Encode(), &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 	var out []Result

@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -142,25 +143,6 @@ func TestEZTVSearchOnlyBrowsesLatest(t *testing.T) {
 	}
 }
 
-func TestSolidTorrentsSearchMapsResults(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"success":true,"results":[{"infohash":"abcdef0123456789abcdef0123456789abcdef01","title":"Solid TV","size":2048,"seeders":5,"leechers":1,"updatedAt":"2024-07-01T12:00:00Z"}]}`))
-	}))
-	t.Cleanup(srv.Close)
-
-	src := torlinkPointedAt(srv, NewSolidTorrents())
-	got, err := src.Search(context.Background(), "")
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(got) != 1 || got[0].Title != "Solid TV" || got[0].Category != "tv" || got[0].Popularity != 5 {
-		t.Fatalf("results = %+v", got)
-	}
-	if got[0].Seeders != 5 || got[0].Leechers != 1 || got[0].Added == 0 {
-		t.Fatalf("solidtorrents fields = %+v, want seeders 5 leechers 1 added>0", got[0])
-	}
-}
-
 func TestNyaaSearchParsesRSS(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<rss><channel><item>
@@ -240,8 +222,8 @@ func TestTorlinkSourcesRegistered(t *testing.T) {
 	got := NewTorlinkSources()
 	want := map[string]bool{
 		"FitGirl": true, "YTS": true, "TPB Movies": true, "1337x Movies": true,
-		"EZTV": true, "SolidTorrents": true, "TPB TV": true, "1337x TV": true,
-		"Nyaa": true, "SubsPlease": true,
+		"EZTV": true, "TPB TV": true, "1337x TV": true,
+		"Nyaa": true, "SubsPlease": true, "Knaben": true, "Torrents-CSV": true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("registered sources = %d, want %d", len(got), len(want))
@@ -254,5 +236,93 @@ func TestTorlinkSourcesRegistered(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing sources: %v", want)
+	}
+}
+
+func TestKnabenSearchMapsResults(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Write([]byte(`{"hits":[
+			{"title":"Show S01E01 1080p","hash":"ABCDEF0123456789ABCDEF0123456789ABCDEF01","magnetUrl":"","bytes":2048,"seeders":9,"peers":2,"category":"TV / HD","date":"2024-07-01T12:00:00Z"},
+			{"title":"Some Anime","hash":"","magnetUrl":"magnet:?xt=urn:btih:1111111111111111111111111111111111111111&dn=Some+Anime","bytes":512,"seeders":4,"peers":1,"category":"Anime / Subbed","date":"2024-07-02T12:00:00Z"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	src := torlinkPointedAt(srv, NewKnaben())
+	got, err := src.Search(context.Background(), "show")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("results = %+v, want 2", got)
+	}
+	if !strings.Contains(string(gotBody), `"search_type":"100%"`) {
+		t.Fatalf("request body = %s, want exact-match search_type", gotBody)
+	}
+	// A row with no magnetUrl still yields one, built from its hash.
+	if ih := ParseMagnetInfoHash(got[0].Magnet); ih != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Fatalf("magnet built from hash = %q", got[0].Magnet)
+	}
+	if got[0].Category != "tv" || got[1].Category != "anime" {
+		t.Fatalf("categories = %q, %q, want tv, anime", got[0].Category, got[1].Category)
+	}
+	if got[0].Source != "Knaben" || got[0].Seeders != 9 || got[0].Leechers != 2 ||
+		got[0].SizeBytes != 2048 || !got[0].SeedersKnown || got[0].Added == 0 {
+		t.Fatalf("knaben fields = %+v", got[0])
+	}
+}
+
+func TestKnabenSkipsEmptyQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("empty query should not reach the API")
+	}))
+	t.Cleanup(srv.Close)
+	got, err := torlinkPointedAt(srv, NewKnaben()).Search(context.Background(), "  ")
+	if err != nil || got != nil {
+		t.Fatalf("Search(empty) = %v, %v, want nil, nil", got, err)
+	}
+}
+
+func TestTorrentsCSVSearchMapsResults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"torrents":[
+			{"infohash":"abcdef0123456789abcdef0123456789abcdef01","name":"Some Film 1080p","size_bytes":4096,"seeders":12,"leechers":3,"created_unix":1710000000},
+			{"infohash":"too-short","name":"Bad Row","size_bytes":1,"seeders":1}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := torlinkPointedAt(srv, NewTorrentsCSV()).Search(context.Background(), "some film")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("results = %+v, want 1 (the short infohash is dropped)", got)
+	}
+	if got[0].Title != "Some Film 1080p" || got[0].Source != "CSV" || got[0].SizeBytes != 4096 ||
+		got[0].Seeders != 12 || got[0].Leechers != 3 || !got[0].SeedersKnown || got[0].Added != 1710000000 {
+		t.Fatalf("torrents-csv fields = %+v", got[0])
+	}
+	if ParseMagnetInfoHash(got[0].Magnet) != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Fatalf("magnet = %q", got[0].Magnet)
+	}
+}
+
+func TestSubsPleaseEmptyArrayIsNoResults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[]`)) // what the API answers when a search has no match
+	}))
+	t.Cleanup(srv.Close)
+	got, err := torlinkPointedAt(srv, NewSubsPlease()).Search(context.Background(), "no such show")
+	if err != nil {
+		t.Fatalf("an empty array must not fail the source: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("results = %+v, want none", got)
 	}
 }

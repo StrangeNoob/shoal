@@ -17,7 +17,8 @@ one site. A slow or failing provider is skipped; you only get an error if *every
 source fails.
 
 Integrated sources: Internet Archive, Open Media (curated), YTS, The Pirate Bay
-(Movies + TV), 1337x (Movies + TV), EZTV, SolidTorrents, Nyaa, SubsPlease, FitGirl.
+(Movies + TV), 1337x (Movies + TV), EZTV, Nyaa, SubsPlease, FitGirl, Knaben
+(a meta-index over ~30 upstream sites), and Torrents-CSV.
 Get the exact list at runtime with `shoal sources` (or `shoal sources --json` for
 a JSON array of {name, enabled} objects).
 
@@ -30,7 +31,7 @@ name prints the available list.
 nothing for `shoal search "<query>"` and never appears in results. That is by
 design, not an outage; don't treat its absence as a broken source. (For anime,
 rely on Nyaa and SubsPlease; for TV keyword search, The Pirate Bay, 1337x, and
-SolidTorrents cover it.)
+Knaben cover it.)
 
 ## Flow
 

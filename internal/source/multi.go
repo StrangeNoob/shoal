@@ -81,11 +81,37 @@ func (m *MultiSource) Search(ctx context.Context, query string) ([]Result, error
 		return nil, firstErr
 	}
 
+	merged = Dedup(merged)
 	// Popularity scales differ between providers, so this is a rough health
 	// ordering, not an exact ranking. Stable so same-popularity ties keep their
 	// source order.
 	sort.SliceStable(merged, func(a, b int) bool { return merged[a].Popularity > merged[b].Popularity })
 	return merged, nil
+}
+
+// Dedup drops rows whose magnet infohash was already seen, keeping the copy that
+// reports more seeders. Meta-indexes (Knaben) re-serve the same torrents as the
+// per-site providers, so the same infohash arrives several times. Rows with no
+// magnet infohash (the Internet Archive serves .torrent URLs) are always kept.
+func Dedup(results []Result) []Result {
+	seen := make(map[string]int, len(results))
+	out := make([]Result, 0, len(results))
+	for _, r := range results {
+		ih := ParseMagnetInfoHash(r.Magnet)
+		if ih == "" {
+			out = append(out, r)
+			continue
+		}
+		if i, ok := seen[ih]; ok {
+			if r.Seeders > out[i].Seeders {
+				out[i] = r
+			}
+			continue
+		}
+		seen[ih] = len(out)
+		out = append(out, r)
+	}
+	return out
 }
 
 // SourceUpdate is one source's contribution to a streaming search.

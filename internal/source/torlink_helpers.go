@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"encoding/base32"
 	"encoding/hex"
@@ -99,6 +100,34 @@ func fetchBytes(ctx context.Context, client *http.Client, endpoint string) ([]by
 
 func fetchJSON(ctx context.Context, client *http.Client, endpoint string, out any) error {
 	b, err := fetchBytes(ctx, client, endpoint)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
+}
+
+// postJSON sends body as JSON and decodes the response into out. Only Knaben
+// needs it — every other provider is a plain GET.
+func postJSON(ctx context.Context, client *http.Client, endpoint string, body, out any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", torlinkUserAgent)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient(client).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("source returned status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return err
 	}

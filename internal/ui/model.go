@@ -824,7 +824,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(msg.up.Results) > 0 {
-			m.results = append(m.results, msg.up.Results...)
+			// Dedup on every update, not at the end: a meta-index re-serves the
+			// same infohash as the per-site providers.
+			m.results = source.Dedup(append(m.results, msg.up.Results...))
 			applySort(m.results, m.sortField, m.sortDesc)
 		}
 		m.sourcesDone = msg.up.Done

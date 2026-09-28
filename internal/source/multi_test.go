@@ -113,3 +113,24 @@ func TestSearchStreamEmitsPerSourceAndCloses(t *testing.T) {
 		t.Fatalf("merged titles = %v, want a1 and b1", titles)
 	}
 }
+
+func TestDedupKeepsBestCopyAndHashlessRows(t *testing.T) {
+	hash := "abcdef0123456789abcdef0123456789abcdef01"
+	in := []Result{
+		{Title: "From TPB", Source: "TPB", Seeders: 5, Magnet: buildMagnet(hash, "x")},
+		{Title: "From Knaben", Source: "Knaben", Seeders: 42, Magnet: buildMagnet(hash, "x")},
+		{Title: "Archive item", Source: "Internet Archive", TorrentURL: "https://archive.org/x.torrent"},
+		{Title: "Another archive item", Source: "Internet Archive", TorrentURL: "https://archive.org/y.torrent"},
+	}
+	got := Dedup(in)
+	if len(got) != 3 {
+		t.Fatalf("Dedup kept %d rows, want 3: %+v", len(got), got)
+	}
+	if got[0].Title != "From Knaben" || got[0].Seeders != 42 {
+		t.Fatalf("duplicate winner = %+v, want the higher seeder count", got[0])
+	}
+	// Rows without a magnet infohash must never collapse into each other.
+	if got[1].Title != "Archive item" || got[2].Title != "Another archive item" {
+		t.Fatalf("hashless rows were dropped: %+v", got)
+	}
+}
